@@ -11,6 +11,12 @@
     {% if n.author_login %}
     <div class="repo-author">
       <span class="author-by">by</span>
+      <button class="star-btn person-star{% if n.author_is_favorite %} is-favorite{% endif %}"
+              hx-post="/people/{{ n.author_login }}/favorite"
+              hx-vals='{"thread_id": "{{ n.id }}"}'
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              title="{% if n.author_is_favorite %}Unfavorite{% else %}Favorite{% endif %} {{ n.author_login }}"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
       {% if n.is_author %}
       <svg class="author-icon icon-self" viewBox="0 0 24 24" fill="currentColor"><title>you (authored this)</title><circle cx="12" cy="8" r="5"/><path d="M3 21a9 9 0 0 1 18 0H3z"/></svg>
       {% elif n.author_badge_class == 'member' %}
@@ -19,14 +25,6 @@
       <svg class="author-icon icon-firsttime" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>first-time contributor</title><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/></svg>
       {% endif %}
       <a class="author-login" href="https://github.com/{{ n.author_login }}" target="_blank" rel="noopener">{{ n.author_login }}</a>
-      <button class="star-btn person-star{% if n.author_is_favorite %} is-favorite{% endif %}"
-              hx-post="/people/{{ n.author_login }}/favorite"
-              hx-vals='{"thread_id": "{{ n.id }}"}'
-              hx-target="closest tr"
-              hx-swap="outerHTML"
-              title="{% if n.author_is_favorite %}Unfavorite{% else %}Favorite{% endif %} {{ n.author_login }}">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-      </button>
     </div>
     {% endif %}
   </td>
