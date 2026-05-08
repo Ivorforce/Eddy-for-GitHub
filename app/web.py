@@ -277,6 +277,66 @@ def _mentioned_since(seen: set[str]) -> bool:
     return "mention" in seen or "team_mention" in seen
 
 
+_ACTION_LABELS = {
+    "assigned": "Assigned",
+    "review_you": "Review you",
+    "review_team": "Review team",
+}
+_REVIEW_LABELS = {
+    "approved": "Approved",
+    "changes_requested": "Changes requested",
+}
+
+
+def _status_summary(d: dict) -> tuple[dict | None, str]:
+    """Pick the most action-defining signal as the headline pill, demote the
+    rest to a ' · '-joined prose subhead. Empty pill + empty prose means
+    nothing to flag — the cell renders blank.
+
+    Priority is action-defining over merely-blocking: a "Review you" headline
+    tells you what to do; "Conflicts" only tells you something is broken (and
+    still shows up in the prose). Designed so a future AI verdict can replace
+    the rules-based pill/prose without changing the template."""
+    candidates: list[tuple[int, str, str]] = []  # (rank, css_class, text)
+
+    merge = d.get("merge_state")
+    if merge:
+        if merge[1] == "danger":
+            candidates.append((3, "sev-danger", merge[0]))
+        else:
+            candidates.append((5, "sev-warning", merge[0]))
+
+    action = d.get("action_needed")
+    if action:
+        candidates.append(
+            (1, f"action-{action.replace('_', '-')}", _ACTION_LABELS[action])
+        )
+
+    if d.get("mentioned_since"):
+        candidates.append((2, "flag-mention", "Mentioned"))
+
+    rs = d.get("pr_review_state")
+    if rs in _REVIEW_LABELS:
+        rs_class = "review-approved" if rs == "approved" else "review-changes"
+        candidates.append((4, rs_class, _REVIEW_LABELS[rs]))
+
+    interest = (d.get("meta") or {}).get("interest") or {}
+    new_c = interest.get("new_comments") or 0
+    if new_c:
+        candidates.append(
+            (6, "new-comments", f"+{new_c} comment{'' if new_c == 1 else 's'}")
+        )
+
+    if not candidates:
+        return None, ""
+
+    candidates.sort(key=lambda c: c[0])
+    _, head_class, head_text = candidates[0]
+    pill = {"text": head_text, "cls": head_class}
+    prose = " · ".join(text for _, _, text in candidates[1:])
+    return pill, prose
+
+
 def _type_state(details: dict, subject_type: str) -> str:
     """One of: open, draft, merged, closed_pr, closed_completed,
     closed_not_planned, or 'unknown' if we can't tell yet."""
@@ -357,6 +417,7 @@ def _row_to_dict(row, fav_people: set[str] | None = None) -> dict:
     # (action or first ingest, baseline NULL means "never engaged").
     baseline_rs = d.pop("baseline_review_state", None)
     d["is_review_new"] = bool(d["pr_review_state"]) and d["pr_review_state"] != baseline_rs
+    d["status_pill"], d["status_prose"] = _status_summary(d)
 
     # Author info — pulled from cached details_json; null if not yet enriched.
     author = (details.get("user") or {}) if details else {}

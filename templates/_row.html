@@ -77,18 +77,11 @@
     </div>
   </td>
   <td class="status">
-    <div class="status-stack">
-    {# Stack order top-to-bottom is priority for scanning: blocking warnings
-       first (mergeable), then review state, then required action, then flags. #}
-    {% if n.merge_state %}<span class="status-pill sev-{{ n.merge_state[1] }}">{{ n.merge_state[0] }}</span>{% endif %}
-    {% if n.pr_review_state == "approved" %}<span class="status-pill review-approved {% if n.is_review_new %}pill-new{% endif %}" {% if n.is_review_new %}title="New since last looked"{% endif %}>Approved</span>{% endif %}
-    {% if n.pr_review_state == "changes_requested" %}<span class="status-pill review-changes {% if n.is_review_new %}pill-new{% endif %}" {% if n.is_review_new %}title="New since last looked"{% endif %}>Changes requested</span>{% endif %}
-    {% if n.action_needed == "assigned" %}<span class="status-pill action-assigned">Assigned</span>{% endif %}
-    {% if n.action_needed == "review_you" %}<span class="status-pill action-review-you">Review you</span>{% endif %}
-    {% if n.action_needed == "review_team" %}<span class="status-pill action-review-team">Review team</span>{% endif %}
-    {% if n.mentioned_since %}<span class="status-pill flag-mention">Mentioned</span>{% endif %}
-    {% if m.interest and m.interest.new_comments %}<span class="status-pill new-comments" title="{{ m.interest.new_comments }} new comment{{ '' if m.interest.new_comments == 1 else 's' }} since last looked">+{{ m.interest.new_comments }} comment{{ '' if m.interest.new_comments == 1 else 's' }}</span>{% endif %}
-    </div>
+    {# Headline pill = single most action-defining signal; prose subhead
+       absorbs everything else. When AI v0 lands, action_now → pill text
+       and summary → prose, with no template change. #}
+    {% if n.status_pill %}<span class="status-pill {{ n.status_pill.cls }}">{{ n.status_pill.text }}</span>{% endif %}
+    {% if n.status_prose %}<div class="status-prose">{{ n.status_prose }}</div>{% endif %}
   </td>
   <td class="actions">
     {% set is_read_now = (not n.unread) and (not n.ignored) %}
