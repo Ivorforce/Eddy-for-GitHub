@@ -368,6 +368,13 @@
     // Global status indicator. HTMX request lifecycle drives loading/idle;
     // online/offline events and HX-Trigger 'showError' drive the error state.
     const setStatus = (state, msg) => {
+      // Hard rule: while the browser thinks we're offline, the dot stays red.
+      // Stops a stray successful afterRequest (in-flight request that completed
+      // around the same time the offline event fired) from flipping back to idle.
+      if (!navigator.onLine) {
+        state = "error";
+        msg = "Offline";
+      }
       const dot = document.getElementById("status-dot");
       if (!dot) return;
       dot.className = "status-dot status-" + state;
