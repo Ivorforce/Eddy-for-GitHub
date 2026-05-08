@@ -1,6 +1,6 @@
 # GitHub notification triage
 
-A local Flask app that turns GitHub's notification firehose into a "you should look at this" view. Single user, runs as `python -m app run` and serves on `localhost:5734`. Auth via `gh auth token` (with `GITHUB_TOKEN` env override).
+A local Flask app that turns GitHub's notification firehose into a "you should look at this" view. Single user, runs as `source .venv/bin/activate && python -m app run` and serves on `localhost:5734`. Auth via `gh auth token` (with `GITHUB_TOKEN` env override).
 
 The point is *triage* — surface what needs attention, quiet what doesn't — not a fancier inbox. AI integration (next major step) is meant to carry most of the noise reduction; the local infrastructure is the substrate that gives it useful signal to work with.
 
