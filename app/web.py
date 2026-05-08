@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from flask import Flask, render_template, request
+from flask import Flask, make_response, render_template, request
 
 from . import db, github
 
@@ -594,8 +594,9 @@ def toggle_favorite(thread_id: str):
 
 @app.post("/people/<login>/favorite")
 def toggle_person_favorite(login: str):
-    """Toggle person-level favorite. Re-renders only the originating row;
-    other rows showing this person stay stale until next page render."""
+    """Toggle person-level favorite. Re-renders the originating row, and
+    fires HX-Trigger so the JS listener can update other rows' stars for the
+    same person without a full table swap."""
     conn = db.connect()
     try:
         existing = conn.execute(
@@ -608,6 +609,7 @@ def toggle_person_favorite(login: str):
                 (new_val, login),
             )
         else:
+            new_val = 1
             conn.execute(
                 "INSERT INTO people (login, is_favorite, last_seen_at) "
                 "VALUES (?, 1, ?)",
@@ -615,12 +617,16 @@ def toggle_person_favorite(login: str):
             )
     finally:
         conn.close()
+
     thread_id = request.values.get("thread_id")
-    if thread_id:
-        n = _load_one(thread_id)
-        if n:
-            return render_template("_row.html", n=n)
-    return ("", 200)
+    body = ""
+    if thread_id and (n := _load_one(thread_id)):
+        body = render_template("_row.html", n=n)
+    response = make_response(body, 200)
+    response.headers["HX-Trigger"] = json.dumps({
+        "personFavoriteChanged": {"login": login, "is_favorite": bool(new_val)}
+    })
+    return response
 
 
 @app.post("/note/<thread_id>")

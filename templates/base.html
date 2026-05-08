@@ -364,6 +364,19 @@
       htmx.ajax("POST", "/refresh", { target, swap: "innerHTML" });
     });
 
+    // Person favorite toggles broadcast a personFavoriteChanged event so all
+    // rows showing the same author update their star, not just the row that
+    // was clicked. Originating row is also updated by the HTMX row-swap; this
+    // handler uses force-set semantics (toggle's 2nd arg) so it's idempotent.
+    document.addEventListener("personFavoriteChanged", (e) => {
+      const { login, is_favorite } = e.detail;
+      const sel = `button.person-star[hx-post="/people/${login}/favorite"]`;
+      document.querySelectorAll(sel).forEach((btn) => {
+        btn.classList.toggle("is-favorite", is_favorite);
+        btn.setAttribute("title", `${is_favorite ? "Unfavorite" : "Favorite"} ${login}`);
+      });
+    });
+
     // Flush dirty note textareas on tab close / reload / navigation.
     // sendBeacon is the browser-native API for fire-and-forget POSTs that
     // survive page unload (regular fetch/XHR may be cancelled mid-flight).
