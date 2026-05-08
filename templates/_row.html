@@ -1,8 +1,4 @@
 <tr class="{% if not n.unread %}read{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_favorite %} is-favorite-row{% endif %}" title="Updated {{ n.updated_at }}">
-  <td class="type">
-    <span class="type-pill state-{{ n.type_state }}"
-          title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ n.type_label }}</span>
-  </td>
   <td class="repo">
     {% if n.repo_owner %}
       <a class="repo-owner" href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a>
@@ -30,6 +26,30 @@
     </div>
     {% endif %}
   </td>
+  {% set m = n.meta %}
+  <td class="activity">
+    {% set rx_pos = m.reception.pos if m.reception else 0 %}
+    {% set rx_neg = m.reception.neg if m.reception else 0 %}
+    {% set int_comments = m.interest.comments if m.interest else 0 %}
+    {% set int_engaged = m.interest.engaged if m.interest else 0 %}
+    {% set int_commenters = m.interest.commenters if m.interest else 0 %}
+    <div class="activity-stats">
+      <span class="stat rx-pos" title="Positive reactions (max-aggregated): {{ rx_pos }}"><span class="stat-num">{{ rx_pos }}</span><span class="stat-icon">▲</span></span>
+      <span class="stat rx-neg" title="Negative reactions (max-aggregated): {{ rx_neg }}"><span class="stat-num">{{ rx_neg }}</span><span class="stat-icon">▼</span></span>
+      <span class="stat" title="{{ int_comments }} comment{{ '' if int_comments == 1 else 's' }}">
+        <span class="stat-num">{{ int_comments }}</span>
+        <svg class="icon stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </span>
+      <span class="stat" title="{{ int_engaged }} engaged ({{ int_commenters }} unique commenters + max-aggregated reactions)">
+        <span class="stat-num">{{ int_engaged }}</span>
+        <svg class="icon stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </span>
+      {% if m.complexity %}
+        <span class="stat stat-add" title="{{ m.complexity[0] }} lines added"><span class="stat-num">{{ m.complexity[0] }}</span><span class="stat-icon">+</span></span>
+        <span class="stat stat-del" title="{{ m.complexity[1] }} lines deleted"><span class="stat-num">{{ m.complexity[1] }}</span><span class="stat-icon">−</span></span>
+      {% endif %}
+    </div>
+  </td>
   <td class="title">
     <button class="star-btn item-star{% if n.is_favorite %} is-favorite{% endif %}"
             hx-post="/toggle/{{ n.id }}/favorite"
@@ -42,43 +62,9 @@
     {% else %}
       {{ n.title }}
     {% endif %}
-    {% set m = n.meta %}
-    {% if m.complexity or m.reception or m.interest %}
-    <div class="meta-metrics">
-      {% if m.complexity %}
-        <span class="meta-stat meta-diff" title="Complexity — {{ m.complexity[0] }} lines added, {{ m.complexity[1] }} deleted">
-          <span class="add">+{{ m.complexity[0] }}</span> <span class="del">−{{ m.complexity[1] }}</span>
-        </span>
-      {% endif %}
-      {% if m.reception %}
-        <span class="meta-stat meta-rx"
-              title="Reception — positive (max): {{ m.reception.pos }} · negative (max): {{ m.reception.neg }}">
-          {% if m.reception.pos %}<span class="rx-pos">▲ {{ m.reception.pos }}</span>{% endif %}
-          {% if m.reception.neg %}<span class="rx-neg">▼ {{ m.reception.neg }}</span>{% endif %}
-        </span>
-      {% endif %}
-      {% if m.interest %}
-        <span class="meta-stat meta-interest"
-              title="Interest — {{ m.interest.comments }} comment{{ '' if m.interest.comments == 1 else 's' }}{% if m.interest.new_comments %} ({{ m.interest.new_comments }} new since last look){% endif %}{% if m.interest.engaged %} · {{ m.interest.engaged }} engaged ({{ m.interest.commenters or 0 }} unique commenters + max-aggregated reactions){% endif %}">
-          {% if m.interest.comments %}
-            <span class="interest-part">
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              {{ m.interest.comments }}{% if m.interest.new_comments %} <span class="meta-new">+{{ m.interest.new_comments }}</span>{% endif %}
-            </span>
-          {% endif %}
-          {% if m.interest.comments and m.interest.engaged %}<span class="meta-sep">·</span>{% endif %}
-          {% if m.interest.engaged %}
-            <span class="interest-part">
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              {{ m.interest.engaged }}
-            </span>
-          {% endif %}
-        </span>
-      {% endif %}
-    </div>
-    {% endif %}
-    {% if n.labels_visible %}
-    <div class="meta-labels">
+    <div class="meta-row">
+      <span class="type-pill state-{{ n.type_state }}"
+            title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ n.type_label }}</span>
       {% for label in n.labels_visible %}
         <span class="label-pill"
               style="background:#{{ label.color }};color:{{ label.text_color }}"
@@ -89,7 +75,6 @@
               title="{% for l in n.labels_extra %}{{ l.name }}{% if not loop.last %}, {% endif %}{% endfor %}">+{{ n.labels_extra|length }} more</span>
       {% endif %}
     </div>
-    {% endif %}
   </td>
   <td class="status">
     <div class="status-stack">
@@ -102,6 +87,7 @@
     {% if n.action_needed == "review_you" %}<span class="status-pill action-review-you">Review you</span>{% endif %}
     {% if n.action_needed == "review_team" %}<span class="status-pill action-review-team">Review team</span>{% endif %}
     {% if n.mentioned_since %}<span class="status-pill flag-mention">Mentioned</span>{% endif %}
+    {% if m.interest and m.interest.new_comments %}<span class="status-pill new-comments" title="{{ m.interest.new_comments }} new comment{{ '' if m.interest.new_comments == 1 else 's' }} since last looked">+{{ m.interest.new_comments }} comment{{ '' if m.interest.new_comments == 1 else 's' }}</span>{% endif %}
     </div>
   </td>
   <td class="actions">

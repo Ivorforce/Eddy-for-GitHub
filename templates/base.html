@@ -54,20 +54,73 @@
     .status-pill.action-review-team { background: #d29922; }
     /* Independent flags */
     .status-pill.flag-mention { background: #bc4c00; }
+    /* "Since last looked" signals — same yellow as the pill-new dot. */
+    .status-pill.new-comments { background: #bf8700; }
     td.title { width: 100%; }
 
-    /* type pill — color tracks GitHub state, not type */
-    td.type { width: 1%; white-space: nowrap; }
+    /* Type pill — color tracks GitHub state, not type. Sits at the head
+       of the meta-row alongside labels. Sized to match .label-pill so it
+       reads as a peer tag, with the state-color as the only differentiator. */
     .type-pill {
       display: inline-block;
-      padding: 0.1rem 0.5rem;
-      border-radius: 0.6rem;
-      font-size: 0.7rem;
-      font-weight: 600;
-      letter-spacing: 0.04em;
+      padding: 0.02rem 0.4rem;
+      border-radius: 0.5rem;
+      font-size: 0.62rem;
+      font-weight: 500;
+      line-height: 1.45;
+      white-space: nowrap;
       color: white;
       background: #6e7781; /* default for Discussion / Release / not-yet-enriched */
     }
+
+    /* Activity column — 2×N icon-grid of stats. Up to three rows: complexity
+       (+adds, −dels) for PRs, popularity (▲ ▼), interest (💬 👥). Vertical-
+       centered so a 2-row Issue block sits balanced against a 3-row PR's
+       title height. Pills are avoided on count rows — they read as noise
+       when their width fluctuates with single-digit numbers. */
+    td.activity {
+      width: 1%;
+      white-space: nowrap;
+      vertical-align: middle;
+      padding-right: 1rem;
+      text-align: center;
+      font-size: 0.78rem;
+    }
+    td.activity .activity-stats {
+      display: inline-grid;
+      grid-template-columns: auto auto;
+      gap: 0.2rem 0.8rem;
+      color: var(--pico-muted-color);
+      cursor: help;
+    }
+    /* Stretch each .stat to fill its grid column (default justify-self).
+       Number takes the slack and right-aligns; icon pins to the right at
+       a fixed 1em width. Reads as "<right-aligned number> <icon>" with
+       icons aligning vertically across rows for easy scanning. */
+    td.activity .activity-stats .stat {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      min-width: 2.5rem;
+    }
+    td.activity .activity-stats .stat-num {
+      flex: 1;
+      text-align: right;
+    }
+    td.activity .activity-stats .stat-icon {
+      width: 1em;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    td.activity .activity-stats svg.stat-icon { height: 1em; }
+    td.activity .activity-stats .rx-pos { color: #1a7f37; font-weight: 600; }
+    td.activity .activity-stats .rx-neg { color: #cf222e; font-weight: 600; }
+    /* Diff stats — desaturated greens/reds so they read as factual metric,
+       distinct from the saturated reaction sentiment colors above. */
+    td.activity .activity-stats .stat-add { color: #5b8c64; }
+    td.activity .activity-stats .stat-del { color: #a8676b; }
     .type-pill.state-open                { background: #1f883d; }
     .type-pill.state-draft               { background: #57606a; }
     .type-pill.state-merged,
@@ -180,21 +233,17 @@
       padding: 0.5rem 0.7rem;
     }
 
-    /* title cell — metrics line + labels line, separated visually */
-    td.title .meta-metrics {
+    /* title cell — single meta row carrying both stat pills (gray) and
+       label pills (colored). Separate divs collapsed to one because, with
+       the wider container, both fit on one line in the common case and
+       wrap together when they don't. */
+    td.title .meta-row {
       font-size: 0.74rem;
       color: var(--pico-muted-color);
-      margin-top: 0.25rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-      align-items: center;
-    }
-    td.title .meta-labels {
       margin-top: 0.3rem;
       display: flex;
       flex-wrap: wrap;
-      gap: 0.3rem;
+      gap: 0.4rem;
       align-items: center;
     }
     /* Each metric group sits in a subtle pill so the boundaries are obvious. */
@@ -217,19 +266,6 @@
        saturated bold ▲/▼ reaction colors which carry sentiment. */
     .meta-diff .add { color: #5b8c64; }
     .meta-diff .del { color: #a8676b; }
-    .meta-new {
-      background: #bf8700;
-      color: white;
-      padding: 0 0.3rem;
-      border-radius: 0.3rem;
-      font-size: 0.66rem;
-      font-weight: 500;
-    }
-    .meta-rx .rx-pos { color: #1a7f37; font-weight: 600; }
-    .meta-rx .rx-neg { color: #cf222e; font-weight: 600; }
-    .meta-interest { gap: 0.4rem; }
-    .interest-part { display: inline-flex; align-items: center; gap: 0.3rem; }
-    .meta-sep { color: var(--pico-muted-color); opacity: 0.5; }
     .icon {
       width: 0.95em;
       height: 0.95em;

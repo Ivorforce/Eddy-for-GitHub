@@ -68,6 +68,7 @@ TYPE_LABELS = {
     "Issue": "Issue",
     "Discussion": "Disc",
     "Release": "Rel",
+    "CheckSuite": "Check",
 }
 
 # Each row carries up to three independent indicators:
