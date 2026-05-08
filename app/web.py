@@ -42,8 +42,19 @@ app.jinja_env.filters["humanize"] = _humanize
 _ROW_COLS = (
     "id, repo, type, title, reason, html_url, updated_at, "
     "unread, ignored, action, details_json, seen_reasons, baseline_comments, "
-    "pr_reactions_json, unique_commenters, pr_review_state, baseline_review_state"
+    "pr_reactions_json, unique_commenters, pr_review_state, baseline_review_state, "
+    "note_user, is_favorite"
 )
+
+# author_association -> (badge css class, display label).
+# Only high-signal associations get a badge; CONTRIBUTOR/NONE etc. stay quiet.
+_AUTHOR_BADGE = {
+    "OWNER":                  ("member",     "owner"),
+    "MEMBER":                 ("member",     "member"),
+    "COLLABORATOR":           ("collab",     "collab"),
+    "FIRST_TIMER":            ("first-time", "first-time"),
+    "FIRST_TIME_CONTRIBUTOR": ("first-time", "first-time"),
+}
 
 # GitHub reaction emoji buckets. Same user can react with multiple positives;
 # max() approximates a lower bound on distinct users in that sentiment bucket
@@ -291,7 +302,19 @@ def _type_state(details: dict, subject_type: str) -> str:
     return "unknown"
 
 
-def _row_to_dict(row) -> dict:
+def _favorite_people() -> set[str]:
+    conn = db.connect()
+    try:
+        return {
+            r["login"] for r in conn.execute(
+                "SELECT login FROM people WHERE is_favorite = 1"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+
+def _row_to_dict(row, fav_people: set[str] | None = None) -> dict:
     d = dict(row)
     details_json = d.pop("details_json", None)
     seen_reasons_json = d.pop("seen_reasons", None)
@@ -333,10 +356,21 @@ def _row_to_dict(row) -> dict:
     # (action or first ingest, baseline NULL means "never engaged").
     baseline_rs = d.pop("baseline_review_state", None)
     d["is_review_new"] = bool(d["pr_review_state"]) and d["pr_review_state"] != baseline_rs
+
+    # Author info — pulled from cached details_json; null if not yet enriched.
+    author = (details.get("user") or {}) if details else {}
+    d["author_login"] = author.get("login") or ""
+    d["author_assoc"] = (details.get("author_association") if details else None) or ""
+    badge = _AUTHOR_BADGE.get(d["author_assoc"])
+    d["author_badge_class"] = badge[0] if badge else ""
+    d["author_badge_label"] = badge[1] if badge else ""
+    d["author_is_favorite"] = bool(fav_people) and d["author_login"] in (fav_people or set())
+
     return d
 
 
 def _load_notifications():
+    fav = _favorite_people()
     conn = db.connect()
     try:
         rows = conn.execute(
@@ -344,7 +378,7 @@ def _load_notifications():
             "WHERE COALESCE(action, '') != 'done' "
             "ORDER BY updated_at DESC"
         ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        return [_row_to_dict(r, fav) for r in rows]
     finally:
         conn.close()
 
@@ -366,10 +400,11 @@ def _load_repos() -> list[str]:
 def _filters_from_request() -> dict:
     src = request.values  # union of query string + form fields
     return {
-        "action_only": bool(src.get("action_only")),
-        "hide_read":   bool(src.get("hide_read")),
-        "repo":        src.get("repo") or "",
-        "sort":        src.get("sort") or "updated",
+        "action_only":    bool(src.get("action_only")),
+        "hide_read":      bool(src.get("hide_read")),
+        "favorites_only": bool(src.get("favorites_only")),
+        "repo":           src.get("repo") or "",
+        "sort":           src.get("sort") or "updated",
     }
 
 
@@ -378,6 +413,8 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         rows = [r for r in rows if r["action_needed"] or r["mentioned_since"]]
     if f["hide_read"]:
         rows = [r for r in rows if r["unread"]]
+    if f["favorites_only"]:
+        rows = [r for r in rows if r["is_favorite"] or r["author_is_favorite"]]
     if f["repo"]:
         rows = [r for r in rows if r["repo"] == f["repo"]]
     if f["sort"] == "engaged":
@@ -391,13 +428,14 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
 
 
 def _load_one(thread_id: str) -> dict | None:
+    fav = _favorite_people()
     conn = db.connect()
     try:
         row = conn.execute(
             f"SELECT {_ROW_COLS} FROM notifications WHERE id = ?",
             (thread_id,),
         ).fetchone()
-        return _row_to_dict(row) if row else None
+        return _row_to_dict(row, fav) if row else None
     finally:
         conn.close()
 
@@ -485,38 +523,47 @@ def _apply_action(
         conn.close()
 
 
-@app.post("/toggle/<thread_id>/read")
-def toggle_read(thread_id: str):
-    """Toggle local read state. Marking-read pushes to GitHub; un-marking is local-only."""
+@app.post("/set/<thread_id>/read")
+def set_read(thread_id: str):
+    """Radio-style: set the row to 'read' state, OR deselect (back to unread)
+    if it's already read. Handles transitions from any of unread / read / muted."""
+    token = app.config["GITHUB_TOKEN"]
     n = _load_one(thread_id)
     if not n:
         return ("", 404)
-    if n["unread"]:
-        github.mark_read(app.config["GITHUB_TOKEN"], thread_id)
-        _apply_action(thread_id, "read", unread=0)
+    is_read_now = n["unread"] == 0 and n["ignored"] == 0
+    if is_read_now:
+        # Click already-active Read → deselect → mark unread locally.
+        # GitHub REST API has no 'mark unread' (only the web UI can, via
+        # /notifications/beta/unmark with session+CSRF auth — not worth it).
+        # action='kept_unread' tells the reconciler not to flip it back.
+        _apply_action(thread_id, "kept_unread", unread=1, ignored=0)
     else:
-        # GitHub's REST/GraphQL API has no "mark unread" — only the web UI can,
-        # via /notifications/beta/unmark (session-cookie + CSRF auth, NT_* node
-        # IDs, undocumented). Not worth implementing. Mark locally and signal
-        # reconciliation to skip via action='kept_unread'.
-        _apply_action(thread_id, "kept_unread", unread=1)
+        if n["unread"]:
+            github.mark_read(token, thread_id)
+        if n["ignored"]:
+            github.set_subscribed(token, thread_id)
+        _apply_action(thread_id, "read", unread=0, ignored=0)
     return render_template("_row.html", n=_load_one(thread_id))
 
 
-@app.post("/toggle/<thread_id>/unsub")
-def toggle_unsub(thread_id: str):
-    """Toggle ignored state on the thread subscription. Ignoring also marks read."""
+@app.post("/set/<thread_id>/muted")
+def set_muted(thread_id: str):
+    """Radio-style: set the row to 'muted' state (read + ignored), OR deselect
+    (back to plain 'read') if it's already muted."""
     token = app.config["GITHUB_TOKEN"]
     n = _load_one(thread_id)
     if not n:
         return ("", 404)
     if n["ignored"]:
+        # Click already-active Muted → deselect → become 'read' (unmute, stay read).
         github.set_subscribed(token, thread_id)
-        _apply_action(thread_id, "subscribed", ignored=0)
+        _apply_action(thread_id, "unmuted", ignored=0)
     else:
+        if n["unread"]:
+            github.mark_read(token, thread_id)
         github.set_ignored(token, thread_id)
-        github.mark_read(token, thread_id)  # unsub implies read (not done)
-        _apply_action(thread_id, "unsub", ignored=1, unread=0)
+        _apply_action(thread_id, "muted", unread=0, ignored=1)
     return render_template("_row.html", n=_load_one(thread_id))
 
 
@@ -525,3 +572,68 @@ def action_done(thread_id: str):
     github.mark_done(app.config["GITHUB_TOKEN"], thread_id)
     _apply_action(thread_id, "done", unread=0)
     return ("", 200)
+
+
+@app.post("/toggle/<thread_id>/favorite")
+def toggle_favorite(thread_id: str):
+    """Toggle item-level favorite. Persists locally; no GitHub API call."""
+    n = _load_one(thread_id)
+    if not n:
+        return ("", 404)
+    new_val = 0 if n["is_favorite"] else 1
+    conn = db.connect()
+    try:
+        conn.execute(
+            "UPDATE notifications SET is_favorite = ? WHERE id = ?",
+            (new_val, thread_id),
+        )
+    finally:
+        conn.close()
+    return render_template("_row.html", n=_load_one(thread_id))
+
+
+@app.post("/people/<login>/favorite")
+def toggle_person_favorite(login: str):
+    """Toggle person-level favorite. Re-renders only the originating row;
+    other rows showing this person stay stale until next page render."""
+    conn = db.connect()
+    try:
+        existing = conn.execute(
+            "SELECT is_favorite FROM people WHERE login = ?", (login,)
+        ).fetchone()
+        if existing:
+            new_val = 0 if existing["is_favorite"] else 1
+            conn.execute(
+                "UPDATE people SET is_favorite = ? WHERE login = ?",
+                (new_val, login),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO people (login, is_favorite, last_seen_at) "
+                "VALUES (?, 1, ?)",
+                (login, int(time.time())),
+            )
+    finally:
+        conn.close()
+    thread_id = request.values.get("thread_id")
+    if thread_id:
+        n = _load_one(thread_id)
+        if n:
+            return render_template("_row.html", n=n)
+    return ("", 200)
+
+
+@app.post("/note/<thread_id>")
+def save_note(thread_id: str):
+    """Save user note for a notification. Silent (no swap); HTMX fires this on
+    textarea change with a small delay."""
+    note = request.form.get("note_user", "").strip() or None
+    conn = db.connect()
+    try:
+        conn.execute(
+            "UPDATE notifications SET note_user = ? WHERE id = ?",
+            (note, thread_id),
+        )
+    finally:
+        conn.close()
+    return ("", 204)

@@ -51,7 +51,6 @@
     .status-pill.action-review-team { background: #d29922; }
     /* Independent flags */
     .status-pill.flag-mention { background: #bc4c00; }
-    .status-pill.flag-author  { background: #57606a; }
     td.title { width: 100%; }
 
     /* type pill — color tracks GitHub state, not type */
@@ -73,7 +72,7 @@
     .type-pill.state-closed_pr           { background: #cf222e; }
     .type-pill.state-closed_not_planned  { background: #6e7781; }
 
-    /* repo cell — owner above, name below, both clickable */
+    /* repo cell — owner above, name below, author below that, all clickable */
     td.repo { width: 1%; white-space: nowrap; line-height: 1.15; padding-right: 1rem; }
     td.repo a { text-decoration: none; }
     td.repo a:hover { text-decoration: underline; }
@@ -86,6 +85,91 @@
       display: block;
       font-size: 0.88rem;
       font-weight: 600;
+    }
+    .repo-author {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      margin-top: 0.2rem;
+      font-size: 0.72rem;
+      color: var(--pico-muted-color);
+    }
+    .repo-author .author-by { opacity: 0.7; }
+    .repo-author .author-login { color: var(--pico-color); }
+    .author-icon {
+      width: 0.95em;
+      height: 0.95em;
+      flex-shrink: 0;
+      cursor: help;
+    }
+    .author-icon.icon-member    { color: #1a7f37; }
+    .author-icon.icon-firsttime { color: #bf8700; }
+    .author-icon.icon-self      { color: #4493f8; }
+
+    /* Favorite stars — inline-block with negative vertical-align trick keeps
+       the SVG sitting at the same baseline as adjacent text (same approach
+       used by the comment/eye icons in the meta row). */
+    .star-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      cursor: pointer;
+      color: var(--pico-muted-color);
+      width: auto;
+      line-height: 1;
+      display: inline-block;
+    }
+    .star-btn svg {
+      width: 0.95em;
+      height: 0.95em;
+      vertical-align: -0.13em;
+    }
+    .star-btn:not(.is-favorite) svg { fill: none; stroke: currentColor; stroke-width: 2; }
+    .star-btn.is-favorite { color: #d4a017; }
+    .star-btn.is-favorite svg { fill: currentColor; stroke: currentColor; stroke-width: 2; }
+    .item-star { margin-right: 0.45rem; }
+    .person-star svg { width: 0.85em; height: 0.85em; }
+
+    /* Row-level highlights: 'yours' (blue) and 'favorite' (gold).
+       Favorite wins when both apply, since favoriting is an explicit choice. */
+    tr.is-yours-row td:first-child    { box-shadow: inset 3px 0 0 #4493f8; }
+    tr.is-favorite-row td:first-child { box-shadow: inset 3px 0 0 #d4a017; }
+
+    /* Notes — pencil button in actions toggles a full-width drawer row
+       beneath the main row. Drawer is collapsed by default. */
+    .note-btn {
+      background: none;
+      border: none;
+      padding: 0.2rem 0.4rem;
+      margin: 0;
+      cursor: pointer;
+      color: var(--pico-muted-color);
+      display: inline-block;
+      width: auto;
+      line-height: 1;
+    }
+    .note-btn svg {
+      width: 1em;
+      height: 1em;
+      vertical-align: -0.18em;
+    }
+    .note-btn.has-note { color: #bf8700; }
+    .note-btn:hover { color: var(--pico-color); }
+
+    tr.note-drawer { display: none; }
+    tr.note-drawer.open { display: table-row; }
+    tr.note-drawer td {
+      padding: 0.5rem 1.2rem 0.8rem;
+      background: var(--pico-card-background-color);
+      border-top: none;
+    }
+    tr.note-drawer textarea {
+      width: 100%;
+      margin: 0;
+      font-size: 0.85rem;
+      min-height: 3rem;
+      padding: 0.5rem 0.7rem;
     }
 
     /* title cell — metrics line + labels line, separated visually */
@@ -161,35 +245,51 @@
       padding: 0 0.2rem;
     }
 
-    /* actions — toggles stacked vertically, Done aside */
-    td.actions { white-space: nowrap; text-align: right; width: 1%; }
-    td.actions .action-row {
-      display: inline-flex;
-      align-items: center;
-      gap: 1rem;
-    }
-    td.actions .action-stack {
+    /* actions — vertical 3-line list: Read / Muted (mutually exclusive) + Note */
+    td.actions { white-space: nowrap; width: 1%; vertical-align: top; padding-top: 0.4rem; }
+    td.actions .action-line {
       display: flex;
-      flex-direction: column;
-      gap: 0.15rem;
-      align-items: flex-start;
+      align-items: center;
+      gap: 0.5rem;
+      width: 100%;
+      padding: 0.15rem 0.4rem;
+      margin: 0;
+      background: none;
+      border: none;
+      border-radius: 0.3rem;
+      cursor: pointer;
+      font-size: 0.82rem;
+      color: var(--pico-color);
+      text-align: left;
+      line-height: 1.3;
     }
-    td.actions .toggle {
+    /* Wrap Read + Muted in a subtle pill so the radio group reads as one unit
+       (Note sits outside it). Same tint family as the meta-stat pills above. */
+    td.actions .action-group {
+      background: rgba(140, 149, 159, 0.08);
+      border-radius: 0.45rem;
+      padding: 0.15rem;
+    }
+    td.actions .action-line:hover {
+      background: rgba(140, 149, 159, 0.18);
+    }
+    td.actions .action-line .action-mark {
+      width: 0.95em;
+      height: 0.95em;
       display: inline-flex;
       align-items: center;
-      gap: 0.4rem;
-      font-size: 0.82rem;
-      cursor: pointer;
-      user-select: none;
+      justify-content: center;
+      flex-shrink: 0;
+      color: var(--pico-muted-color);
     }
-    td.actions .toggle input[type="checkbox"] { margin: 0; cursor: pointer; }
-    td.actions button.done-btn {
-      display: inline-block;
-      width: auto;
-      padding: 0.25rem 0.7rem;
-      font-size: 0.8rem;
-      margin: 0;
+    td.actions .action-line .action-mark svg {
+      width: 100%;
+      height: 100%;
     }
+    td.actions .action-line.active .action-mark { color: #1a7f37; }
+    /* Note sits outside the Read/Muted pill — small breathing room. */
+    td.actions .note-line { margin-top: 0.3rem; }
+    td.actions .note-line.has-note .action-mark { color: #bf8700; }
 
     /* time bucket separators */
     tr.bucket-separator td {
@@ -262,6 +362,22 @@
       if (!target) return;
       lastFocusRefresh = Date.now();
       htmx.ajax("POST", "/refresh", { target, swap: "innerHTML" });
+    });
+
+    // Flush dirty note textareas on tab close / reload / navigation.
+    // sendBeacon is the browser-native API for fire-and-forget POSTs that
+    // survive page unload (regular fetch/XHR may be cancelled mid-flight).
+    window.addEventListener("pagehide", () => {
+      document.querySelectorAll(".note-drawer form").forEach((form) => {
+        const ta = form.querySelector("textarea");
+        if (!ta) return;
+        if (ta.value === ta.defaultValue) return;  // not dirty — skip
+        const url = form.getAttribute("hx-post");
+        if (!url) return;
+        const data = new FormData();
+        data.append("note_user", ta.value);
+        navigator.sendBeacon(url, data);
+      });
     });
   </script>
 </head>

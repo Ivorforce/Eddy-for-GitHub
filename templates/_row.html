@@ -1,4 +1,4 @@
-<tr {% if not n.unread %}class="read"{% endif %} title="Updated {{ n.updated_at }}">
+<tr class="{% if not n.unread %}read{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_favorite %} is-favorite-row{% endif %}" title="Updated {{ n.updated_at }}">
   <td class="type">
     <span class="type-pill state-{{ n.type_state }}"
           title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ n.type_label }}</span>
@@ -8,11 +8,37 @@
       <a class="repo-owner" href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a>
     {% endif %}
     <a class="repo-name" href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo_name }}</a>
+    {% if n.author_login %}
+    <div class="repo-author">
+      <span class="author-by">by</span>
+      {% if n.is_author %}
+      <svg class="author-icon icon-self" viewBox="0 0 24 24" fill="currentColor"><title>you (authored this)</title><circle cx="12" cy="8" r="5"/><path d="M3 21a9 9 0 0 1 18 0H3z"/></svg>
+      {% elif n.author_badge_class == 'member' %}
+      <svg class="author-icon icon-member" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>{{ n.author_assoc|lower }}</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+      {% elif n.author_badge_class == 'first-time' %}
+      <svg class="author-icon icon-firsttime" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>first-time contributor</title><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/></svg>
+      {% endif %}
+      <a class="author-login" href="https://github.com/{{ n.author_login }}" target="_blank" rel="noopener">{{ n.author_login }}</a>
+      <button class="star-btn person-star{% if n.author_is_favorite %} is-favorite{% endif %}"
+              hx-post="/people/{{ n.author_login }}/favorite"
+              hx-vals='{"thread_id": "{{ n.id }}"}'
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              title="{% if n.author_is_favorite %}Unfavorite{% else %}Favorite{% endif %} {{ n.author_login }}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </button>
+    </div>
+    {% endif %}
   </td>
   <td class="title">
+    <button class="star-btn item-star{% if n.is_favorite %} is-favorite{% endif %}"
+            hx-post="/toggle/{{ n.id }}/favorite"
+            hx-target="closest tr"
+            hx-swap="outerHTML"
+            title="{% if n.is_favorite %}Unfavorite{% else %}Favorite{% endif %} this item"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
     {% if n.html_url %}
       <a href="{{ n.html_url }}" target="_blank" rel="noopener"
-         {% if n.unread %}onclick="htmx.ajax('POST', '/toggle/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML'})"{% endif %}>{{ n.title }}</a>
+         {% if n.unread %}onclick="htmx.ajax('POST', '/set/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML'})"{% endif %}>{{ n.title }}</a>
     {% else %}
       {{ n.title }}
     {% endif %}
@@ -73,35 +99,35 @@
     {% if n.action_needed == "review_you" %}<span class="status-pill action-review-you">Review you</span>{% endif %}
     {% if n.action_needed == "review_team" %}<span class="status-pill action-review-team">Review team</span>{% endif %}
     {% if n.mentioned_since %}<span class="status-pill flag-mention">Mentioned</span>{% endif %}
-    {% if n.is_author %}<span class="status-pill flag-author">Yours</span>{% endif %}
   </td>
   <td class="actions">
-    <div class="action-row">
-      <div class="action-stack">
-        <label class="toggle">
-          <input type="checkbox"
-                 {% if not n.unread %}checked{% endif %}
-                 hx-post="/toggle/{{ n.id }}/read"
-                 hx-target="closest tr"
-                 hx-swap="outerHTML"
-                 title="Mark read. Syncs to GitHub when checking; unchecking is local only.">
-          Read
-        </label>
-        <label class="toggle">
-          <input type="checkbox"
-                 {% if n.ignored %}checked{% endif %}
-                 hx-post="/toggle/{{ n.id }}/unsub"
-                 hx-target="closest tr"
-                 hx-swap="outerHTML"
-                 title="Ignore future notifications on this thread (also marks read).">
-          Ignored
-        </label>
-      </div>
-      <button class="secondary outline done-btn"
-              hx-post="/action/{{ n.id }}/done"
+    {% set is_read_now = (not n.unread) and (not n.ignored) %}
+    <div class="action-group">
+      <button type="button"
+              class="action-line{% if is_read_now %} active{% endif %}"
+              hx-post="/set/{{ n.id }}/read"
               hx-target="closest tr"
               hx-swap="outerHTML"
-              title="Clear from inbox; hides here. One-way.">Done</button>
+              title="Mark read. Click again to mark unread (local only — GitHub API has no unread)."><span class="action-mark">{% if is_read_now %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{% endif %}</span>Read</button>
+      <button type="button"
+              class="action-line{% if n.ignored %} active{% endif %}"
+              hx-post="/set/{{ n.id }}/muted"
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              title="Mute thread (also marks read). Click again to unmute and stay read."><span class="action-mark">{% if n.ignored %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{% endif %}</span>Muted</button>
     </div>
+    <button type="button"
+            class="action-line note-line{% if n.note_user %} has-note{% endif %}"
+            onclick="this.closest('tr').nextElementSibling.classList.toggle('open')"
+            title="{% if n.note_user %}View/edit note{% else %}Add note{% endif %}"><span class="action-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></span>Note</button>
+  </td>
+</tr>
+<tr class="note-drawer">
+  <td colspan="5">
+    <form hx-post="/note/{{ n.id }}"
+          hx-trigger="keyup from:textarea changed delay:600ms, blur from:textarea"
+          hx-swap="none">
+      <textarea name="note_user" rows="3" placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
+    </form>
   </td>
 </tr>

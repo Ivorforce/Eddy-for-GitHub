@@ -257,6 +257,18 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
             "WHERE id = ?",
             (json.dumps(details), now, details.get("comments") or 0, row["id"]),
         )
+
+        # Lazy-populate people directory from the author of the item.
+        author = (details.get("user") or {})
+        if author.get("login"):
+            conn.execute(
+                "INSERT INTO people (login, avatar_url, last_seen_at) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(login) DO UPDATE SET "
+                "  avatar_url = excluded.avatar_url, "
+                "  last_seen_at = excluded.last_seen_at",
+                (author["login"], author.get("avatar_url"), now),
+            )
         if row["type"] == "PullRequest":
             try:
                 reactions = fetch_pr_reactions(token, row["api_url"])

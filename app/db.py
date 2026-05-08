@@ -75,6 +75,21 @@ SCHEMA_V11 = """
 ALTER TABLE notifications ADD COLUMN baseline_review_state TEXT;
 """
 
+SCHEMA_V12 = """
+ALTER TABLE notifications ADD COLUMN note_user TEXT;
+ALTER TABLE notifications ADD COLUMN note_ai TEXT;
+ALTER TABLE notifications ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS people (
+    login              TEXT PRIMARY KEY,
+    avatar_url         TEXT,
+    note_user          TEXT,
+    note_ai            TEXT,
+    is_favorite        INTEGER NOT NULL DEFAULT 0,
+    last_seen_at       INTEGER
+);
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +148,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V11)
             _set_version(conn, 11)
             version = 11
+        if version < 12:
+            conn.executescript(SCHEMA_V12)
+            _set_version(conn, 12)
+            version = 12
     finally:
         conn.close()
 

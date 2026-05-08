@@ -32,6 +32,10 @@
     <input type="checkbox" name="hide_read" {% if filters.hide_read %}checked{% endif %}>
     Hide read
   </label>
+  <label class="filter-toggle">
+    <input type="checkbox" name="favorites_only" {% if filters.favorites_only %}checked{% endif %}>
+    Favorites only
+  </label>
   <span class="filter-spacer"></span>
   <label class="filter-select">
     Repo
