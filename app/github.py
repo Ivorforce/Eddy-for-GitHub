@@ -81,18 +81,37 @@ def set_ignored(token: str, thread_id: str) -> None:
     r.raise_for_status()
 
 
-def backfetch(conn: sqlite3.Connection, token: str, n: int = 20) -> int:
-    """Temporary helper: pull the last N notifications (including read) and force
-    re-enrichment of those rows. Useful while iterating on enrichment fields.
+def backfetch(conn: sqlite3.Connection, token: str, n: int = 50) -> int:
+    """Pull the last N notifications (including read) and force re-enrichment
+    of those rows. Paginates as needed up to N items. Used as an explicit
+    backfill for initial population or catching up after long offline periods.
+
+    Note: enrichment runs once with the existing ENRICHMENT_PER_POLL bound, so
+    on large backfills the first batch enriches now and the rest catch up over
+    subsequent polls (their details_fetched_at is NULL, so they get picked).
     """
-    r = requests.get(
-        API_NOTIFICATIONS,
-        headers=_auth_headers(token),
-        params={"per_page": n, "all": "true"},
-        timeout=30,
-    )
-    r.raise_for_status()
-    items = r.json()
+    per_page = min(100, max(1, n))
+    headers = _auth_headers(token)
+    items: list[dict[str, Any]] = []
+    next_url: str | None = None
+
+    while len(items) < n:
+        if next_url:
+            r = requests.get(next_url, headers=headers, timeout=30)
+        else:
+            r = requests.get(
+                API_NOTIFICATIONS,
+                headers=headers,
+                params={"per_page": per_page, "all": "true"},
+                timeout=30,
+            )
+        r.raise_for_status()
+        items.extend(r.json())
+        next_url = r.links.get("next", {}).get("url")
+        if not next_url:
+            break
+    items = items[:n]
+
     now = int(time.time())
     ids: list[str] = []
     for item in items:
@@ -101,7 +120,6 @@ def backfetch(conn: sqlite3.Connection, token: str, n: int = 20) -> int:
         ids.append(item["id"])
         _upsert(conn, item, now)
 
-    # Force the next _enrich pass to re-fetch details (and PR reactions) for these.
     if ids:
         placeholders = ",".join(["?"] * len(ids))
         conn.execute(

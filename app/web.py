@@ -485,16 +485,22 @@ def refresh():
 
 @app.post("/backfetch")
 def backfetch():
-    """Temporary: pull last 20 notifications and force re-enrichment."""
+    """Backfill last N notifications (incl read) and force re-enrichment.
+    N is clamped to [1, 1000] to keep API budget bounded."""
+    try:
+        n = int(request.values.get("n", 50))
+    except (TypeError, ValueError):
+        n = 50
+    n = max(1, min(n, 1000))
     token = app.config["GITHUB_TOKEN"]
     error: str | None = None
     conn = db.connect()
     try:
         try:
-            github.backfetch(conn, token, n=20)
+            github.backfetch(conn, token, n=n)
         except Exception as e:
             log.exception("backfetch failed")
-            error = f"Backfetch failed: {e}"
+            error = f"Backfill ({n}) failed: {e}"
     finally:
         conn.close()
     return _table_response(error)
