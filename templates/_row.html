@@ -1,0 +1,105 @@
+<tr {% if not n.unread %}class="read"{% endif %} title="Updated {{ n.updated_at }}">
+  <td class="type">
+    <span class="type-pill state-{{ n.type_state }}"
+          title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ n.type_label }}</span>
+  </td>
+  <td class="repo">
+    {% if n.repo_owner %}
+      <a class="repo-owner" href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a>
+    {% endif %}
+    <a class="repo-name" href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo_name }}</a>
+  </td>
+  <td class="title">
+    {% if n.html_url %}
+      <a href="{{ n.html_url }}" target="_blank" rel="noopener"
+         {% if n.unread %}onclick="htmx.ajax('POST', '/toggle/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML'})"{% endif %}>{{ n.title }}</a>
+    {% else %}
+      {{ n.title }}
+    {% endif %}
+    {% set m = n.meta %}
+    {% if m.complexity or m.reception or m.interest %}
+    <div class="meta-metrics">
+      {% if m.complexity %}
+        <span class="meta-stat meta-diff" title="Complexity — {{ m.complexity[0] }} lines added, {{ m.complexity[1] }} deleted">
+          <span class="add">+{{ m.complexity[0] }}</span> <span class="del">−{{ m.complexity[1] }}</span>
+        </span>
+      {% endif %}
+      {% if m.reception %}
+        <span class="meta-stat meta-rx"
+              title="Reception — positive (max): {{ m.reception.pos }} · negative (max): {{ m.reception.neg }}">
+          {% if m.reception.pos %}<span class="rx-pos">▲ {{ m.reception.pos }}</span>{% endif %}
+          {% if m.reception.neg %}<span class="rx-neg">▼ {{ m.reception.neg }}</span>{% endif %}
+        </span>
+      {% endif %}
+      {% if m.interest %}
+        <span class="meta-stat meta-interest"
+              title="Interest — {{ m.interest.comments }} comment{{ '' if m.interest.comments == 1 else 's' }}{% if m.interest.new_comments %} ({{ m.interest.new_comments }} new since last look){% endif %}{% if m.interest.engaged %} · {{ m.interest.engaged }} engaged ({{ m.interest.commenters or 0 }} unique commenters + max-aggregated reactions){% endif %}">
+          {% if m.interest.comments %}
+            <span class="interest-part">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              {{ m.interest.comments }}{% if m.interest.new_comments %} <span class="meta-new">+{{ m.interest.new_comments }}</span>{% endif %}
+            </span>
+          {% endif %}
+          {% if m.interest.comments and m.interest.engaged %}<span class="meta-sep">·</span>{% endif %}
+          {% if m.interest.engaged %}
+            <span class="interest-part">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              {{ m.interest.engaged }}
+            </span>
+          {% endif %}
+        </span>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if n.labels_visible %}
+    <div class="meta-labels">
+      {% for label in n.labels_visible %}
+        <span class="label-pill"
+              style="background:#{{ label.color }};color:{{ label.text_color }}"
+              {% if label.description %}title="{{ label.description }}"{% endif %}>{{ label.name }}</span>
+      {% endfor %}
+      {% if n.labels_extra %}
+        <span class="label-more"
+              title="{% for l in n.labels_extra %}{{ l.name }}{% if not loop.last %}, {% endif %}{% endfor %}">+{{ n.labels_extra|length }} more</span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </td>
+  <td class="status">
+    {% if n.merge_state %}<span class="status-pill sev-{{ n.merge_state[1] }}">{{ n.merge_state[0] }}</span>{% endif %}
+    {% if n.action_needed == "assigned" %}<span class="status-pill action-assigned">Assigned</span>{% endif %}
+    {% if n.action_needed == "review_you" %}<span class="status-pill action-review-you">Review you</span>{% endif %}
+    {% if n.action_needed == "review_team" %}<span class="status-pill action-review-team">Review team</span>{% endif %}
+    {% if n.mentioned_since %}<span class="status-pill flag-mention">Mentioned</span>{% endif %}
+    {% if n.is_author %}<span class="status-pill flag-author">Yours</span>{% endif %}
+  </td>
+  <td class="actions">
+    <div class="action-row">
+      <div class="action-stack">
+        <label class="toggle">
+          <input type="checkbox"
+                 {% if not n.unread %}checked{% endif %}
+                 hx-post="/toggle/{{ n.id }}/read"
+                 hx-target="closest tr"
+                 hx-swap="outerHTML"
+                 title="Mark read. Syncs to GitHub when checking; unchecking is local only.">
+          Read
+        </label>
+        <label class="toggle">
+          <input type="checkbox"
+                 {% if n.ignored %}checked{% endif %}
+                 hx-post="/toggle/{{ n.id }}/unsub"
+                 hx-target="closest tr"
+                 hx-swap="outerHTML"
+                 title="Ignore future notifications on this thread (also marks read).">
+          Ignored
+        </label>
+      </div>
+      <button class="secondary outline done-btn"
+              hx-post="/action/{{ n.id }}/done"
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              title="Clear from inbox; hides here. One-way.">Done</button>
+    </div>
+  </td>
+</tr>

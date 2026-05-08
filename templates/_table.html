@@ -1,0 +1,26 @@
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if notifications %}
+<table>
+  <thead>
+    <tr>
+      <th class="type-col">Type</th>
+      <th class="repo-col">Repo</th>
+      <th>Title</th>
+      <th class="status-col">Status</th>
+      <th class="actions-col">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% set ns = namespace(prev=None) %}
+    {% for n in notifications %}
+      {% if n.bucket != ns.prev %}
+      <tr class="bucket-separator"><td colspan="5">{{ n.bucket }}</td></tr>
+      {% set ns.prev = n.bucket %}
+      {% endif %}
+      {% include "_row.html" %}
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p><em>No notifications.</em></p>
+{% endif %}

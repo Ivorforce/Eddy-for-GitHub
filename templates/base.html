@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gh-notification-auto-triage</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/pico.min.css') }}">
+  <script src="{{ url_for('static', filename='vendor/htmx.min.js') }}" defer></script>
+  <style>
+    main.container { max-width: 1200px; padding-top: 1.5rem; }
+    table { font-size: 0.9rem; }
+    th, td { vertical-align: middle; }
+    td.status {
+      white-space: nowrap;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      align-items: flex-start;
+    }
+    .status-pill {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 0.5rem;
+      font-size: 0.7rem;
+      font-weight: 500;
+      color: white;
+      white-space: nowrap;
+    }
+    /* Mergeable state warnings (top of stack — most actionable) */
+    .status-pill.sev-danger  { background: #cf222e; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.66rem; }
+    .status-pill.sev-warning { background: #bf8700; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.66rem; }
+    /* Action-needed: red for direct, orange for team */
+    .status-pill.action-assigned    { background: #cf222e; }
+    .status-pill.action-review-you  { background: #cf222e; }
+    .status-pill.action-review-team { background: #d29922; }
+    /* Independent flags */
+    .status-pill.flag-mention { background: #bc4c00; }
+    .status-pill.flag-author  { background: #1f883d; }
+    td.title { width: 100%; }
+
+    /* type pill — color tracks GitHub state, not type */
+    td.type { width: 1%; white-space: nowrap; }
+    .type-pill {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 0.6rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: white;
+      background: #6e7781; /* default for Discussion / Release / not-yet-enriched */
+    }
+    .type-pill.state-open                { background: #1f883d; }
+    .type-pill.state-draft               { background: #57606a; }
+    .type-pill.state-merged,
+    .type-pill.state-closed_completed    { background: #8250df; }
+    .type-pill.state-closed_pr           { background: #cf222e; }
+    .type-pill.state-closed_not_planned  { background: #6e7781; }
+
+    /* repo cell — owner above, name below, both clickable */
+    td.repo { width: 1%; white-space: nowrap; line-height: 1.15; padding-right: 1rem; }
+    td.repo a { text-decoration: none; }
+    td.repo a:hover { text-decoration: underline; }
+    .repo-owner {
+      display: block;
+      font-size: 0.7rem;
+      color: var(--pico-muted-color);
+    }
+    .repo-name {
+      display: block;
+      font-size: 0.88rem;
+      font-weight: 600;
+    }
+
+    /* title cell — metrics line + labels line, separated visually */
+    td.title .meta-metrics {
+      font-size: 0.74rem;
+      color: var(--pico-muted-color);
+      margin-top: 0.25rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+    }
+    td.title .meta-labels {
+      margin-top: 0.3rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      align-items: center;
+    }
+    /* Each metric group sits in a subtle pill so the boundaries are obvious. */
+    .meta-stat {
+      display: inline-flex;
+      gap: 0.3rem;
+      align-items: baseline;
+      padding: 0.08rem 0.5rem;
+      border-radius: 0.45rem;
+      background: rgba(140, 149, 159, 0.12);
+      white-space: nowrap;
+      cursor: help;
+    }
+    .meta-diff {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.72rem;
+    }
+    /* Diff stays green/red (universal diff convention) but desaturated +
+       regular weight, so it reads as factual metric — distinct from the
+       saturated bold ▲/▼ reaction colors which carry sentiment. */
+    .meta-diff .add { color: #5b8c64; }
+    .meta-diff .del { color: #a8676b; }
+    .meta-new {
+      background: #bf8700;
+      color: white;
+      padding: 0 0.3rem;
+      border-radius: 0.3rem;
+      font-size: 0.66rem;
+      font-weight: 500;
+    }
+    .meta-rx .rx-pos { color: #1a7f37; font-weight: 600; }
+    .meta-rx .rx-neg { color: #cf222e; font-weight: 600; }
+    .meta-interest { gap: 0.4rem; }
+    .interest-part { display: inline-flex; align-items: center; gap: 0.3rem; }
+    .meta-sep { color: var(--pico-muted-color); opacity: 0.5; }
+    .icon {
+      width: 0.95em;
+      height: 0.95em;
+      vertical-align: -0.13em;
+      flex-shrink: 0;
+    }
+    .label-pill {
+      display: inline-block;
+      padding: 0.02rem 0.4rem;
+      border-radius: 0.5rem;
+      font-size: 0.62rem;
+      font-weight: 500;
+      line-height: 1.45;
+      white-space: nowrap;
+      opacity: 0.9;
+    }
+    .label-more {
+      font-size: 0.62rem;
+      color: var(--pico-muted-color);
+      cursor: help;
+      padding: 0 0.2rem;
+    }
+
+    /* actions — toggles stacked vertically, Done aside */
+    td.actions { white-space: nowrap; text-align: right; width: 1%; }
+    td.actions .action-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    td.actions .action-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+      align-items: flex-start;
+    }
+    td.actions .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.82rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    td.actions .toggle input[type="checkbox"] { margin: 0; cursor: pointer; }
+    td.actions button.done-btn {
+      display: inline-block;
+      width: auto;
+      padding: 0.25rem 0.7rem;
+      font-size: 0.8rem;
+      margin: 0;
+    }
+
+    /* time bucket separators */
+    tr.bucket-separator td {
+      background: transparent;
+      color: var(--pico-muted-color);
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 0.9rem 0.5rem 0.25rem;
+      border-bottom: 1px solid var(--pico-muted-border-color);
+    }
+    tr.bucket-separator + tr td { padding-top: 0.5rem; }
+
+    .toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+    .toolbar h1 { margin: 0; flex: 1; }
+    .error { color: var(--pico-color-red-500); margin-bottom: 1rem; }
+    tr.read { opacity: 0.45; }
+    tr.read:hover { opacity: 1; }
+    tr.action-error { outline: 1px solid var(--pico-color-red-500); }
+  </style>
+  <script>
+    document.addEventListener("htmx:responseError", (e) => {
+      const tr = e.detail.elt.closest("tr");
+      if (tr) tr.classList.add("action-error");
+      const status = e.detail.xhr.status;
+      console.error("Action failed:", status, e.detail.xhr.responseText);
+      alert(`Action failed (HTTP ${status}). See terminal for details.`);
+    });
+
+    // Auto-refresh when the tab regains focus (catches reads done on github.com).
+    // Debounced to once per 30s to avoid hammering the API on tab-switching.
+    let lastFocusRefresh = Date.now();
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      if (Date.now() - lastFocusRefresh < 30000) return;
+      const target = document.querySelector("#notifications-table");
+      if (!target) return;
+      lastFocusRefresh = Date.now();
+      htmx.ajax("POST", "/refresh", { target, swap: "innerHTML" });
+    });
+  </script>
+</head>
+<body>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

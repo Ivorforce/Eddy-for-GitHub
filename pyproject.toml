@@ -1,0 +1,17 @@
+[project]
+name = "gh-notification-auto-triage"
+version = "0.0.1"
+description = "Local GitHub notification triage app."
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3",
+    "requests>=2.31",
+    "python-dotenv>=1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

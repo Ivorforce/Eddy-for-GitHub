@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="toolbar">
+  <h1>Notifications</h1>
+  <button hx-post="/refresh" hx-target="#notifications-table" hx-indicator="#refresh-indicator">
+    Refresh
+  </button>
+  <button class="secondary outline"
+          hx-post="/backfetch"
+          hx-target="#notifications-table"
+          hx-indicator="#refresh-indicator"
+          title="Pull last 20 notifications (including read) and force re-enrichment. Temporary.">
+    Backfetch
+  </button>
+  <span id="refresh-indicator" class="htmx-indicator" aria-busy="true"></span>
+</div>
+<div id="notifications-table">
+  {% include "_table.html" %}
+</div>
+{% endblock %}
