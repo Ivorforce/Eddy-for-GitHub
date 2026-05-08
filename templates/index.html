@@ -5,19 +5,17 @@
   <h1>Triage</h1>
   <button hx-post="/refresh"
           hx-include="#filters"
-          hx-target="#notifications-table"
-          hx-indicator="#refresh-indicator">
+          hx-target="#notifications-table">
     Refresh
   </button>
   <button class="secondary outline"
           hx-post="/backfetch"
           hx-include="#filters"
           hx-target="#notifications-table"
-          hx-indicator="#refresh-indicator"
           title="Pull last 20 notifications (including read) and force re-enrichment. Temporary.">
     Backfetch
   </button>
-  <span id="refresh-indicator" class="htmx-indicator" aria-busy="true"></span>
+  <span id="status-dot" class="status-dot status-idle" title="Up to date"></span>
 </div>
 <form id="filters"
       class="filter-bar"

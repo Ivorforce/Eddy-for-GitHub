@@ -307,6 +307,27 @@
     .toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem; }
     .toolbar h1 { margin: 0; flex: 1; }
     .brand-logo { width: 1.6rem; height: 1.6rem; flex-shrink: 0; color: var(--pico-h1-color, currentColor); }
+
+    /* Status dot — green idle, orange pulsing while updating, red on error.
+       Hover for details. Replaces the old hx-indicator-only spinner. */
+    .status-dot {
+      width: 0.7rem;
+      height: 0.7rem;
+      border-radius: 50%;
+      flex-shrink: 0;
+      cursor: help;
+      transition: background-color 0.15s ease;
+    }
+    .status-dot.status-idle    { background: #1a7f37; }
+    .status-dot.status-loading {
+      background: #bf8700;
+      animation: status-pulse 0.9s ease-in-out infinite;
+    }
+    .status-dot.status-error   { background: #cf222e; }
+    @keyframes status-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.4; transform: scale(0.65); }
+    }
     .filter-bar {
       display: flex;
       flex-wrap: wrap;
@@ -344,12 +365,57 @@
     tr.action-error { outline: 1px solid var(--pico-color-red-500); }
   </style>
   <script>
+    // Global status indicator. HTMX request lifecycle drives loading/idle;
+    // online/offline events and HX-Trigger 'showError' drive the error state.
+    const setStatus = (state, msg) => {
+      const dot = document.getElementById("status-dot");
+      if (!dot) return;
+      dot.className = "status-dot status-" + state;
+      dot.title = msg;
+    };
+    if (!navigator.onLine) setStatus("error", "Offline");
+    window.addEventListener("online",  () => setStatus("idle", "Up to date"));
+    window.addEventListener("offline", () => setStatus("error", "Offline"));
+
+    // Min visible duration so a sub-100ms 304 round-trip still flashes the
+    // loading state long enough for the user to perceive it.
+    const MIN_LOADING_MS = 300;
+    let loadingSince = 0;
+    document.addEventListener("htmx:beforeRequest", () => {
+      // Don't drown out a sticky error state with transient loading flicker.
+      const dot = document.getElementById("status-dot");
+      if (dot && dot.classList.contains("status-error")) return;
+      loadingSince = Date.now();
+      setStatus("loading", "Updating…");
+    });
+    document.addEventListener("htmx:afterRequest", (e) => {
+      const settle = () => {
+        if (e.detail.successful) {
+          setStatus("idle", "Up to date");
+        } else {
+          const code = e.detail.xhr ? e.detail.xhr.status : 0;
+          const txt  = (e.detail.xhr && e.detail.xhr.responseText) || "Network error";
+          setStatus("error", `HTTP ${code}: ${String(txt).slice(0, 240)}`);
+        }
+      };
+      const elapsed = Date.now() - loadingSince;
+      if (elapsed < MIN_LOADING_MS) {
+        setTimeout(settle, MIN_LOADING_MS - elapsed);
+      } else {
+        settle();
+      }
+    });
+    // Server-handled errors (route caught + still rendered the table) come
+    // through as HX-Trigger 'showError' on a 200 response.
+    document.addEventListener("showError", (e) => {
+      setStatus("error", e.detail.message || "Error");
+    });
+
     document.addEventListener("htmx:responseError", (e) => {
       const tr = e.detail.elt.closest("tr");
       if (tr) tr.classList.add("action-error");
       const status = e.detail.xhr.status;
       console.error("Action failed:", status, e.detail.xhr.responseText);
-      alert(`Action failed (HTTP ${status}). See terminal for details.`);
     });
 
     // Auto-refresh when the tab regains focus (catches reads done on github.com).

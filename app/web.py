@@ -456,6 +456,17 @@ def list_view():
     return render_template("_table.html", notifications=rows, error=None)
 
 
+def _table_response(error: str | None) -> "Response":
+    """Re-render the table with current filters; if an error happened, attach
+    HX-Trigger 'showError' so the status dot flips red without disrupting the swap."""
+    rows = _filter_and_sort(_load_notifications(), _filters_from_request())
+    body = render_template("_table.html", notifications=rows)
+    response = make_response(body, 200)
+    if error:
+        response.headers["HX-Trigger"] = json.dumps({"showError": {"message": error}})
+    return response
+
+
 @app.post("/refresh")
 def refresh():
     token = app.config["GITHUB_TOKEN"]
@@ -469,8 +480,7 @@ def refresh():
             error = f"Refresh failed: {e}"
     finally:
         conn.close()
-    rows = _filter_and_sort(_load_notifications(), _filters_from_request())
-    return render_template("_table.html", notifications=rows, error=error)
+    return _table_response(error)
 
 
 @app.post("/backfetch")
@@ -487,8 +497,7 @@ def backfetch():
             error = f"Backfetch failed: {e}"
     finally:
         conn.close()
-    rows = _filter_and_sort(_load_notifications(), _filters_from_request())
-    return render_template("_table.html", notifications=rows, error=error)
+    return _table_response(error)
 
 
 def _apply_action(
