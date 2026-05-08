@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gh-notification-auto-triage</title>
+  <title>GitHub Triage</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icon.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/pico.min.css') }}">
   <script src="{{ url_for('static', filename='vendor/htmx.min.js') }}" defer></script>
   <style>
@@ -191,8 +192,40 @@
     }
     tr.bucket-separator + tr td { padding-top: 0.5rem; }
 
-    .toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+    .toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.75rem; }
     .toolbar h1 { margin: 0; flex: 1; }
+    .brand-logo { width: 1.6rem; height: 1.6rem; flex-shrink: 0; color: var(--pico-h1-color, currentColor); }
+    .filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.9rem 1.4rem;
+      align-items: center;
+      margin: 0 0 1rem;
+      padding: 0.5rem 0.75rem;
+      border-top: 1px solid var(--pico-muted-border-color);
+      border-bottom: 1px solid var(--pico-muted-border-color);
+      font-size: 0.82rem;
+    }
+    .filter-bar .filter-toggle,
+    .filter-bar .filter-select {
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .filter-bar input[type="checkbox"] { margin: 0; }
+    .filter-bar select {
+      margin: 0;
+      padding: 0.15rem 0.4rem;
+      font-size: 0.82rem;
+      min-width: 7rem;
+      width: auto;
+      height: auto;
+      background-position: right 0.4rem center;
+    }
+    .filter-spacer { flex: 1; }
     .error { color: var(--pico-color-red-500); margin-bottom: 1rem; }
     tr.read { opacity: 0.45; }
     tr.read:hover { opacity: 1; }

@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 
 from . import db, github
 
@@ -345,6 +345,47 @@ def _load_notifications():
         conn.close()
 
 
+def _load_repos() -> list[str]:
+    conn = db.connect()
+    try:
+        return [
+            r["repo"] for r in conn.execute(
+                "SELECT DISTINCT repo FROM notifications "
+                "WHERE COALESCE(action, '') != 'done' AND repo != '' "
+                "ORDER BY repo"
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+
+def _filters_from_request() -> dict:
+    src = request.values  # union of query string + form fields
+    return {
+        "action_only": bool(src.get("action_only")),
+        "hide_read":   bool(src.get("hide_read")),
+        "repo":        src.get("repo") or "",
+        "sort":        src.get("sort") or "updated",
+    }
+
+
+def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
+    if f["action_only"]:
+        rows = [r for r in rows if r["action_needed"] or r["mentioned_since"]]
+    if f["hide_read"]:
+        rows = [r for r in rows if r["unread"]]
+    if f["repo"]:
+        rows = [r for r in rows if r["repo"] == f["repo"]]
+    if f["sort"] == "engaged":
+        rows.sort(
+            key=lambda r: (
+                ((r.get("meta") or {}).get("interest") or {}).get("engaged") or 0
+            ),
+            reverse=True,
+        )
+    return rows
+
+
 def _load_one(thread_id: str) -> dict | None:
     conn = db.connect()
     try:
@@ -359,7 +400,18 @@ def _load_one(thread_id: str) -> dict | None:
 
 @app.get("/")
 def index():
-    return render_template("index.html", notifications=_load_notifications())
+    f = _filters_from_request()
+    rows = _filter_and_sort(_load_notifications(), f)
+    return render_template(
+        "index.html", notifications=rows, repos=_load_repos(), filters=f
+    )
+
+
+@app.get("/list")
+def list_view():
+    """Re-render the table with current filter/sort params (no polling)."""
+    rows = _filter_and_sort(_load_notifications(), _filters_from_request())
+    return render_template("_table.html", notifications=rows, error=None)
 
 
 @app.post("/refresh")
@@ -375,11 +427,8 @@ def refresh():
             error = f"Refresh failed: {e}"
     finally:
         conn.close()
-    return render_template(
-        "_table.html",
-        notifications=_load_notifications(),
-        error=error,
-    )
+    rows = _filter_and_sort(_load_notifications(), _filters_from_request())
+    return render_template("_table.html", notifications=rows, error=error)
 
 
 @app.post("/backfetch")
@@ -396,11 +445,8 @@ def backfetch():
             error = f"Backfetch failed: {e}"
     finally:
         conn.close()
-    return render_template(
-        "_table.html",
-        notifications=_load_notifications(),
-        error=error,
-    )
+    rows = _filter_and_sort(_load_notifications(), _filters_from_request())
+    return render_template("_table.html", notifications=rows, error=error)
 
 
 def _apply_action(
