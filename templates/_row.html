@@ -92,6 +92,7 @@
     {% endif %}
   </td>
   <td class="status">
+    <div class="status-stack">
     {# Stack order top-to-bottom is priority for scanning: blocking warnings
        first (mergeable), then review state, then required action, then flags. #}
     {% if n.merge_state %}<span class="status-pill sev-{{ n.merge_state[1] }}">{{ n.merge_state[0] }}</span>{% endif %}
@@ -101,6 +102,7 @@
     {% if n.action_needed == "review_you" %}<span class="status-pill action-review-you">Review you</span>{% endif %}
     {% if n.action_needed == "review_team" %}<span class="status-pill action-review-team">Review team</span>{% endif %}
     {% if n.mentioned_since %}<span class="status-pill flag-mention">Mentioned</span>{% endif %}
+    </div>
   </td>
   <td class="actions">
     {% set is_read_now = (not n.unread) and (not n.ignored) %}

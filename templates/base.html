@@ -11,8 +11,11 @@
     main.container { max-width: 1400px; padding: 1.5rem 1.5rem 0; }
     table { font-size: 0.9rem; }
     th, td { vertical-align: middle; }
-    td.status {
-      white-space: nowrap;
+    td.status { white-space: nowrap; }
+    /* Wrapper, not the td itself, so the cell stays a real table-cell —
+       display:flex on a <td> detaches it from the row's baseline and the
+       per-cell bottom border lands at a different y than its siblings. */
+    td.status .status-stack {
       display: flex;
       flex-direction: column;
       gap: 0.2rem;
