@@ -42,7 +42,7 @@ app.jinja_env.filters["humanize"] = _humanize
 _ROW_COLS = (
     "id, repo, type, title, reason, html_url, updated_at, "
     "unread, ignored, action, details_json, seen_reasons, baseline_comments, "
-    "pr_reactions_json, unique_commenters"
+    "pr_reactions_json, unique_commenters, pr_review_state"
 )
 
 # GitHub reaction emoji buckets. Same user can react with multiple positives;

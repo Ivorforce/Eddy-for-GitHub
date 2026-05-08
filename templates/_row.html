@@ -67,6 +67,8 @@
   </td>
   <td class="status">
     {% if n.merge_state %}<span class="status-pill sev-{{ n.merge_state[1] }}">{{ n.merge_state[0] }}</span>{% endif %}
+    {% if n.pr_review_state == "approved" %}<span class="status-pill review-approved">Approved</span>{% endif %}
+    {% if n.pr_review_state == "changes_requested" %}<span class="status-pill review-changes">Changes requested</span>{% endif %}
     {% if n.action_needed == "assigned" %}<span class="status-pill action-assigned">Assigned</span>{% endif %}
     {% if n.action_needed == "review_you" %}<span class="status-pill action-review-you">Review you</span>{% endif %}
     {% if n.action_needed == "review_team" %}<span class="status-pill action-review-team">Review team</span>{% endif %}

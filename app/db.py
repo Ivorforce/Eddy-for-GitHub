@@ -67,6 +67,10 @@ SCHEMA_V9 = """
 ALTER TABLE notifications ADD COLUMN unique_commenters INTEGER;
 """
 
+SCHEMA_V10 = """
+ALTER TABLE notifications ADD COLUMN pr_review_state TEXT;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -117,6 +121,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V9)
             _set_version(conn, 9)
             version = 9
+        if version < 10:
+            conn.executescript(SCHEMA_V10)
+            _set_version(conn, 10)
+            version = 10
     finally:
         conn.close()
 

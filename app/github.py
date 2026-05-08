@@ -126,6 +126,45 @@ def fetch_details(token: str, api_url: str | None) -> dict | None:
     return r.json()
 
 
+def _compute_review_state(reviews: list[dict]) -> str | None:
+    """Latest non-comment review per author wins. Returns
+    'changes_requested' | 'approved' | None.
+
+    GitHub returns reviews in chronological order. COMMENTED reviews don't
+    update an author's stance. DISMISSED reviews invalidate prior approvals
+    or changes-requested from that author.
+    """
+    by_author: dict[str, str] = {}
+    for r in reviews:
+        author = (r.get("user") or {}).get("login")
+        state = r.get("state")
+        if not author or state in ("PENDING", "COMMENTED"):
+            continue
+        by_author[author] = state  # APPROVED, CHANGES_REQUESTED, or DISMISSED
+
+    if any(s == "CHANGES_REQUESTED" for s in by_author.values()):
+        return "changes_requested"
+    if any(s == "APPROVED" for s in by_author.values()):
+        return "approved"
+    return None
+
+
+def fetch_pr_review_state(token: str, pr_api_url: str | None) -> str | None:
+    """Returns 'approved' | 'changes_requested' | None for a PR's review state."""
+    if not pr_api_url or "/pulls/" not in pr_api_url:
+        return None
+    r = requests.get(
+        pr_api_url + "/reviews",
+        headers=_auth_headers(token),
+        params={"per_page": 100},
+        timeout=15,
+    )
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return _compute_review_state(r.json())
+
+
 def fetch_unique_commenters(
     token: str, api_url: str | None, comments_count: int, max_pages: int = 5
 ) -> int | None:
@@ -226,6 +265,14 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                     )
             except Exception:
                 log.exception("pr_reactions fetch failed for %s", row["id"])
+            try:
+                review_state = fetch_pr_review_state(token, row["api_url"])
+                conn.execute(
+                    "UPDATE notifications SET pr_review_state = ? WHERE id = ?",
+                    (review_state, row["id"]),
+                )
+            except Exception:
+                log.exception("review state fetch failed for %s", row["id"])
 
         # Unique commenters (cheap when comments_count is 0).
         try:

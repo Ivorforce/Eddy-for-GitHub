@@ -29,13 +29,16 @@
     /* Mergeable state warnings (top of stack — most actionable) */
     .status-pill.sev-danger  { background: #cf222e; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.66rem; }
     .status-pill.sev-warning { background: #bf8700; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.66rem; }
+    /* Review state: positive (green) / negative (red) */
+    .status-pill.review-approved { background: #1a7f37; }
+    .status-pill.review-changes  { background: #cf222e; }
     /* Action-needed: red for direct, orange for team */
     .status-pill.action-assigned    { background: #cf222e; }
     .status-pill.action-review-you  { background: #cf222e; }
     .status-pill.action-review-team { background: #d29922; }
     /* Independent flags */
     .status-pill.flag-mention { background: #bc4c00; }
-    .status-pill.flag-author  { background: #1f883d; }
+    .status-pill.flag-author  { background: #57606a; }
     td.title { width: 100%; }
 
     /* type pill — color tracks GitHub state, not type */
