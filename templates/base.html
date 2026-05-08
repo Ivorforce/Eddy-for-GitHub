@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/pico.min.css') }}">
   <script src="{{ url_for('static', filename='vendor/htmx.min.js') }}" defer></script>
   <style>
-    main.container { max-width: 1200px; padding-top: 1.5rem; }
+    main.container { max-width: 1400px; padding: 1.5rem 1.5rem 0; }
     table { font-size: 0.9rem; }
     th, td { vertical-align: middle; }
     td.status {
@@ -72,19 +72,24 @@
     .type-pill.state-closed_pr           { background: #cf222e; }
     .type-pill.state-closed_not_planned  { background: #6e7781; }
 
-    /* repo cell — owner above, name below, author below that, all clickable */
-    td.repo { width: 1%; white-space: nowrap; line-height: 1.15; padding-right: 1rem; }
+    /* repo cell — owner above, name below, author below that, all clickable.
+       Capped at 14rem so a long repo name (e.g. godot-proposals-viewer.github.io)
+       wraps onto two lines instead of stretching the column and starving the
+       title column. overflow-wrap: anywhere lets the break land on dots/hyphens. */
+    td.repo { width: 1%; max-width: 14rem; line-height: 1.15; padding-right: 1rem; }
     td.repo a { text-decoration: none; }
     td.repo a:hover { text-decoration: underline; }
     .repo-owner {
       display: block;
       font-size: 0.7rem;
       color: var(--pico-muted-color);
+      overflow-wrap: anywhere;
     }
     .repo-name {
       display: block;
       font-size: 0.88rem;
       font-weight: 600;
+      overflow-wrap: anywhere;
     }
     .repo-author {
       display: flex;
