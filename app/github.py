@@ -5,6 +5,7 @@ import json
 import logging
 import sqlite3
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -13,6 +14,7 @@ from . import db
 
 API_NOTIFICATIONS = "https://api.github.com/notifications"
 PER_PAGE = 50
+MAX_PAGES_PER_FETCH = 2  # ~100 items per fetch — bound poll cost
 ENRICHMENT_PER_POLL = 20
 
 log = logging.getLogger(__name__)
@@ -386,35 +388,47 @@ def _accumulate_seen_reason(
     )
 
 
-def poll_once(conn: sqlite3.Connection, token: str) -> int:
-    """Fetch /notifications and upsert. Returns count of items processed (-1 on 304)."""
-    last_modified = db.get_meta(conn, "last_modified")
+def _get_paginated(
+    token: str,
+    params: dict,
+    last_modified: str | None,
+    max_pages: int = MAX_PAGES_PER_FETCH,
+) -> tuple[list[dict[str, Any]], str | None, int]:
+    """GET /notifications with optional If-Modified-Since + page cap.
+    Returns (items, new_last_modified, status). status=304 means no changes."""
     headers = _auth_headers(token)
     if last_modified:
         headers["If-Modified-Since"] = last_modified
-
-    r = requests.get(
-        API_NOTIFICATIONS,
-        headers=headers,
-        params={"per_page": PER_PAGE},
-        timeout=30,
-    )
+    r = requests.get(API_NOTIFICATIONS, headers=headers, params=params, timeout=30)
     if r.status_code == 304:
-        # No new notifications — but still try to enrich any stale rows.
-        _enrich(conn, token)
-        return -1
+        return [], last_modified, 304
     r.raise_for_status()
-
-    new_last_modified = r.headers.get("Last-Modified")
+    new_last_modified = r.headers.get("Last-Modified", last_modified)
     items: list[dict[str, Any]] = list(r.json())
-
-    # Follow pagination (drop If-Modified-Since on subsequent pages).
-    page_headers = _auth_headers(token)
-    while "next" in r.links:
-        next_url = r.links["next"]["url"]
-        r = requests.get(next_url, headers=page_headers, timeout=30)
+    page_headers = _auth_headers(token)  # no If-Modified-Since on subsequent pages
+    pages = 1
+    while "next" in r.links and pages < max_pages:
+        r = requests.get(r.links["next"]["url"], headers=page_headers, timeout=30)
         r.raise_for_status()
         items.extend(r.json())
+        pages += 1
+    return items, new_last_modified, 200
+
+
+def _fetch_unread(conn: sqlite3.Connection, token: str) -> int:
+    """Fetch currently-unread notifications + reconcile read-state of items
+    missing from the response (they were marked read elsewhere). This is the
+    only path that catches read-state changes on threads with no new activity
+    (e.g. user clicked through on github.com/mobile without commenting)."""
+    last_modified = (
+        db.get_meta(conn, "last_modified_unread")
+        or db.get_meta(conn, "last_modified")  # fallback to legacy single-key
+    )
+    items, new_last_modified, status = _get_paginated(
+        token, {"per_page": PER_PAGE}, last_modified
+    )
+    if status == 304:
+        return 0
 
     now = int(time.time())
     seen_ids: set[str] = set()
@@ -424,9 +438,8 @@ def poll_once(conn: sqlite3.Connection, token: str) -> int:
         seen_ids.add(item["id"])
         _upsert(conn, item, now)
 
-    # Anything previously unread that's missing from the current response was
-    # marked read elsewhere — except when the user explicitly toggled it back
-    # to unread locally (action='kept_unread'), in which case respect their override.
+    # Items previously unread but missing from the response were read elsewhere.
+    # Skip rows where the user has explicitly kept-unread locally.
     if seen_ids:
         placeholders = ",".join(["?"] * len(seen_ids))
         conn.execute(
@@ -443,9 +456,46 @@ def poll_once(conn: sqlite3.Connection, token: str) -> int:
         )
 
     if new_last_modified:
-        db.set_meta(conn, "last_modified", new_last_modified)
-
-    # Enrich PR/Issue rows that are stale or never fetched. Bounded per cycle.
-    _enrich(conn, token)
-
+        db.set_meta(conn, "last_modified_unread", new_last_modified)
+        if db.get_meta(conn, "last_modified"):
+            db.set_meta(conn, "last_modified", None)  # cleanup legacy key
     return len(items)
+
+
+def _fetch_since(conn: sqlite3.Connection, token: str) -> int:
+    """Fetch every notification updated since last successful since-fetch
+    (?all=true&since=<bookmark>). Catches arrivals that were created and read
+    on another client before we had a chance to see them as unread."""
+    since = db.get_meta(conn, "last_full_fetch_at")
+    last_modified = db.get_meta(conn, "last_modified_all")
+    fetched_at_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    params: dict = {"per_page": PER_PAGE, "all": "true"}
+    if since:
+        params["since"] = since
+
+    items, new_last_modified, status = _get_paginated(token, params, last_modified)
+
+    if status == 200:
+        now = int(time.time())
+        for item in items:
+            if not item.get("id"):
+                continue
+            _upsert(conn, item, now)
+        if new_last_modified:
+            db.set_meta(conn, "last_modified_all", new_last_modified)
+
+    # Advance the bookmark on success or 304. On exception we never reach here
+    # so the bookmark stays put — next attempt re-fetches from the same point.
+    db.set_meta(conn, "last_full_fetch_at", fetched_at_iso)
+    return len(items) if status == 200 else 0
+
+
+def poll_once(conn: sqlite3.Connection, token: str) -> int:
+    """Run both fetches (unread + since-last) and enrich PR/Issue details.
+    Each fetch is bounded by MAX_PAGES_PER_FETCH * PER_PAGE items (~100);
+    larger backfills go through Backfetch. Returns total items touched."""
+    n_unread = _fetch_unread(conn, token)
+    n_since = _fetch_since(conn, token)
+    _enrich(conn, token)
+    return n_unread + n_since
