@@ -10,6 +10,8 @@
     <a class="repo-name" href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo_name }}</a>
     {% if n.author_login %}
     <div class="repo-author">
+      {# Author icon priority: self trumps member trumps first-time. Each
+         encodes a distinct signal to scan for at a glance. #}
       <span class="author-by">by</span>
       <button class="star-btn person-star{% if n.author_is_favorite %} is-favorite{% endif %}"
               hx-post="/people/{{ n.author_login }}/favorite"
@@ -90,6 +92,8 @@
     {% endif %}
   </td>
   <td class="status">
+    {# Stack order top-to-bottom is priority for scanning: blocking warnings
+       first (mergeable), then review state, then required action, then flags. #}
     {% if n.merge_state %}<span class="status-pill sev-{{ n.merge_state[1] }}">{{ n.merge_state[0] }}</span>{% endif %}
     {% if n.pr_review_state == "approved" %}<span class="status-pill review-approved {% if n.is_review_new %}pill-new{% endif %}" {% if n.is_review_new %}title="New since last looked"{% endif %}>Approved</span>{% endif %}
     {% if n.pr_review_state == "changes_requested" %}<span class="status-pill review-changes {% if n.is_review_new %}pill-new{% endif %}" {% if n.is_review_new %}title="New since last looked"{% endif %}>Changes requested</span>{% endif %}
