@@ -31,6 +31,16 @@ def main() -> int:
     web.app.config["GITHUB_TOKEN"] = token
     web.app.config["USER_LOGIN"] = user_login
     web.app.config["USER_TEAMS"] = user_teams
+    # Hot-reload Jinja templates on edit. Both the config flag and the env
+    # attribute are required: web.py touches app.jinja_env at import (to
+    # register the humanize filter), which constructs the env with the config
+    # value at that moment (False) and caches it. Setting only the env
+    # attribute later got reset by Flask somewhere between import and the
+    # first request — setting the config too keeps it sticky. Full Flask
+    # debug stays off because its reloader respawns the process and would
+    # double the poll thread.
+    web.app.config["TEMPLATES_AUTO_RELOAD"] = True
+    web.app.jinja_env.auto_reload = True
 
     stop = threading.Event()
     poller = threading.Thread(
