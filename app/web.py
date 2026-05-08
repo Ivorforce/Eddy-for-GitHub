@@ -42,7 +42,7 @@ app.jinja_env.filters["humanize"] = _humanize
 _ROW_COLS = (
     "id, repo, type, title, reason, html_url, updated_at, "
     "unread, ignored, action, details_json, seen_reasons, baseline_comments, "
-    "pr_reactions_json, unique_commenters, pr_review_state"
+    "pr_reactions_json, unique_commenters, pr_review_state, baseline_review_state"
 )
 
 # GitHub reaction emoji buckets. Same user can react with multiple positives;
@@ -329,6 +329,10 @@ def _row_to_dict(row) -> dict:
     d["mentioned_since"] = _mentioned_since(seen)
     d["is_author"] = _is_author(details)
     d["merge_state"] = _merge_state(details, d["type"])
+    # 'New since last action': review state changed since the user last engaged
+    # (action or first ingest, baseline NULL means "never engaged").
+    baseline_rs = d.pop("baseline_review_state", None)
+    d["is_review_new"] = bool(d["pr_review_state"]) and d["pr_review_state"] != baseline_rs
     return d
 
 
@@ -456,13 +460,18 @@ def _apply_action(
     **state,
 ) -> None:
     """Record action + actioned_at + action_source, plus arbitrary state columns.
-    Always clears seen_reasons (resets 'mentioned since last looked') and snapshots
-    baseline_comments from details_json (resets '+N new comments since last looked')."""
+
+    NOTE: baselines (baseline_comments, baseline_review_state) and seen_reasons
+    are intentionally NOT touched here. 'Since last looked' indicators persist
+    through Read so the user can see what they just handled; only fresh
+    notification activity (new comment count, new review state, new mention)
+    shifts them. Done/Unsub remove the row from view, so any staleness there
+    is invisible.
+    """
     cols = {
         "action": action,
         "actioned_at": int(time.time()),
         "action_source": source,
-        "seen_reasons": None,
         **state,
     }
     setters = ", ".join(f"{k} = ?" for k in cols)
@@ -470,10 +479,7 @@ def _apply_action(
     conn = db.connect()
     try:
         conn.execute(
-            f"UPDATE notifications SET {setters}, "
-            "baseline_comments = COALESCE(json_extract(details_json, '$.comments'), 0) "
-            "WHERE id = ?",
-            values,
+            f"UPDATE notifications SET {setters} WHERE id = ?", values
         )
     finally:
         conn.close()

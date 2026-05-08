@@ -33,6 +33,18 @@
     /* Review state: positive (green) / negative (red) */
     .status-pill.review-approved { background: #1a7f37; }
     .status-pill.review-changes  { background: #cf222e; }
+    /* 'New since last looked' indicator — small orange dot, applies to any pill */
+    .status-pill.pill-new::before {
+      content: "";
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #bf8700;
+      margin-right: 0.4rem;
+      vertical-align: 0.05em;
+      box-shadow: 0 0 0 1.5px rgba(255,255,255,0.35);
+    }
     /* Action-needed: red for direct, orange for team */
     .status-pill.action-assigned    { background: #cf222e; }
     .status-pill.action-review-you  { background: #cf222e; }

@@ -248,10 +248,14 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 (now, row["id"]),
             )
             continue
+        # COALESCE captures baseline_comments on first enrichment so the
+        # '+N new comments' indicator stays alive through Read actions and
+        # only shifts when actual notification activity changes the count.
         conn.execute(
-            "UPDATE notifications SET details_json = ?, details_fetched_at = ? "
+            "UPDATE notifications SET details_json = ?, details_fetched_at = ?, "
+            "baseline_comments = COALESCE(baseline_comments, ?) "
             "WHERE id = ?",
-            (json.dumps(details), now, row["id"]),
+            (json.dumps(details), now, details.get("comments") or 0, row["id"]),
         )
         if row["type"] == "PullRequest":
             try:
@@ -267,9 +271,14 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 log.exception("pr_reactions fetch failed for %s", row["id"])
             try:
                 review_state = fetch_pr_review_state(token, row["api_url"])
+                # COALESCE captures baseline on the first time we know the
+                # review state — the 'pill-new' dot only fires once it actually
+                # changes after that point, surviving Read actions in between.
                 conn.execute(
-                    "UPDATE notifications SET pr_review_state = ? WHERE id = ?",
-                    (review_state, row["id"]),
+                    "UPDATE notifications SET pr_review_state = ?, "
+                    "baseline_review_state = COALESCE(baseline_review_state, ?) "
+                    "WHERE id = ?",
+                    (review_state, review_state, row["id"]),
                 )
             except Exception:
                 log.exception("review state fetch failed for %s", row["id"])
