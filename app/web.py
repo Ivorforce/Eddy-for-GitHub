@@ -375,7 +375,27 @@ def _favorite_people() -> set[str]:
         conn.close()
 
 
-def _row_to_dict(row, fav_people: set[str] | None = None) -> dict:
+def _favorite_set(table: str) -> set[str]:
+    """Generic favorite-set lookup for the repos / orgs tables (both keyed
+    by 'name'). Mirrors _favorite_people but kept separate because people
+    use 'login' as the key."""
+    conn = db.connect()
+    try:
+        return {
+            r["name"] for r in conn.execute(
+                f"SELECT name FROM {table} WHERE is_favorite = 1"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+
+def _row_to_dict(
+    row,
+    fav_people: set[str] | None = None,
+    fav_repos: set[str] | None = None,
+    fav_orgs: set[str] | None = None,
+) -> dict:
     d = dict(row)
     details_json = d.pop("details_json", None)
     seen_reasons_json = d.pop("seen_reasons", None)
@@ -427,12 +447,16 @@ def _row_to_dict(row, fav_people: set[str] | None = None) -> dict:
     d["author_badge_class"] = badge[0] if badge else ""
     d["author_badge_label"] = badge[1] if badge else ""
     d["author_is_favorite"] = bool(fav_people) and d["author_login"] in (fav_people or set())
+    d["repo_is_favorite"] = d["repo"] in (fav_repos or set())
+    d["org_is_favorite"] = bool(repo_owner) and repo_owner in (fav_orgs or set())
 
     return d
 
 
 def _load_notifications():
-    fav = _favorite_people()
+    fav_p = _favorite_people()
+    fav_r = _favorite_set("repos")
+    fav_o = _favorite_set("orgs")
     conn = db.connect()
     try:
         rows = conn.execute(
@@ -440,7 +464,7 @@ def _load_notifications():
             "WHERE COALESCE(action, '') != 'done' "
             "ORDER BY updated_at DESC"
         ).fetchall()
-        return [_row_to_dict(r, fav) for r in rows]
+        return [_row_to_dict(r, fav_p, fav_r, fav_o) for r in rows]
     finally:
         conn.close()
 
@@ -476,7 +500,13 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
     if f["hide_read"]:
         rows = [r for r in rows if r["unread"]]
     if f["favorites_only"]:
-        rows = [r for r in rows if r["is_favorite"] or r["author_is_favorite"]]
+        rows = [
+            r for r in rows
+            if r["is_favorite"]
+            or r["author_is_favorite"]
+            or r["repo_is_favorite"]
+            or r["org_is_favorite"]
+        ]
     if f["repo"]:
         rows = [r for r in rows if r["repo"] == f["repo"]]
     if f["sort"] == "engaged":
@@ -490,14 +520,16 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
 
 
 def _load_one(thread_id: str) -> dict | None:
-    fav = _favorite_people()
+    fav_p = _favorite_people()
+    fav_r = _favorite_set("repos")
+    fav_o = _favorite_set("orgs")
     conn = db.connect()
     try:
         row = conn.execute(
             f"SELECT {_ROW_COLS} FROM notifications WHERE id = ?",
             (thread_id,),
         ).fetchone()
-        return _row_to_dict(row, fav) if row else None
+        return _row_to_dict(row, fav_p, fav_r, fav_o) if row else None
     finally:
         conn.close()
 
@@ -669,41 +701,71 @@ def toggle_favorite(thread_id: str):
     return render_template("_row.html", n=_load_one(thread_id))
 
 
-@app.post("/people/<login>/favorite")
-def toggle_person_favorite(login: str):
-    """Toggle person-level favorite. Re-renders the originating row, and
-    fires HX-Trigger so the JS listener can update other rows' stars for the
-    same person without a full table swap."""
+def _toggle_entity_favorite(table: str, key_col: str, key: str) -> bool:
+    """Generic upsert-and-toggle for the people / repos / orgs favorite tables.
+    Returns the new is_favorite value."""
     conn = db.connect()
     try:
         existing = conn.execute(
-            "SELECT is_favorite FROM people WHERE login = ?", (login,)
+            f"SELECT is_favorite FROM {table} WHERE {key_col} = ?", (key,)
         ).fetchone()
         if existing:
             new_val = 0 if existing["is_favorite"] else 1
             conn.execute(
-                "UPDATE people SET is_favorite = ? WHERE login = ?",
-                (new_val, login),
+                f"UPDATE {table} SET is_favorite = ? WHERE {key_col} = ?",
+                (new_val, key),
             )
         else:
             new_val = 1
             conn.execute(
-                "INSERT INTO people (login, is_favorite, last_seen_at) "
+                f"INSERT INTO {table} ({key_col}, is_favorite, last_seen_at) "
                 "VALUES (?, 1, ?)",
-                (login, int(time.time())),
+                (key, int(time.time())),
             )
     finally:
         conn.close()
+    return bool(new_val)
 
+
+def _entity_favorite_response(kind: str, key: str, is_fav: bool):
+    """Build the HTMX response shared by all three favorite endpoints:
+    re-render the originating row (so its server-side state is fresh),
+    plus HX-Trigger 'entityFavoriteChanged' so the JS listener can update
+    matching star icons and the row-highlight on every other affected row."""
     thread_id = request.values.get("thread_id")
     body = ""
     if thread_id and (n := _load_one(thread_id)):
         body = render_template("_row.html", n=n)
     response = make_response(body, 200)
     response.headers["HX-Trigger"] = json.dumps({
-        "personFavoriteChanged": {"login": login, "is_favorite": bool(new_val)}
+        "entityFavoriteChanged": {
+            "kind": kind, "key": key, "is_favorite": is_fav,
+        }
     })
     return response
+
+
+@app.post("/people/<login>/favorite")
+def toggle_person_favorite(login: str):
+    """Toggle person-level favorite. Persists locally; no GitHub API call."""
+    new_val = _toggle_entity_favorite("people", "login", login)
+    return _entity_favorite_response("person", login, new_val)
+
+
+@app.post("/repos/<owner>/<name>/favorite")
+def toggle_repo_favorite(owner: str, name: str):
+    """Toggle repo-level favorite. The repo key is 'owner/name' to match
+    notifications.repo's stored format."""
+    repo = f"{owner}/{name}"
+    new_val = _toggle_entity_favorite("repos", "name", repo)
+    return _entity_favorite_response("repo", repo, new_val)
+
+
+@app.post("/orgs/<owner>/favorite")
+def toggle_org_favorite(owner: str):
+    """Toggle org-level favorite (the owner half of owner/repo)."""
+    new_val = _toggle_entity_favorite("orgs", "name", owner)
+    return _entity_favorite_response("org", owner, new_val)
 
 
 @app.post("/note/<thread_id>")

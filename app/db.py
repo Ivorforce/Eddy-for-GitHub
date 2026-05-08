@@ -90,6 +90,24 @@ CREATE TABLE IF NOT EXISTS people (
 );
 """
 
+SCHEMA_V13 = """
+CREATE TABLE IF NOT EXISTS repos (
+    name         TEXT PRIMARY KEY,
+    note_user    TEXT,
+    note_ai      TEXT,
+    is_favorite  INTEGER NOT NULL DEFAULT 0,
+    last_seen_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS orgs (
+    name         TEXT PRIMARY KEY,
+    note_user    TEXT,
+    note_ai      TEXT,
+    is_favorite  INTEGER NOT NULL DEFAULT 0,
+    last_seen_at INTEGER
+);
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -152,6 +170,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V12)
             _set_version(conn, 12)
             version = 12
+        if version < 13:
+            conn.executescript(SCHEMA_V13)
+            _set_version(conn, 13)
+            version = 13
     finally:
         conn.close()
 

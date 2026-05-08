@@ -126,22 +126,32 @@
     /* repo cell — owner above, name below, author below that, all clickable.
        Capped at 14rem so a long repo name (e.g. godot-proposals-viewer.github.io)
        wraps onto two lines instead of stretching the column and starving the
-       title column. overflow-wrap: anywhere lets the break land on dots/hyphens. */
+       title column. overflow-wrap: anywhere lets the break land on dots/hyphens.
+       repo-line wraps the star + link per row so the star sits inline with
+       the link's first text line even when the link wraps onto two lines. */
     td.repo { width: 1%; max-width: 14rem; line-height: 1.15; padding-right: 1rem; }
     td.repo a { text-decoration: none; }
     td.repo a:hover { text-decoration: underline; }
+    .repo-line {
+      display: flex;
+      align-items: baseline;
+      gap: 0.3rem;
+    }
     .repo-owner {
-      display: block;
       font-size: 0.7rem;
       color: var(--pico-muted-color);
       overflow-wrap: anywhere;
+      min-width: 0;
     }
     .repo-name {
-      display: block;
       font-size: 0.88rem;
       font-weight: 600;
       overflow-wrap: anywhere;
+      min-width: 0;
     }
+    /* org/repo stars match the smaller person-star sizing — they're context
+       indicators, not the row's primary action. */
+    .org-star svg, .repo-star svg { width: 0.85em; height: 0.85em; }
     .repo-author {
       display: flex;
       align-items: center;
@@ -187,8 +197,19 @@
     .item-star { margin-right: 0.45rem; }
     .person-star svg { width: 0.85em; height: 0.85em; }
 
-    /* Row-level highlights: 'yours' (blue) and 'favorite' (gold).
-       Favorite wins when both apply, since favoriting is an explicit choice. */
+    /* Row-level highlights, in increasing priority:
+         context-fav: any of org/repo/author starred → subtle gold (1.5px, half-alpha)
+         yours      : you authored this              → blue (3px)
+         favorite   : item itself starred            → solid gold (3px)
+       Later rules override earlier ones because both write box-shadow on
+       the same first-child cell. Context-fav uses :not(...) on the rows
+       above so a yours-row never gets demoted to subtle gold by an
+       attribute-selector match. */
+    tr[data-fav-author="true"]:not(.is-favorite-row):not(.is-yours-row) td:first-child,
+    tr[data-fav-repo="true"]:not(.is-favorite-row):not(.is-yours-row) td:first-child,
+    tr[data-fav-org="true"]:not(.is-favorite-row):not(.is-yours-row) td:first-child {
+      box-shadow: inset 1.5px 0 0 rgba(212, 160, 23, 0.55);
+    }
     tr.is-yours-row td:first-child    { box-shadow: inset 3px 0 0 #4493f8; }
     tr.is-favorite-row td:first-child { box-shadow: inset 3px 0 0 #d4a017; }
 
@@ -494,16 +515,34 @@
       htmx.ajax("POST", "/refresh", { target, swap: "innerHTML" });
     });
 
-    // Person favorite toggles broadcast a personFavoriteChanged event so all
-    // rows showing the same author update their star, not just the row that
-    // was clicked. Originating row is also updated by the HTMX row-swap; this
-    // handler uses force-set semantics (toggle's 2nd arg) so it's idempotent.
-    document.addEventListener("personFavoriteChanged", (e) => {
-      const { login, is_favorite } = e.detail;
-      const sel = `button.person-star[hx-post="/people/${login}/favorite"]`;
-      document.querySelectorAll(sel).forEach((btn) => {
+    // Entity (person/repo/org) favorite toggles broadcast a single
+    // entityFavoriteChanged event. The originating row is updated by the
+    // HTMX row-swap; this handler updates *every other* affected row's
+    // star icons and the data-fav-* attribute the row-highlight CSS reads.
+    // Idempotent (force-set toggle), so a stray repeat is harmless.
+    const ENTITY_ROW_ATTR = { person: "author", repo: "repo", org: "org" };
+    document.addEventListener("entityFavoriteChanged", (e) => {
+      const { kind, key, is_favorite } = e.detail;
+      const rowAttr = ENTITY_ROW_ATTR[kind];
+      if (!rowAttr) return;
+      const escaped = CSS.escape(key);
+      // Star buttons of this kind referencing this key.
+      document.querySelectorAll(
+        `button.${kind}-star[data-key="${escaped}"]`
+      ).forEach((btn) => {
         btn.classList.toggle("is-favorite", is_favorite);
-        btn.setAttribute("title", `${is_favorite ? "Unfavorite" : "Favorite"} ${login}`);
+        btn.setAttribute(
+          "title",
+          `${is_favorite ? "Unfavorite" : "Favorite"} ${key}`
+        );
+      });
+      // Rows whose author/repo/org matches — drives the subtle row stripe.
+      const datasetKey =
+        "fav" + rowAttr.charAt(0).toUpperCase() + rowAttr.slice(1);
+      document.querySelectorAll(
+        `tr[data-${rowAttr}="${escaped}"]`
+      ).forEach((tr) => {
+        tr.dataset[datasetKey] = String(is_favorite);
       });
     });
 

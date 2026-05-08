@@ -1,15 +1,41 @@
-<tr class="{% if not n.unread %}read{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_favorite %} is-favorite-row{% endif %}" title="Updated {{ n.updated_at }}">
+<tr class="{% if not n.unread %}read{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_favorite %} is-favorite-row{% endif %}"
+    data-author="{{ n.author_login or '' }}"
+    data-repo="{{ n.repo }}"
+    data-org="{{ n.repo_owner or '' }}"
+    data-fav-author="{{ 'true' if n.author_is_favorite else 'false' }}"
+    data-fav-repo="{{ 'true' if n.repo_is_favorite else 'false' }}"
+    data-fav-org="{{ 'true' if n.org_is_favorite else 'false' }}"
+    title="Updated {{ n.updated_at }}">
   <td class="repo">
     {% if n.repo_owner %}
+    <div class="repo-line">
+      <button class="star-btn org-star{% if n.org_is_favorite %} is-favorite{% endif %}"
+              data-key="{{ n.repo_owner }}"
+              hx-post="/orgs/{{ n.repo_owner }}/favorite"
+              hx-vals='{"thread_id": "{{ n.id }}"}'
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              title="{% if n.org_is_favorite %}Unfavorite{% else %}Favorite{% endif %} {{ n.repo_owner }}"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
       <a class="repo-owner" href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a>
+    </div>
     {% endif %}
-    <a class="repo-name" href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo_name }}</a>
+    <div class="repo-line">
+      <button class="star-btn repo-star{% if n.repo_is_favorite %} is-favorite{% endif %}"
+              data-key="{{ n.repo }}"
+              hx-post="/repos/{{ n.repo }}/favorite"
+              hx-vals='{"thread_id": "{{ n.id }}"}'
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              title="{% if n.repo_is_favorite %}Unfavorite{% else %}Favorite{% endif %} {{ n.repo }}"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
+      <a class="repo-name" href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo_name }}</a>
+    </div>
     {% if n.author_login %}
     <div class="repo-author">
       {# Author icon priority: self trumps member trumps first-time. Each
          encodes a distinct signal to scan for at a glance. #}
       <span class="author-by">by</span>
       <button class="star-btn person-star{% if n.author_is_favorite %} is-favorite{% endif %}"
+              data-key="{{ n.author_login }}"
               hx-post="/people/{{ n.author_login }}/favorite"
               hx-vals='{"thread_id": "{{ n.id }}"}'
               hx-target="closest tr"
