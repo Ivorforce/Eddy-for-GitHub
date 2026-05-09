@@ -529,7 +529,7 @@
     }
     .filter-bar {
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 0.5rem 1.2rem;
       align-items: center;
       margin: 0 0 0.6rem;
@@ -562,6 +562,18 @@
        Truncation in the closed select is browser-handled via the inline
        text width; the full name is visible in the dropdown list. */
     .filter-bar select[name="repo"] { width: 13rem; }
+    .filter-bar input[type="search"] {
+      margin: 0;
+      padding: 0.15rem 0.5rem;
+      font-size: 0.82rem;
+      width: 16rem;
+      min-width: 8rem;
+      height: auto;
+      /* Pico paints a magnifier as a background-image on type=search; with our
+         tighter padding it overlaps the placeholder. Drop it — the placeholder
+         text already says "Search ...". */
+      background-image: none;
+    }
     .filter-spacer { flex: 1; }
     .error { color: var(--pico-color-red-500); margin-bottom: 1rem; }
     tr.read { opacity: 0.45; }

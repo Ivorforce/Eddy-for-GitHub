@@ -40,7 +40,6 @@
     <input type="checkbox" name="tracked_only" {% if filters.tracked_only %}checked{% endif %}>
     Tracked only
   </label>
-  <span class="filter-spacer"></span>
   <label class="filter-select">
     Repo
     <select name="repo">
@@ -56,6 +55,16 @@
       <option value="updated" {% if filters.sort == "updated" %}selected{% endif %}>Most recent</option>
       <option value="engaged" {% if filters.sort == "engaged" %}selected{% endif %}>Most engagement</option>
     </select>
+  </label>
+  <span class="filter-spacer"></span>
+  <label class="filter-search">
+    <input type="search" name="q" value="{{ filters.q }}"
+           placeholder="Search title or author"
+           autocomplete="off"
+           hx-get="/list"
+           hx-target="#notifications-table"
+           hx-include="#filters"
+           hx-trigger="keyup changed delay:250ms, search">
   </label>
 </form>
 <div id="notifications-table">

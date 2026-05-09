@@ -663,6 +663,7 @@ def _filters_from_request() -> dict:
         "tracked_only": bool(src.get("tracked_only")),
         "repo":         src.get("repo") or "",
         "sort":         src.get("sort") or "updated",
+        "q":            (src.get("q") or "").strip(),
     }
 
 
@@ -681,6 +682,13 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         ]
     if f["repo"]:
         rows = [r for r in rows if r["repo"] == f["repo"]]
+    if f["q"]:
+        q = f["q"].lower()
+        rows = [
+            r for r in rows
+            if q in r["title"].lower()
+            or q in (r["author_login"] or "").lower()
+        ]
     if f["sort"] == "engaged":
         rows.sort(
             key=lambda r: (
