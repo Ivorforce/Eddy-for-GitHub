@@ -675,6 +675,19 @@
       }
     };
 
+    // True if the element (or any descendant) has horizontally clipped text.
+    // Used to suppress tooltips that just duplicate visible text when nothing
+    // is actually being clipped — see the mouseover handler below.
+    const isTextTruncated = (el) => {
+      const queue = [el];
+      while (queue.length) {
+        const node = queue.shift();
+        if (node.scrollWidth > node.clientWidth + 1) return true;
+        for (const child of node.children) queue.push(child);
+      }
+      return false;
+    };
+
     // Resolve the trigger element + text for a hover event: either an
     // [title] ancestor, or an SVG with a <title> child.
     const resolveTooltipTrigger = (eventTarget) => {
@@ -694,6 +707,13 @@
       hideTooltip();
       const { target, text, svgTitleNode } = trig;
       if (!text) return;
+      // When the title just duplicates the element's visible text, it's a
+      // truncation fallback — only useful when the text is actually clipped.
+      // Still stash the title so the browser doesn't show its native tooltip;
+      // hideTooltip restores it on mouseleave.
+      const suppressDuplicate = !svgTitleNode
+        && text.trim() === target.textContent.trim()
+        && !isTextTruncated(target);
       tooltipTarget = target;
       if (svgTitleNode) {
         tooltipStashedSvgTitle = { parent: target, node: svgTitleNode };
@@ -702,6 +722,7 @@
         target.setAttribute("data-stashed-title", text);
         target.removeAttribute("title");
       }
+      if (suppressDuplicate) return;
       tooltipTimer = setTimeout(() => {
         const tip = ensureTooltip();
         tip.textContent = text;
