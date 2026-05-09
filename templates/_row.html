@@ -105,6 +105,7 @@
     {% set int_engaged = m.interest.engaged if m.interest else 0 %}
     {% set int_commenters = m.interest.commenters if m.interest else 0 %}
     <div class="activity-stats">
+      {% if n.age %}<span class="stat age-pill" style="color: {{ n.age.color }}" title="{{ n.age.title }}">{{ n.age.text }}</span>{% endif %}
       <span class="stat rx-pos" title="Positive reactions (max-aggregated): {{ rx_pos }}"><span class="stat-num">{{ rx_pos }}</span><span class="stat-icon">▲</span></span>
       <span class="stat rx-neg" title="Negative reactions (max-aggregated): {{ rx_neg }}"><span class="stat-num">{{ rx_neg }}</span><span class="stat-icon">▼</span></span>
       <span class="stat" title="{{ int_comments }} comment{{ '' if int_comments == 1 else 's' }}">

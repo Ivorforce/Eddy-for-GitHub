@@ -241,6 +241,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       number
       title
       url
+      createdAt
       updatedAt
       author { login avatarUrl }
       comments(first: 100) {
@@ -335,6 +336,7 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
     author = disc.get("author") or {}
     return {
         "html_url": disc.get("url"),
+        "created_at": disc.get("createdAt"),
         "user": {
             "login": author.get("login"),
             "avatar_url": author.get("avatarUrl"),

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from datetime import datetime, timezone
 
@@ -37,6 +38,54 @@ def _humanize(iso: str | None) -> str:
 
 
 app.jinja_env.filters["humanize"] = _humanize
+
+
+# Item-creation age (NOT notification age — that's already encoded by row order
+# and exposed on hover). Surfaced as a colored pill so a year-old PR that just
+# came back to life is instantly distinguishable from a fresh one.
+#
+# Color uses log(days+1) → [0,1] over 0..AGE_GRADIENT_MAX_DAYS. Log compresses
+# the long tail (year-vs-five-year matters less than week-vs-month) and gives
+# the dense first-month range most of the visual range. Hue interpolates
+# muted-green → faded-warm-orange.
+AGE_GRADIENT_MAX_DAYS = 1825  # 5y; older items pin to the warm end
+
+
+def _age_pill(iso: str | None) -> dict | None:
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    secs = max(0, int((datetime.now(timezone.utc) - dt).total_seconds()))
+    days = secs / 86400.0
+
+    if secs < 3600:
+        text = "now"
+    elif secs < 86400:
+        text = f"{secs // 3600}h"
+    elif days < 7:
+        text = f"{int(days)}d"
+    elif days < 30:
+        text = f"{int(days / 7)}w"
+    elif days < 365:
+        text = f"{int(days / 30.44)}mo"
+    else:
+        text = f"{int(days / 365.25)}y"
+
+    t = min(1.0, math.log(days + 1) / math.log(AGE_GRADIENT_MAX_DAYS + 1))
+    # HSL endpoints picked to read in both light and dark mode: moderate
+    # saturation, mid lightness. Green→warm-orange goes through yellow-green,
+    # which keeps the "fresh" hue from blurring into the "old" hue.
+    hue = 140 + (25 - 140) * t
+    sat = 35
+    lit = 45 + (50 - 45) * t
+    color = f"hsl({hue:.0f} {sat:.0f}% {lit:.0f}%)"
+
+    days_int = int(days)
+    title = f"Created {days_int} day{'' if days_int == 1 else 's'} ago ({iso})"
+    return {"text": text, "color": color, "title": title}
 
 
 _ROW_COLS = (
@@ -440,6 +489,7 @@ def _row_to_dict(
         d.pop("pr_reactions_json", None),
         d.pop("unique_commenters", None),
     )
+    d["age"] = _age_pill(details.get("created_at")) if details else None
     all_labels = _extract_labels(details_json)
     d["labels_visible"] = all_labels[:3]
     d["labels_extra"] = all_labels[3:]
