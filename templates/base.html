@@ -145,12 +145,13 @@
     .type-pill.state-closed_not_planned  { background: #6e7781; }
 
     /* repo cell — owner above, name below, author below that, all clickable.
-       Capped at 14rem so a long repo name (e.g. godot-proposals-viewer.github.io)
-       wraps onto two lines instead of stretching the column and starving the
-       title column. overflow-wrap: anywhere lets the break land on dots/hyphens.
-       repo-line wraps the star + link per row so the star sits inline with
-       the link's first text line even when the link wraps onto two lines. */
-    td.repo { width: 1%; max-width: 14rem; line-height: 1.1; padding-right: 1rem; }
+       Pinned to 11rem on all three width axes so the column doesn't reflow
+       when filters change which cells are visible. width alone is only a
+       preferred-width hint in auto table layout; min-width is the hard floor
+       that survives "no visible cell needs 11rem". Long content truncates
+       per-line (see .repo-owner / .repo-name / .author-login below). */
+    .repo-col, td.repo { width: 11rem; min-width: 11rem; max-width: 11rem; }
+    td.repo { line-height: 1.1; padding-right: 1rem; }
     td.repo a { text-decoration: none; }
     td.repo a:hover { text-decoration: underline; }
     .repo-line {
@@ -159,10 +160,16 @@
       gap: 0.3rem;
       position: relative;
     }
+    /* Owner/name/author all truncate with an ellipsis rather than wrap onto
+       extra lines — the repo column has a fixed width and a row's vertical
+       footprint should be predictable. Full text remains in the link's
+       href + the popover, so nothing is hidden. */
     .repo-owner {
       font-size: 0.7rem;
       color: var(--pico-muted-color);
-      overflow-wrap: anywhere;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       min-width: 0;
     }
     /* Trailing slash signals "this owner contains the repo below" — turns
@@ -175,7 +182,9 @@
     .repo-name {
       font-size: 0.88rem;
       font-weight: 600;
-      overflow-wrap: anywhere;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       min-width: 0;
     }
     /* Author indents under the repo so it reads as item-attribution, not
@@ -190,7 +199,13 @@
       color: var(--pico-muted-color);
       position: relative;
     }
-    .repo-author .author-by { opacity: 0.7; }
+    .repo-author .author-by { opacity: 0.7; flex-shrink: 0; }
+    .repo-author .author-login {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
     .author-icon {
       width: 0.95em;
       height: 0.95em;
