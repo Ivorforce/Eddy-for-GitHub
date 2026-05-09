@@ -5,7 +5,6 @@ import json
 import logging
 import sqlite3
 import time
-from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -850,40 +849,75 @@ def _fetch_unread(conn: sqlite3.Connection, token: str) -> int:
     return len(items)
 
 
-def _fetch_since(conn: sqlite3.Connection, token: str) -> int:
-    """Fetch every notification updated since last successful since-fetch
-    (?all=true&since=<bookmark>). Catches arrivals that were created and read
-    on another client before we had a chance to see them as unread."""
-    since = db.get_meta(conn, "last_full_fetch_at")
-    last_modified = db.get_meta(conn, "last_modified_all")
-    fetched_at_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _fetch_combined(conn: sqlite3.Connection, token: str) -> int:
+    """Fetch the 100 most-recently-updated notifications (read or unread) in
+    a single GET. Each item carries its own `unread` flag, so _upsert
+    reconciles local read-state for everything in this window. If-Modified-
+    Since gives the quiet-poll path a cheap 304.
 
-    params: dict = {"per_page": PER_PAGE, "all": "true"}
-    if since:
-        params["since"] = since
+    This replaces the previous unread + since-bookmark pair for the auto-
+    refresh path. The dedicated `/notifications` (unread-only) call still
+    exists for the rarer reconciliation case where a locally-unread item
+    sits outside the latest-100 window — see _has_unread_outside_window."""
+    last_modified = (
+        db.get_meta(conn, "last_modified_combined")
+        or db.get_meta(conn, "last_modified_all")  # legacy single-key fallback
+    )
+    items, new_last_modified, status = _get_paginated(
+        token, {"per_page": 100, "all": "true"}, last_modified, max_pages=1
+    )
+    if status == 304:
+        return 0
 
-    items, new_last_modified, status = _get_paginated(token, params, last_modified)
-
-    if status == 200:
-        now = int(time.time())
-        for item in items:
-            if not item.get("id"):
-                continue
-            _upsert(conn, item, now)
-        if new_last_modified:
-            db.set_meta(conn, "last_modified_all", new_last_modified)
-
-    # Advance the bookmark on success or 304. On exception we never reach here
-    # so the bookmark stays put — next attempt re-fetches from the same point.
-    db.set_meta(conn, "last_full_fetch_at", fetched_at_iso)
-    return len(items) if status == 200 else 0
+    now = int(time.time())
+    for item in items:
+        if not item.get("id"):
+            continue
+        _upsert(conn, item, now)
+    if new_last_modified:
+        db.set_meta(conn, "last_modified_combined", new_last_modified)
+        if db.get_meta(conn, "last_modified_all"):
+            db.set_meta(conn, "last_modified_all", None)  # cleanup legacy key
+        if db.get_meta(conn, "last_full_fetch_at"):
+            db.set_meta(conn, "last_full_fetch_at", None)  # no longer used
+    return len(items)
 
 
-def poll_once(conn: sqlite3.Connection, token: str) -> int:
-    """Run both fetches (unread + since-last) and enrich PR/Issue details.
-    Each fetch is bounded by MAX_PAGES_PER_FETCH * PER_PAGE items (~100);
-    larger backfills go through Backfetch. Returns total items touched."""
-    n_unread = _fetch_unread(conn, token)
-    n_since = _fetch_since(conn, token)
+def _has_unread_outside_window(conn: sqlite3.Connection) -> bool:
+    """True iff at least one locally-unread non-kept-unread row sits outside
+    the 100 most-recently-updated rows. When False, the combined fetch's
+    response covers every unread item we'd want to reconcile, so the
+    dedicated unread fetch can be skipped."""
+    row = conn.execute(
+        """
+        SELECT 1 FROM notifications
+        WHERE unread = 1
+          AND COALESCE(action, '') != 'kept_unread'
+          AND id NOT IN (
+            SELECT id FROM notifications ORDER BY updated_at DESC LIMIT 100
+          )
+        LIMIT 1
+        """
+    ).fetchone()
+    return row is not None
+
+
+def poll_once(
+    conn: sqlite3.Connection, token: str, force_full: bool = False
+) -> int:
+    """One refresh cycle: combined fetch + (conditional) unread reconciliation
+    + enrichment.
+
+    The combined fetch covers virtually all reconciliation in normal use.
+    The dedicated unread fetch fires only when force_full is True (manual
+    refresh, app launch) or when at least one locally-unread row sits
+    outside the latest-100 window — that's the only case the combined fetch
+    can't handle, since `?all=true` doesn't surface read-on-mobile-no-comment
+    events for items beyond the recent window.
+    """
+    n_combined = _fetch_combined(conn, token)
+    n_unread = 0
+    if force_full or _has_unread_outside_window(conn):
+        n_unread = _fetch_unread(conn, token)
     _enrich(conn, token)
-    return n_unread + n_since
+    return n_combined + n_unread

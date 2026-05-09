@@ -697,7 +697,11 @@ def refresh():
     conn = db.connect()
     try:
         try:
-            github.poll_once(conn, token)
+            # Manual refresh forces the dedicated unread fetch — auto-polls
+            # rely on the predicate to skip it most of the time, but a user-
+            # triggered refresh should always reconcile read state fully so
+            # the click never feels like it missed something.
+            github.poll_once(conn, token, force_full=True)
         except Exception as e:
             log.exception("on-demand refresh failed")
             error = f"Refresh failed: {e}"
