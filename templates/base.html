@@ -61,7 +61,12 @@
     .status-pill.flag-mention { background: #bc4c00; }
     /* "Since last looked" signals — same yellow as the pill-new dot. */
     .status-pill.new-comments { background: #bf8700; }
-    td.title { width: 100%; }
+    /* width:100% + max-width:0 is the classic table-cell ellipsis trick:
+       the cell takes all remaining horizontal space (since other cells use
+       width:1%), but the max-width forces descendant overflow rules to
+       actually clip rather than grow the column. Without this, a long
+       title elongates the table past the viewport. */
+    td.title { width: 100%; max-width: 0; }
 
     /* Type pill — color tracks GitHub state, not type. Sits at the head
        of the meta-row alongside labels. Sized to match .label-pill so it
