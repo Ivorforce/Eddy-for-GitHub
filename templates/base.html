@@ -272,20 +272,22 @@
 
     /* Item-level popover trigger ("•••") — sits in the actions cell where
        the old inline star + Note button used to live, replacing both. */
+    /* Sits on a second line below the segmented control. Text label
+       ("More…") rather than a kebab so the affordance is discoverable —
+       column never goes wider than the segment pill above it. */
     .item-trigger-btn {
       background: none;
       border: none;
       cursor: pointer;
       color: var(--pico-muted-color);
-      font-size: 0.8rem;
+      font-size: 0.7rem;
       line-height: 1;
-      padding: 0.05rem 0.4rem;
-      margin-top: 0.05rem;
-      letter-spacing: 0.1em;
-      justify-content: center;
-      text-align: center;
+      padding: 0.15rem 0.3rem;
+      margin: 0.2rem 0 0;
+      border-radius: 0.3rem;
+      text-align: left;
     }
-    .item-trigger-btn:hover { color: var(--pico-color); background: rgba(140, 149, 159, 0.18); border-radius: 0.3rem; }
+    .item-trigger-btn:hover { color: var(--pico-color); background: rgba(140, 149, 159, 0.18); }
 
     /* Action popover panel — shared chrome for org / repo / person / item.
        Anchored below its trigger via CSS Anchor Positioning (anchor-name on
@@ -392,48 +394,54 @@
       padding: 0 0.2rem;
     }
 
-    /* actions — vertical 3-line list: Read / Muted (mutually exclusive) + Note */
-    td.actions { white-space: nowrap; width: 1%; vertical-align: top; padding-top: 0.2rem; }
-    td.actions .action-line {
+    /* actions — single-line segmented control (Read | Muted, mutually
+       exclusive) + the ••• item-popover trigger. The "active" segment is a
+       filled tint, not an icon: the fill itself signals "you're here".
+       Read uses a muted green, Muted uses a neutral gray, so the two states
+       are distinguishable by hue, not just by which side is filled. */
+    td.actions { white-space: nowrap; width: 1%; vertical-align: middle; }
+    td.actions .action-group {
       display: flex;
-      align-items: center;
-      gap: 0.45rem;
-      width: 100%;
-      padding: 0.05rem 0.35rem;
-      margin: 0;
+      background: rgba(140, 149, 159, 0.08);
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.4rem;
+      overflow: hidden;
+    }
+    td.actions .action-segment {
       background: none;
       border: none;
-      border-radius: 0.3rem;
+      margin: 0;
+      padding: 0.2rem 0.5rem;
       cursor: pointer;
-      font-size: 0.76rem;
-      color: var(--pico-color);
-      text-align: left;
-      line-height: 1.2;
-    }
-    /* Wrap Read + Muted in a subtle pill so the radio group reads as one unit
-       (Note sits outside it). */
-    td.actions .action-group {
-      background: rgba(140, 149, 159, 0.08);
-      border-radius: 0.45rem;
-      padding: 0.1rem;
-    }
-    td.actions .action-line:hover {
-      background: rgba(140, 149, 159, 0.18);
-    }
-    td.actions .action-line .action-mark {
-      width: 0.95em;
-      height: 0.95em;
+      line-height: 1;
+      color: var(--pico-muted-color);
+      text-align: center;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      flex-shrink: 0;
-      color: var(--pico-muted-color);
     }
-    td.actions .action-line .action-mark svg {
-      width: 100%;
-      height: 100%;
+    td.actions .action-segment svg {
+      width: 0.95rem;
+      height: 0.95rem;
+      display: block;
     }
-    td.actions .action-line.active .action-mark { color: #1a7f37; }
+    td.actions .action-segment + .action-segment {
+      border-left: 1px solid var(--pico-muted-border-color);
+    }
+    td.actions .action-segment:hover {
+      background: rgba(140, 149, 159, 0.18);
+      color: var(--pico-color);
+    }
+    td.actions .action-segment.active {
+      font-weight: 600;
+      color: var(--pico-color);
+    }
+    td.actions .action-segment.seg-read.active {
+      background: rgba(26, 127, 55, 0.22);
+    }
+    td.actions .action-segment.seg-mute.active {
+      background: rgba(140, 149, 159, 0.32);
+    }
 
     /* time bucket separators */
     tr.bucket-separator td {
