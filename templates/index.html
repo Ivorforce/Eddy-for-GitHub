@@ -23,16 +23,51 @@
   </button>
   <span id="status-dot" class="status-dot status-idle" title="Up to date"></span>
 </div>
-<nav class="preset-tabs">
-  {# Static workflow presets — JS detects which one matches the current
-     filter state and toggles .active. Edit URLs / labels here; nowhere
-     else needs to know about them. #}
-  <a href="/" class="preset-tab">Inbox</a>
-  <a href="/?actions=assigned&actions=review_you&actions=mentioned&hide_done=on" class="preset-tab">Action needed</a>
-  <a href="/?mine_only=on&hide_done=on" class="preset-tab">Mine</a>
-  <a href="/?tracked_only=on&hide_done=on" class="preset-tab">Tracked</a>
-  <a href="/?sort=engaged&hide_done=on" class="preset-tab">Hot</a>
-</nav>
+<div class="presets-row">
+  {# Owner + Repo live here, not in #filters — they're orthogonal to
+     presets: "Hot in repo X" is a real combination. Owner-only filters
+     to that org/user; Repo-only matches by name across any owner; both
+     AND together. form="filters" keeps each select associated with the
+     form for FormData / hx-include despite the DOM separation. #}
+  <div class="repo-filters">
+    <label class="repo-filter">
+      Owner
+      <select name="owner" form="filters"
+              hx-get="/list"
+              hx-target="#notifications-table"
+              hx-include="#filters"
+              hx-trigger="change">
+        <option value="">All</option>
+        {% for o in owners %}
+        <option value="{{ o }}" {% if filters.owner == o %}selected{% endif %}>{{ o }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="repo-filter">
+      Repo
+      <select name="repo" form="filters"
+              hx-get="/list"
+              hx-target="#notifications-table"
+              hx-include="#filters"
+              hx-trigger="change">
+        <option value="">All</option>
+        {% for n in repo_names %}
+        <option value="{{ n }}" {% if filters.repo == n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <nav class="preset-tabs">
+    {# Static workflow presets — JS detects which one matches the current
+       filter state and toggles .active. Edit URLs / labels here; nowhere
+       else needs to know about them. #}
+    <a href="/" class="preset-tab">Inbox</a>
+    <a href="/?actions=assigned&actions=review_you&actions=mentioned&hide_done=on" class="preset-tab">Action needed</a>
+    <a href="/?mine_only=on&hide_done=on" class="preset-tab">Mine</a>
+    <a href="/?tracked_only=on&hide_done=on" class="preset-tab">Tracked</a>
+    <a href="/?sort=engaged&hide_done=on" class="preset-tab">Hot</a>
+  </nav>
+</div>
 <form id="filters"
       class="filter-bar"
       hx-get="/list"
@@ -95,15 +130,6 @@
       {% endfor %}
     </ul>
   </details>
-  <label class="filter-select">
-    Repo
-    <select name="repo">
-      <option value="">All</option>
-      {% for r in repos %}
-      <option value="{{ r }}" {% if filters.repo == r %}selected{% endif %}>{{ r }}</option>
-      {% endfor %}
-    </select>
-  </label>
   <label class="filter-select">
     Sort
     <select name="sort">

@@ -659,18 +659,27 @@ def _load_notifications():
         conn.close()
 
 
-def _load_repos() -> list[str]:
+def _load_repo_options() -> tuple[list[str], list[str]]:
+    """Distinct owners and repo names from active (non-done) notifications.
+    Drives the Owner and Repo filter dropdowns. Names are de-duplicated
+    across owners — if 'godot' shows up under two owners it appears once."""
     conn = db.connect()
     try:
-        return [
-            r["repo"] for r in conn.execute(
-                "SELECT DISTINCT repo FROM notifications "
-                "WHERE COALESCE(action, '') != 'done' AND repo != '' "
-                "ORDER BY repo"
-            ).fetchall()
-        ]
+        rows = conn.execute(
+            "SELECT DISTINCT repo FROM notifications "
+            "WHERE COALESCE(action, '') != 'done' AND repo != ''"
+        ).fetchall()
     finally:
         conn.close()
+    owners: set[str] = set()
+    names: set[str] = set()
+    for r in rows:
+        owner, name = _split_repo(r["repo"])
+        if owner:
+            owners.add(owner)
+        if name:
+            names.add(name)
+    return sorted(owners), sorted(names)
 
 
 def _filters_from_request() -> dict:
@@ -681,6 +690,7 @@ def _filters_from_request() -> dict:
         "hide_done":    bool(src.get("hide_done")),
         "tracked_only": bool(src.get("tracked_only")),
         "mine_only":    bool(src.get("mine_only")),
+        "owner":        src.get("owner") or "",
         "repo":         src.get("repo") or "",
         "sort":         src.get("sort") or "updated",
         "q":            (src.get("q") or "").strip(),
@@ -711,8 +721,10 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         ]
     if f["mine_only"]:
         rows = [r for r in rows if r["is_author"]]
+    if f["owner"]:
+        rows = [r for r in rows if r["repo_owner"] == f["owner"]]
     if f["repo"]:
-        rows = [r for r in rows if r["repo"] == f["repo"]]
+        rows = [r for r in rows if r["repo_name"] == f["repo"]]
     if f["types"]:
         types = set(f["types"])
         rows = [r for r in rows if r["type"] in types]
@@ -770,10 +782,12 @@ def _load_one(thread_id: str) -> dict | None:
 def index():
     f = _filters_from_request()
     rows = _filter_and_sort(_load_notifications(), f)
+    owners, repo_names = _load_repo_options()
     return render_template(
         "index.html",
         notifications=rows,
-        repos=_load_repos(),
+        owners=owners,
+        repo_names=repo_names,
         filters=f,
         type_labels=TYPE_LABELS_LONG,
         action_labels=ACTION_FILTER_LABELS,

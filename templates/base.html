@@ -542,6 +542,39 @@
       0%, 100% { opacity: 1; transform: scale(1); }
       50%      { opacity: 0.4; transform: scale(0.65); }
     }
+    /* Presets row — preset tabs on the left, Repo dropdown on the right.
+       Repo sits here (not in the filter bar) because it's orthogonal to
+       refinement: a workflow scope you might pair with any preset. */
+    .presets-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.4rem 1rem;
+      margin: 0.25rem 0 0.55rem;
+    }
+    .repo-filters {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.7rem;
+    }
+    .repo-filter {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin: 0;
+      font-size: 0.84rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .repo-filter select {
+      margin: 0;
+      padding: 0.15rem 0.4rem;
+      font-size: 0.84rem;
+      width: 10rem;
+      height: auto;
+      background-position: right 0.4rem center;
+    }
     /* Workflow preset tabs — segmented control above the filter bar.
        Each tab is a bookmarkable URL; clicking does a full page reload
        so the form rebuilds from query params. Active state is detected
@@ -556,7 +589,7 @@
       border: 1px solid var(--pico-muted-border-color);
       border-radius: 999px;
       overflow: hidden;
-      margin: 0.25rem 0 0.55rem;
+      margin: 0;
       font-size: 0.84rem;
       line-height: 1.4;
     }
@@ -610,11 +643,6 @@
       height: auto;
       background-position: right 0.4rem center;
     }
-    /* Repo names can run long (owner + repo + path-y bits); fix the width
-       so the toolbar doesn't reflow when a deep org/repo is selected.
-       Truncation in the closed select is browser-handled via the inline
-       text width; the full name is visible in the dropdown list. */
-    .filter-bar select[name="repo"] { width: 13rem; }
     /* Multi-toggle dropdown — Pico's <details class="dropdown"> with checkbox
        <label>s instead of <a>s. Selectors deliberately match Pico's own
        (details.dropdown > summary + ul, ...) so we beat its default padding /
@@ -1054,11 +1082,18 @@
       }
       const qs = params.toString();
       history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
+      syncPresetHrefs();
       detectActivePreset();
     };
     const onFilterEvent = (e) => {
-      const form = e.target.closest && e.target.closest("#filters");
-      if (form) syncFiltersToUrl(form);
+      // Pick up both DOM-descendant inputs and form-associated controls
+      // (e.g. the Repo select that lives in the presets row but is bound
+      // to the form via form="filters").
+      let form = e.target.form;
+      if (!form || form.id !== "filters") {
+        form = e.target.closest && e.target.closest("#filters");
+      }
+      if (form && form.id === "filters") syncFiltersToUrl(form);
     };
     document.addEventListener("change", onFilterEvent);
     document.addEventListener("input", onFilterEvent);
@@ -1072,6 +1107,10 @@
       for (const [k, v] of new URLSearchParams(search)) {
         if (v === "" || v === null) continue;
         if (k === "sort" && v === "updated") continue;
+        // Owner / Repo are intentionally excluded from preset matching:
+        // they're orthogonal scope ("Hot in repo X" should still light
+        // up Hot).
+        if (k === "owner" || k === "repo") continue;
         entries.push(`${k}=${encodeURIComponent(v)}`);
       }
       entries.sort();
@@ -1080,14 +1119,44 @@
     const detectActivePreset = () => {
       const cur = normalizeSearch(location.search);
       document.querySelectorAll(".preset-tab").forEach((tab) => {
-        const tabSearch = new URL(tab.href).search;
+        // Use dataset.baseHref (set by syncPresetHrefs) so the live
+        // ?repo= query a click would carry doesn't break the match.
+        const ref = tab.dataset.baseHref || tab.getAttribute("href");
+        const tabSearch = new URL(ref, location.origin).search;
         tab.classList.toggle("active", normalizeSearch(tabSearch) === cur);
+      });
+    };
+    // Splice the live repo selection into every preset tab's href so
+    // clicking one preserves the current scope. The repo lives outside
+    // the preset (it's orthogonal), but a preset click without this
+    // would navigate to a static URL with no repo and clear it.
+    const syncPresetHrefs = () => {
+      const params = new URLSearchParams(location.search);
+      const owner = params.get("owner");
+      const repo = params.get("repo");
+      document.querySelectorAll(".preset-tab").forEach((tab) => {
+        if (!tab.dataset.baseHref) {
+          tab.dataset.baseHref = tab.getAttribute("href");
+        }
+        const base = tab.dataset.baseHref;
+        const extra = [];
+        if (owner) extra.push(`owner=${encodeURIComponent(owner)}`);
+        if (repo)  extra.push(`repo=${encodeURIComponent(repo)}`);
+        if (!extra.length) {
+          tab.setAttribute("href", base);
+        } else {
+          const sep = base.includes("?") ? "&" : "?";
+          tab.setAttribute("href", `${base}${sep}${extra.join("&")}`);
+        }
       });
     };
     // Run once after the DOM exists so the active tab lights up on load.
     // Brief flash of "no tab active" between HTML parse and this firing
     // is acceptable on localhost.
-    document.addEventListener("DOMContentLoaded", detectActivePreset);
+    document.addEventListener("DOMContentLoaded", () => {
+      syncPresetHrefs();
+      detectActivePreset();
+    });
 
     // bfcache restoration: when a page comes back from the back-forward
     // cache, the in-memory DOM is restored — for our table that means
