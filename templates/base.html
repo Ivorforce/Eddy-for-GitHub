@@ -538,6 +538,27 @@
     tr.read { opacity: 0.45; }
     tr.read:hover { opacity: 1; }
     tr.action-error { outline: 1px solid var(--pico-color-red-500); }
+
+    /* Custom tooltip layer. Browser-native title tooltips have an
+       OS-controlled delay (~500–1500ms on macOS) we can't tune. This
+       takes over the title attribute, showing after ~120ms instead. */
+    .custom-tooltip {
+      position: fixed;
+      z-index: 1000;
+      background: rgba(20, 22, 30, 0.95);
+      color: #fff;
+      padding: 0.3rem 0.5rem;
+      border-radius: 0.3rem;
+      font-size: 0.74rem;
+      line-height: 1.35;
+      max-width: 26rem;
+      pointer-events: none;
+      white-space: pre-line;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+      opacity: 0;
+      transition: opacity 0.08s ease-out;
+    }
+    .custom-tooltip.shown { opacity: 1; }
   </style>
   <script>
     // Global status indicator. HTMX request lifecycle drives loading/idle;
@@ -599,6 +620,106 @@
       const status = e.detail.xhr.status;
       console.error("Action failed:", status, e.detail.xhr.responseText);
     });
+
+    // Custom tooltip layer. Hijacks the title attribute so we can show
+    // it after ~120ms instead of the browser's OS-controlled delay.
+    // Strategy: on mouseenter, stash the title in data-stashed-title and
+    // remove the attribute (so the browser doesn't also show its own).
+    // Restore on mouseleave so semantics + accessibility tooling are
+    // preserved when the user isn't actively hovering.
+    const TOOLTIP_DELAY_MS = 120;
+    let tooltipEl = null;
+    let tooltipTimer = null;
+    let tooltipTarget = null;
+    // When the source is an SVG <title> child (used on author icons et al.
+    // for accessibility), we have to remove the node to suppress the native
+    // browser tooltip and re-insert it on hide. Stash {parent, node} here.
+    let tooltipStashedSvgTitle = null;
+    // Lazy-init so the script can run in <head> before <body> exists.
+    const ensureTooltip = () => {
+      if (!tooltipEl) {
+        tooltipEl = document.createElement("div");
+        tooltipEl.className = "custom-tooltip";
+        document.body.appendChild(tooltipEl);
+      }
+      return tooltipEl;
+    };
+
+    const hideTooltip = () => {
+      clearTimeout(tooltipTimer);
+      if (tooltipEl) tooltipEl.classList.remove("shown");
+      if (tooltipTarget) {
+        const stashed = tooltipTarget.getAttribute("data-stashed-title");
+        if (stashed !== null) {
+          tooltipTarget.setAttribute("title", stashed);
+          tooltipTarget.removeAttribute("data-stashed-title");
+        }
+        tooltipTarget = null;
+      }
+      if (tooltipStashedSvgTitle) {
+        const { parent, node } = tooltipStashedSvgTitle;
+        // Re-insert at the front so SVG semantics stay intact.
+        parent.insertBefore(node, parent.firstChild);
+        tooltipStashedSvgTitle = null;
+      }
+    };
+
+    // Resolve the trigger element + text for a hover event: either an
+    // [title] ancestor, or an SVG with a <title> child.
+    const resolveTooltipTrigger = (eventTarget) => {
+      const titled = eventTarget.closest("[title]");
+      if (titled) return { target: titled, text: titled.getAttribute("title"), svgTitleNode: null };
+      const svg = eventTarget.closest("svg");
+      if (svg) {
+        const titleEl = svg.querySelector(":scope > title");
+        if (titleEl) return { target: svg, text: titleEl.textContent, svgTitleNode: titleEl };
+      }
+      return null;
+    };
+
+    document.addEventListener("mouseover", (e) => {
+      const trig = resolveTooltipTrigger(e.target);
+      if (!trig || trig.target === tooltipTarget) return;
+      hideTooltip();
+      const { target, text, svgTitleNode } = trig;
+      if (!text) return;
+      tooltipTarget = target;
+      if (svgTitleNode) {
+        tooltipStashedSvgTitle = { parent: target, node: svgTitleNode };
+        target.removeChild(svgTitleNode);
+      } else {
+        target.setAttribute("data-stashed-title", text);
+        target.removeAttribute("title");
+      }
+      tooltipTimer = setTimeout(() => {
+        const tip = ensureTooltip();
+        tip.textContent = text;
+        // Position above the trigger, clamping to viewport.
+        const rect = target.getBoundingClientRect();
+        tip.style.left = "0px";
+        tip.style.top = "0px";
+        tip.classList.add("shown");
+        const tipRect = tip.getBoundingClientRect();
+        const margin = 6;
+        let left = rect.left + rect.width / 2 - tipRect.width / 2;
+        let top = rect.top - tipRect.height - margin;
+        if (top < margin) top = rect.bottom + margin;
+        left = Math.max(margin, Math.min(left, window.innerWidth - tipRect.width - margin));
+        tip.style.left = `${left}px`;
+        tip.style.top = `${top}px`;
+      }, TOOLTIP_DELAY_MS);
+    });
+
+    document.addEventListener("mouseout", (e) => {
+      if (!tooltipTarget) return;
+      // Hide when the cursor leaves the target's subtree. relatedTarget
+      // is null when leaving the window, which contains() treats as
+      // outside — exactly what we want.
+      if (!tooltipTarget.contains(e.relatedTarget)) hideTooltip();
+    });
+
+    // HTMX swaps can yank the tooltip target out of the DOM mid-hover.
+    document.addEventListener("htmx:beforeSwap", hideTooltip);
 
     // Auto-refresh when the tab regains focus (catches reads done on github.com).
     // Debounced to once per 30s to avoid hammering the API on tab-switching.
