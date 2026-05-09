@@ -528,6 +528,11 @@
       height: auto;
       background-position: right 0.4rem center;
     }
+    /* Repo names can run long (owner + repo + path-y bits); fix the width
+       so the toolbar doesn't reflow when a deep org/repo is selected.
+       Truncation in the closed select is browser-handled via the inline
+       text width; the full name is visible in the dropdown list. */
+    .filter-bar select[name="repo"] { width: 13rem; }
     .filter-spacer { flex: 1; }
     .error { color: var(--pico-color-red-500); margin-bottom: 1rem; }
     tr.read { opacity: 0.45; }
