@@ -136,6 +136,7 @@
       display: flex;
       align-items: baseline;
       gap: 0.3rem;
+      position: relative;
     }
     .repo-owner {
       font-size: 0.7rem;
@@ -159,6 +160,7 @@
       margin-top: 0.2rem;
       font-size: 0.72rem;
       color: var(--pico-muted-color);
+      position: relative;
     }
     .repo-author .author-by { opacity: 0.7; }
     .repo-author .author-login { color: var(--pico-color); }
@@ -234,12 +236,36 @@
     .note-btn.has-note { color: #bf8700; }
     .note-btn:hover { color: var(--pico-color); }
 
+    /* Entity-note pencil — sits absolutely at the right edge of its
+       repo-line / repo-author parent. Hidden by default to keep idle rows
+       clean; fades in on row hover; always visible (orange) when the
+       entity has a note saved. The right-aligned float overlaps the link
+       on long-wrap names — acceptable; uncommon. */
+    .entity-note {
+      position: absolute;
+      right: 0;
+      top: 0;
+      padding: 0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.1s ease-in-out;
+    }
+    .entity-note svg { width: 0.9em; height: 0.9em; vertical-align: middle; }
+    tr:hover .entity-note { opacity: 0.55; pointer-events: auto; }
+    tr:hover .entity-note:hover { opacity: 1; }
+    .entity-note.has-note { opacity: 1; pointer-events: auto; color: #bf8700; }
+
     tr.note-drawer { display: none; }
     tr.note-drawer.open { display: table-row; }
     tr.note-drawer td {
       padding: 0.5rem 1.2rem 0.8rem;
       background: var(--pico-card-background-color);
       border-top: none;
+    }
+    tr.note-drawer .drawer-label {
+      font-size: 0.78rem;
+      color: var(--pico-muted-color);
+      margin-bottom: 0.3rem;
     }
     tr.note-drawer textarea {
       width: 100%;
@@ -546,6 +572,43 @@
       });
     });
 
+    // Note drawer toggle — exclusive within a row group (item / org / repo /
+    // person). Walks forward from the main row collecting adjacent
+    // .note-drawer rows, then opens the matching one and closes the rest.
+    function toggleNoteDrawer(btn, kind) {
+      let row = btn.closest("tr");
+      // The main row is the closest ancestor tr that is NOT a note-drawer.
+      while (row && row.classList.contains("note-drawer")) {
+        row = row.previousElementSibling;
+      }
+      if (!row) return;
+      let n = row.nextElementSibling;
+      while (n && n.classList.contains("note-drawer")) {
+        if (n.dataset.kind === kind) n.classList.toggle("open");
+        else n.classList.remove("open");
+        n = n.nextElementSibling;
+      }
+    }
+
+    // Note save broadcasts entityNoteChanged so every matching pencil
+    // (across rows referencing the same entity) updates its has-note state
+    // without re-rendering the row. Symmetric with entityFavoriteChanged.
+    document.addEventListener("entityNoteChanged", (e) => {
+      const { kind, key, has_note } = e.detail;
+      const escaped = CSS.escape(key);
+      document.querySelectorAll(
+        `.note-btn[data-kind="${kind}"][data-key="${escaped}"]`
+      ).forEach((b) => b.classList.toggle("has-note", has_note));
+    });
+
+    // bfcache restoration: when a page comes back from the back-forward
+    // cache, the in-memory DOM is restored — for our table that means
+    // pre-save textarea state with no real server fetch. Force a real
+    // reload so the user sees the server's truth.
+    window.addEventListener("pageshow", (e) => {
+      if (e.persisted) location.reload();
+    });
+
     // Flush dirty note textareas on tab close / reload / navigation.
     // sendBeacon is the browser-native API for fire-and-forget POSTs that
     // survive page unload (regular fetch/XHR may be cancelled mid-flight).
@@ -553,7 +616,7 @@
       document.querySelectorAll(".note-drawer form").forEach((form) => {
         const ta = form.querySelector("textarea");
         if (!ta) return;
-        if (ta.value === ta.defaultValue) return;  // not dirty — skip
+        if (ta.value === ta.defaultValue) return;
         const url = form.getAttribute("hx-post");
         if (!url) return;
         const data = new FormData();

@@ -390,11 +390,29 @@ def _favorite_set(table: str) -> set[str]:
         conn.close()
 
 
+def _entity_notes(table: str, key_col: str) -> dict[str, str]:
+    """All non-null notes from people / repos / orgs. Small dict (rows
+    only exist for entities the user has touched: favorited or note-edited)."""
+    conn = db.connect()
+    try:
+        return {
+            r[key_col]: r["note_user"] for r in conn.execute(
+                f"SELECT {key_col}, note_user FROM {table} "
+                "WHERE note_user IS NOT NULL AND note_user != ''"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+
 def _row_to_dict(
     row,
     fav_people: set[str] | None = None,
     fav_repos: set[str] | None = None,
     fav_orgs: set[str] | None = None,
+    notes_people: dict[str, str] | None = None,
+    notes_repos: dict[str, str] | None = None,
+    notes_orgs: dict[str, str] | None = None,
 ) -> dict:
     d = dict(row)
     details_json = d.pop("details_json", None)
@@ -449,6 +467,9 @@ def _row_to_dict(
     d["author_is_favorite"] = bool(fav_people) and d["author_login"] in (fav_people or set())
     d["repo_is_favorite"] = d["repo"] in (fav_repos or set())
     d["org_is_favorite"] = bool(repo_owner) and repo_owner in (fav_orgs or set())
+    d["author_note"] = (notes_people or {}).get(d["author_login"]) if d["author_login"] else None
+    d["repo_note"] = (notes_repos or {}).get(d["repo"])
+    d["org_note"] = (notes_orgs or {}).get(repo_owner) if repo_owner else None
 
     return d
 
@@ -457,6 +478,9 @@ def _load_notifications():
     fav_p = _favorite_people()
     fav_r = _favorite_set("repos")
     fav_o = _favorite_set("orgs")
+    n_p = _entity_notes("people", "login")
+    n_r = _entity_notes("repos", "name")
+    n_o = _entity_notes("orgs", "name")
     conn = db.connect()
     try:
         rows = conn.execute(
@@ -464,7 +488,7 @@ def _load_notifications():
             "WHERE COALESCE(action, '') != 'done' "
             "ORDER BY updated_at DESC"
         ).fetchall()
-        return [_row_to_dict(r, fav_p, fav_r, fav_o) for r in rows]
+        return [_row_to_dict(r, fav_p, fav_r, fav_o, n_p, n_r, n_o) for r in rows]
     finally:
         conn.close()
 
@@ -523,13 +547,16 @@ def _load_one(thread_id: str) -> dict | None:
     fav_p = _favorite_people()
     fav_r = _favorite_set("repos")
     fav_o = _favorite_set("orgs")
+    n_p = _entity_notes("people", "login")
+    n_r = _entity_notes("repos", "name")
+    n_o = _entity_notes("orgs", "name")
     conn = db.connect()
     try:
         row = conn.execute(
             f"SELECT {_ROW_COLS} FROM notifications WHERE id = ?",
             (thread_id,),
         ).fetchone()
-        return _row_to_dict(row, fav_p, fav_r, fav_o) if row else None
+        return _row_to_dict(row, fav_p, fav_r, fav_o, n_p, n_r, n_o) if row else None
     finally:
         conn.close()
 
@@ -768,11 +795,43 @@ def toggle_org_favorite(owner: str):
     return _entity_favorite_response("org", owner, new_val)
 
 
+def _save_entity_note(table: str, key_col: str, key: str, note: str | None) -> bool:
+    """Upsert note_user on people / repos / orgs. Allows attaching a note to
+    an entity that's never been favorited (the row is created on first save).
+    Returns the new has-note flag."""
+    conn = db.connect()
+    try:
+        conn.execute(
+            f"INSERT INTO {table} ({key_col}, note_user, last_seen_at) "
+            "VALUES (?, ?, ?) "
+            f"ON CONFLICT({key_col}) DO UPDATE SET note_user = excluded.note_user",
+            (key, note, int(time.time())),
+        )
+    finally:
+        conn.close()
+    return bool(note)
+
+
+def _entity_note_response(kind: str, key: str, has_note: bool):
+    """Silent 204 + HX-Trigger 'entityNoteChanged' so the JS listener can
+    flip the has-note styling on every matching pencil across rows."""
+    response = make_response("", 204)
+    response.headers["HX-Trigger"] = json.dumps({
+        "entityNoteChanged": {"kind": kind, "key": key, "has_note": has_note}
+    })
+    return response
+
+
+def _form_note() -> str | None:
+    return request.form.get("note_user", "").strip() or None
+
+
 @app.post("/note/<thread_id>")
 def save_note(thread_id: str):
     """Save user note for a notification. Silent (no swap); HTMX fires this on
-    textarea change with a small delay."""
-    note = request.form.get("note_user", "").strip() or None
+    textarea change with a small delay. Broadcasts entityNoteChanged so the
+    pencil's has-note styling updates without a row swap."""
+    note = _form_note()
     conn = db.connect()
     try:
         conn.execute(
@@ -781,4 +840,23 @@ def save_note(thread_id: str):
         )
     finally:
         conn.close()
-    return ("", 204)
+    return _entity_note_response("item", thread_id, bool(note))
+
+
+@app.post("/people/<login>/note")
+def save_person_note(login: str):
+    has_note = _save_entity_note("people", "login", login, _form_note())
+    return _entity_note_response("person", login, has_note)
+
+
+@app.post("/repos/<owner>/<name>/note")
+def save_repo_note(owner: str, name: str):
+    repo = f"{owner}/{name}"
+    has_note = _save_entity_note("repos", "name", repo, _form_note())
+    return _entity_note_response("repo", repo, has_note)
+
+
+@app.post("/orgs/<owner>/note")
+def save_org_note(owner: str):
+    has_note = _save_entity_note("orgs", "name", owner, _form_note())
+    return _entity_note_response("org", owner, has_note)
