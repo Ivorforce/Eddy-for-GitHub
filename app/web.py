@@ -88,6 +88,40 @@ def _age_pill(iso: str | None) -> dict | None:
     return {"text": text, "color": color, "title": title}
 
 
+# Popularity colors split sentiment into two independent visual axes:
+#   hue        ← ratio (pure positive → green, balanced → yellow, pure negative → red)
+#   saturation ← total volume (1 vote barely tints, 20+ reads vivid)
+# So 4+/2- (positive but contested) reads as moderate yellow-green, while
+# 30+/0- reads as strong pure green. The displayed number is still net.
+POPULARITY_GRADIENT_MAX = 50
+
+
+def _popularity_pill(reception: dict | None) -> dict | None:
+    if not reception:
+        return None
+    pos = reception.get("pos") or 0
+    neg = reception.get("neg") or 0
+    if not (pos or neg):
+        return None
+    net = pos - neg
+    mag = abs(net)
+    total = pos + neg
+    arrow = "▲" if net > 0 else ("▼" if net < 0 else "")
+    # Hue: linear from green (120) at ratio=1 to red (0) at ratio=0.
+    # Lightness: pull yellow/red end up so they don't read muddy.
+    ratio = pos / total
+    hue = 120 * ratio
+    lit = 36 + 12 * (1 - ratio)
+    # Saturation curve: log scale on total volume, then ^1.5 to suppress the
+    # low end so a single vote reads as barely-tinted gray rather than a
+    # confident signal. Floor at 8% so colored hue is just visible.
+    t = (math.log(total + 1) / math.log(POPULARITY_GRADIENT_MAX + 1)) ** 1.5
+    sat = 8 + 62 * t
+    color = f"hsl({hue:.0f} {sat:.0f}% {lit:.0f}%)"
+    title = f"{pos} positive · {neg} negative ({total} reaction{'' if total == 1 else 's'})"
+    return {"mag": str(mag), "arrow": arrow, "color": color, "title": title}
+
+
 _ROW_COLS = (
     "id, repo, type, title, reason, html_url, updated_at, "
     "unread, ignored, action, details_json, seen_reasons, baseline_comments, "
@@ -499,6 +533,7 @@ def _row_to_dict(
         d.pop("unique_commenters", None),
     )
     d["age"] = _age_pill(details.get("created_at")) if details else None
+    d["popularity"] = _popularity_pill(d["meta"].get("reception"))
     all_labels = _extract_labels(details_json)
     d["labels_visible"] = all_labels[:3]
     d["labels_extra"] = all_labels[3:]

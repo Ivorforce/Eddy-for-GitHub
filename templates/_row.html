@@ -122,23 +122,22 @@
     </div>
   </td>
   <td class="activity">
-    {% set rx_pos = m.reception.pos if m.reception else 0 %}
-    {% set rx_neg = m.reception.neg if m.reception else 0 %}
     {% set int_comments = m.interest.comments if m.interest else 0 %}
     {% set int_engaged = m.interest.engaged if m.interest else 0 %}
     {% set int_commenters = m.interest.commenters if m.interest else 0 %}
     <div class="activity-stats">
       {% if n.age %}<span class="stat age-pill" style="color: {{ n.age.color }}" title="{{ n.age.title }}&#10;Updated {{ n.updated_at }}">{{ n.age.text }}</span>{% endif %}
-      <span class="stat rx-pos" title="Positive reactions (max-aggregated): {{ rx_pos }}"><span class="stat-num">{{ rx_pos }}</span><span class="stat-icon">▲</span></span>
-      <span class="stat rx-neg" title="Negative reactions (max-aggregated): {{ rx_neg }}"><span class="stat-num">{{ rx_neg }}</span><span class="stat-icon">▼</span></span>
-      <span class="stat" title="{{ int_comments }} comment{{ '' if int_comments == 1 else 's' }}">
-        <span class="stat-num">{{ int_comments }}</span>
-        <svg class="icon stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-      </span>
-      <span class="stat" title="{{ int_engaged }} engaged ({{ int_commenters }} unique commenters + max-aggregated reactions)">
+      {# Popularity: net reactions as magnitude + ▲/▼, with magnitude-driven
+         color saturation. Hover for the pos/neg breakdown. #}
+      {% if n.popularity %}<span class="stat popularity" style="color: {{ n.popularity.color }}; font-weight: 600" title="{{ n.popularity.title }}"><span class="stat-num">{{ n.popularity.mag }}</span>{% if n.popularity.arrow %}<span class="stat-icon">{{ n.popularity.arrow }}</span>{% endif %}</span>{% endif %}
+      {# Attention: distinct people who engaged (commenters ∪ max-reacters).
+         Tooltip carries the comment count for the rare cases that matters. #}
+      {% if int_engaged %}
+      <span class="stat" title="{{ int_engaged }} engaged · {{ int_commenters or 0 }} unique commenter{{ '' if int_commenters == 1 else 's' }} · {{ int_comments }} comment{{ '' if int_comments == 1 else 's' }}">
         <span class="stat-num">{{ int_engaged }}</span>
         <svg class="icon stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       </span>
+      {% endif %}
     </div>
   </td>
   <td class="status">
