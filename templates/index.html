@@ -23,6 +23,16 @@
   </button>
   <span id="status-dot" class="status-dot status-idle" title="Up to date"></span>
 </div>
+<nav class="preset-tabs">
+  {# Static workflow presets — JS detects which one matches the current
+     filter state and toggles .active. Edit URLs / labels here; nowhere
+     else needs to know about them. #}
+  <a href="/" class="preset-tab">Inbox</a>
+  <a href="/?actions=assigned&actions=review_you&actions=mentioned&hide_done=on" class="preset-tab">Action needed</a>
+  <a href="/?mine_only=on&hide_done=on" class="preset-tab">Mine</a>
+  <a href="/?tracked_only=on&hide_done=on" class="preset-tab">Tracked</a>
+  <a href="/?sort=engaged&hide_done=on" class="preset-tab">Hot</a>
+</nav>
 <form id="filters"
       class="filter-bar"
       hx-get="/list"

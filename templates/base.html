@@ -542,6 +542,43 @@
       0%, 100% { opacity: 1; transform: scale(1); }
       50%      { opacity: 0.4; transform: scale(0.65); }
     }
+    /* Workflow preset tabs — segmented control above the filter bar.
+       Each tab is a bookmarkable URL; clicking does a full page reload
+       so the form rebuilds from query params. Active state is detected
+       client-side (see detectActivePreset) and updates as the user
+       toggles filters, so a tab lights up when the live filter dict
+       matches its preset and dims when the user drifts off into a
+       custom view. Single bordered container with internal dividers
+       reads unambiguously as "pick one"; loose pills at different
+       widths read as "stray buttons". */
+    .preset-tabs {
+      display: inline-flex;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 0.25rem 0 0.55rem;
+      font-size: 0.84rem;
+      line-height: 1.4;
+    }
+    .preset-tab {
+      padding: 0.22rem 0.9rem;
+      color: var(--pico-color);
+      text-decoration: none;
+      background: transparent;
+      white-space: nowrap;
+    }
+    .preset-tab + .preset-tab {
+      border-left: 1px solid var(--pico-muted-border-color);
+    }
+    .preset-tab:hover {
+      background: rgba(140, 149, 159, 0.12);
+      text-decoration: none;
+    }
+    .preset-tab.active {
+      background: rgba(73, 147, 248, 0.16);
+      color: var(--pico-color);
+      font-weight: 600;
+    }
     .filter-bar {
       display: flex;
       flex-wrap: nowrap;
@@ -1009,10 +1046,15 @@
       const params = new URLSearchParams();
       for (const [k, v] of new FormData(form)) {
         if (v === "" || v === null) continue;
+        // sort=updated is the default — strip so the canonical "no
+        // overrides" URL is just '/', and so it matches the Inbox
+        // preset URL when comparing in detectActivePreset.
+        if (k === "sort" && v === "updated") continue;
         params.append(k, v);
       }
       const qs = params.toString();
       history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
+      detectActivePreset();
     };
     const onFilterEvent = (e) => {
       const form = e.target.closest && e.target.closest("#filters");
@@ -1020,6 +1062,32 @@
     };
     document.addEventListener("change", onFilterEvent);
     document.addEventListener("input", onFilterEvent);
+
+    // Preset tab active-state detection. Normalize both the live URL and
+    // each tab's href into a sorted, default-stripped string, then mark
+    // the matching tab. Uses the tab's own href as the source of truth
+    // so the JS doesn't need a copy of the preset table.
+    const normalizeSearch = (search) => {
+      const entries = [];
+      for (const [k, v] of new URLSearchParams(search)) {
+        if (v === "" || v === null) continue;
+        if (k === "sort" && v === "updated") continue;
+        entries.push(`${k}=${encodeURIComponent(v)}`);
+      }
+      entries.sort();
+      return entries.join("&");
+    };
+    const detectActivePreset = () => {
+      const cur = normalizeSearch(location.search);
+      document.querySelectorAll(".preset-tab").forEach((tab) => {
+        const tabSearch = new URL(tab.href).search;
+        tab.classList.toggle("active", normalizeSearch(tabSearch) === cur);
+      });
+    };
+    // Run once after the DOM exists so the active tab lights up on load.
+    // Brief flash of "no tab active" between HTML parse and this firing
+    // is acceptable on localhost.
+    document.addEventListener("DOMContentLoaded", detectActivePreset);
 
     // bfcache restoration: when a page comes back from the back-forward
     // cache, the in-memory DOM is restored — for our table that means
