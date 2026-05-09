@@ -316,12 +316,15 @@ def _extract_labels(details_json: str | None) -> list[dict]:
     return out
 
 
-def _bucket(updated_at_iso: str | None) -> str:
-    """Group notifications into time buckets based on local-calendar age."""
-    if not updated_at_iso:
+def _bucket(date_iso: str | None) -> str:
+    """Group items into time buckets based on local-calendar age. Caller
+    decides which date field to bucket by — the sort key drives that
+    choice (updated_at for Most recent / Most stale, created_at for
+    Newest / Oldest)."""
+    if not date_iso:
         return "Earlier"
     try:
-        dt = datetime.fromisoformat(updated_at_iso.replace("Z", "+00:00")).astimezone()
+        dt = datetime.fromisoformat(date_iso.replace("Z", "+00:00")).astimezone()
     except ValueError:
         return "Earlier"
     today = datetime.now().astimezone().date()
@@ -611,7 +614,12 @@ def _row_to_dict(
     # color for categories, so the pill stays neutral.
     d["category"] = details.get("category") if d["type"] == "Discussion" else None
     d["type_state"] = _type_state(details, d["type"])
-    d["bucket"] = _bucket(d["updated_at"])
+    # Bucket is set later in _filter_and_sort once the active sort is
+    # known — the time field we bucket by depends on it. Initialize to
+    # None so callers that bypass _filter_and_sort (e.g. _load_one for
+    # single-row swaps) get a defined value; bucketing only matters in
+    # the table view anyway.
+    d["bucket"] = None
     d["repo_owner"], d["repo_name"] = repo_owner, repo_name
     d["action_needed"] = _action_needed(details, repo_owner, d["reason"], seen)
     d["mentioned_since"] = _mentioned_since(seen)
@@ -757,6 +765,20 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         # ancient issue that just got a comment is most-recent but not newest.
         # Empty-string created_at sinks to the bottom in this reverse sort.
         rows.sort(key=lambda r: r["created_at"], reverse=True)
+
+    # Bucket separators reflect the active sort: temporal sorts bucket by
+    # the same time key they sort on, so the "Today / Yesterday / ..."
+    # headers are honest about what they're grouping. Non-temporal sorts
+    # (engagement) get no bucketing at all — the order doesn't carry a
+    # date semantics, so headers would be misleading.
+    sort = f["sort"]
+    if sort in ("updated", "stale"):
+        for r in rows:
+            r["bucket"] = _bucket(r["updated_at"])
+    elif sort in ("newest", "oldest"):
+        for r in rows:
+            r["bucket"] = _bucket(r["created_at"])
+    # else: leave bucket as None (set in _row_to_dict) → template skips.
     return rows
 
 

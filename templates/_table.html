@@ -12,7 +12,7 @@
   <tbody>
     {% set ns = namespace(prev=None) %}
     {% for n in notifications %}
-      {% if n.bucket != ns.prev %}
+      {% if n.bucket and n.bucket != ns.prev %}
       <tr class="bucket-separator"><td colspan="5">{{ n.bucket }}</td></tr>
       {% set ns.prev = n.bucket %}
       {% endif %}
