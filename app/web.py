@@ -388,6 +388,27 @@ _REVIEW_LABELS = {
     "approved": "Approved",
     "changes_requested": "Changes requested",
 }
+# Last-resort labels keyed off GitHub's notification `reason`. Used only when
+# nothing more specific (action, mention, review state, new comments, …)
+# applies, so the row always shows *why* it's here. Always rendered as prose.
+_REASON_FALLBACK_LABELS = {
+    "subscribed": "Subscribed",
+    "author": "Your thread",
+    "comment": "Commented before",
+    "state_change": "State changed",
+    "push": "New commit",
+    "ci_activity": "CI activity",
+    "security_alert": "Security alert",
+    "security_advisory_credit": "Advisory credit",
+    "manual": "Manually subscribed",
+    "invitation": "Invitation",
+    "approval_requested": "Approval requested",
+    "review_requested": "Review requested",
+    "mention": "Mentioned",
+    "team_mention": "Team mentioned",
+    "assign": "Assigned",
+    "member_feature_requested": "Org request",
+}
 
 
 def _status_summary(d: dict) -> tuple[dict | None, str]:
@@ -397,45 +418,54 @@ def _status_summary(d: dict) -> tuple[dict | None, str]:
 
     Priority is action-defining over merely-blocking: a "Review you" headline
     tells you what to do; "Conflicts" only tells you something is broken (and
-    still shows up in the prose). Designed so a future AI verdict can replace
-    the rules-based pill/prose without changing the template."""
-    candidates: list[tuple[int, str, str]] = []  # (rank, css_class, text)
+    still shows up in the prose). Neutral candidates (purely informational,
+    e.g. "+N comments") never get promoted to the pill — they only render as
+    prose, even when they're the highest-priority candidate. When no candidate
+    fires at all, fall back to the GitHub `reason` so the user can still see
+    why the row is here. Designed so a future AI verdict can replace the
+    rules-based pill/prose without changing the template."""
+    # (rank, css_class, text, neutral)
+    candidates: list[tuple[int, str, str, bool]] = []
 
     merge = d.get("merge_state")
     if merge:
         if merge[1] == "danger":
-            candidates.append((3, "sev-danger", merge[0]))
+            candidates.append((3, "sev-danger", merge[0], False))
         else:
-            candidates.append((5, "sev-warning", merge[0]))
+            candidates.append((5, "sev-warning", merge[0], False))
 
     action = d.get("action_needed")
     if action:
         candidates.append(
-            (1, f"action-{action.replace('_', '-')}", _ACTION_LABELS[action])
+            (1, f"action-{action.replace('_', '-')}", _ACTION_LABELS[action], False)
         )
 
     if d.get("mentioned_since"):
-        candidates.append((2, "flag-mention", "Mentioned"))
+        candidates.append((2, "flag-mention", "Mentioned", False))
 
     rs = d.get("pr_review_state")
     if rs in _REVIEW_LABELS:
         rs_class = "review-approved" if rs == "approved" else "review-changes"
-        candidates.append((4, rs_class, _REVIEW_LABELS[rs]))
+        candidates.append((4, rs_class, _REVIEW_LABELS[rs], False))
 
     interest = (d.get("meta") or {}).get("interest") or {}
     new_c = interest.get("new_comments") or 0
     if new_c:
         candidates.append(
-            (6, "new-comments", f"+{new_c} comment{'' if new_c == 1 else 's'}")
+            (6, "new-comments", f"+{new_c} comment{'' if new_c == 1 else 's'}", True)
         )
 
     if not candidates:
-        return None, ""
+        fallback = _REASON_FALLBACK_LABELS.get(d.get("reason") or "")
+        return None, fallback or ""
 
     candidates.sort(key=lambda c: c[0])
-    _, head_class, head_text = candidates[0]
+    rank, head_class, head_text, head_neutral = candidates[0]
+    if head_neutral:
+        prose = " · ".join(text for _, _, text, _ in candidates)
+        return None, prose
     pill = {"text": head_text, "cls": head_class}
-    prose = " · ".join(text for _, _, text in candidates[1:])
+    prose = " · ".join(text for _, _, text, _ in candidates[1:])
     return pill, prose
 
 
