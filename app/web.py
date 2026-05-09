@@ -680,6 +680,7 @@ def _filters_from_request() -> dict:
         "hide_read":    bool(src.get("hide_read")),
         "hide_done":    bool(src.get("hide_done")),
         "tracked_only": bool(src.get("tracked_only")),
+        "mine_only":    bool(src.get("mine_only")),
         "repo":         src.get("repo") or "",
         "sort":         src.get("sort") or "updated",
         "q":            (src.get("q") or "").strip(),
@@ -708,6 +709,8 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
             or r["repo_is_tracked"]
             or r["org_is_tracked"]
         ]
+    if f["mine_only"]:
+        rows = [r for r in rows if r["is_author"]]
     if f["repo"]:
         rows = [r for r in rows if r["repo"] == f["repo"]]
     if f["types"]:
