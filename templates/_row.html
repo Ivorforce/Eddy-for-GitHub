@@ -83,6 +83,10 @@
     <div class="meta-row">
       <span class="type-pill state-{{ n.type_state }}"
             title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ n.type_label }}</span>
+      {% if m.complexity %}
+        <span class="stat-add" title="{{ m.complexity[0] }} lines added">+{{ m.complexity[0] }}</span>
+        <span class="stat-del" title="{{ m.complexity[1] }} lines deleted">−{{ m.complexity[1] }}</span>
+      {% endif %}
       {% for label in n.labels_visible %}
         <span class="label-pill"
               style="background:#{{ label.color }};color:{{ label.text_color }}"
@@ -111,10 +115,6 @@
         <span class="stat-num">{{ int_engaged }}</span>
         <svg class="icon stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       </span>
-      {% if m.complexity %}
-        <span class="stat stat-add" title="{{ m.complexity[0] }} lines added"><span class="stat-num">{{ m.complexity[0] }}</span><span class="stat-icon">+</span></span>
-        <span class="stat stat-del" title="{{ m.complexity[1] }} lines deleted"><span class="stat-num">{{ m.complexity[1] }}</span><span class="stat-icon">−</span></span>
-      {% endif %}
     </div>
   </td>
   <td class="status">
