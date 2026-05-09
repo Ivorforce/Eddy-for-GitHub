@@ -664,6 +664,7 @@ def _filters_from_request() -> dict:
         "repo":         src.get("repo") or "",
         "sort":         src.get("sort") or "updated",
         "q":            (src.get("q") or "").strip(),
+        "types":        src.getlist("types"),
     }
 
 
@@ -682,6 +683,9 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         ]
     if f["repo"]:
         rows = [r for r in rows if r["repo"] == f["repo"]]
+    if f["types"]:
+        types = set(f["types"])
+        rows = [r for r in rows if r["type"] in types]
     if f["q"]:
         q = f["q"].lower()
         rows = [
@@ -722,7 +726,11 @@ def index():
     f = _filters_from_request()
     rows = _filter_and_sort(_load_notifications(), f)
     return render_template(
-        "index.html", notifications=rows, repos=_load_repos(), filters=f
+        "index.html",
+        notifications=rows,
+        repos=_load_repos(),
+        filters=f,
+        type_labels=TYPE_LABELS_LONG,
     )
 
 

@@ -51,6 +51,20 @@
       </li>
     </ul>
   </details>
+  <details class="dropdown filter-dropdown">
+    <summary role="button" class="secondary outline">Type</summary>
+    <ul>
+      {% for type_key, type_label in type_labels.items() %}
+      <li>
+        <label class="filter-toggle">
+          <input type="checkbox" name="types" value="{{ type_key }}"
+                 {% if type_key in filters.types %}checked{% endif %}>
+          {{ type_label }}
+        </label>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
   <label class="filter-select">
     Repo
     <select name="repo">
