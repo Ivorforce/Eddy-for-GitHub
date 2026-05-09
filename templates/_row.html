@@ -59,8 +59,8 @@
     </div>
     {% if n.author_login %}
     <div class="repo-author">
-      {# Author icon priority: self trumps member trumps first-time. Each
-         encodes a distinct signal to scan for at a glance. #}
+      {# Author icon: badged variants for self/member/first-time, generic
+         person glyph otherwise. Priority: self > member > first-time. #}
       <span class="author-by">by</span>
       {% if n.is_author %}
       <svg class="author-icon icon-self" viewBox="0 0 24 24" fill="currentColor"><title>you (authored this)</title><circle cx="12" cy="8" r="5"/><path d="M3 21a9 9 0 0 1 18 0H3z"/></svg>
@@ -68,6 +68,8 @@
       <svg class="author-icon icon-member" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>{{ n.author_assoc|lower }}</title><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
       {% elif n.author_badge_class == 'first-time' %}
       <svg class="author-icon icon-firsttime" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>first-time contributor</title><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/></svg>
+      {% else %}
+      <svg class="author-icon icon-generic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       {% endif %}
       <a class="author-login entity-trigger{% if n.author_is_tracked %} is-tracked{% endif %}"
          href="https://github.com/{{ n.author_login }}"

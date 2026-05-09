@@ -163,17 +163,27 @@
       overflow-wrap: anywhere;
       min-width: 0;
     }
+    /* Trailing slash signals "this owner contains the repo below" — turns
+       the stacked owner/name into a directional path, distinguishing it
+       from the indented author line below. */
+    .repo-owner.entity-trigger::after {
+      content: "/";
+      opacity: 0.6;
+    }
     .repo-name {
       font-size: 0.88rem;
       font-weight: 600;
       overflow-wrap: anywhere;
       min-width: 0;
     }
+    /* Author indents under the repo so it reads as item-attribution, not
+       another segment of the owner/repo path. */
     .repo-author {
       display: flex;
       align-items: center;
       gap: 0.3rem;
       margin-top: 0.1rem;
+      padding-left: 0.45rem;
       font-size: 0.72rem;
       color: var(--pico-muted-color);
       position: relative;
@@ -188,6 +198,7 @@
     .author-icon.icon-member    { color: #1a7f37; }
     .author-icon.icon-firsttime { color: #bf8700; }
     .author-icon.icon-self      { color: #4493f8; }
+    .author-icon.icon-generic   { opacity: 0.55; }
 
     /* Entity name = popover trigger. Reads as content (body color), not as
        a styled link — same readability fix as the item title. The repo-owner
