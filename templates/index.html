@@ -28,18 +28,29 @@
       hx-get="/list"
       hx-target="#notifications-table"
       hx-trigger="change">
-  <label class="filter-toggle">
-    <input type="checkbox" name="action_only" {% if filters.action_only %}checked{% endif %}>
-    Action needed only
-  </label>
-  <label class="filter-toggle">
-    <input type="checkbox" name="hide_read" {% if filters.hide_read %}checked{% endif %}>
-    Hide read
-  </label>
-  <label class="filter-toggle">
-    <input type="checkbox" name="tracked_only" {% if filters.tracked_only %}checked{% endif %}>
-    Tracked only
-  </label>
+  <details class="dropdown filter-dropdown">
+    <summary role="button" class="secondary outline">Filters</summary>
+    <ul>
+      <li>
+        <label class="filter-toggle">
+          <input type="checkbox" name="action_only" {% if filters.action_only %}checked{% endif %}>
+          Action needed only
+        </label>
+      </li>
+      <li>
+        <label class="filter-toggle">
+          <input type="checkbox" name="hide_read" {% if filters.hide_read %}checked{% endif %}>
+          Hide read
+        </label>
+      </li>
+      <li>
+        <label class="filter-toggle">
+          <input type="checkbox" name="tracked_only" {% if filters.tracked_only %}checked{% endif %}>
+          Tracked only
+        </label>
+      </li>
+    </ul>
+  </details>
   <label class="filter-select">
     Repo
     <select name="repo">

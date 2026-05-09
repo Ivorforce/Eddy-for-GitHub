@@ -562,6 +562,72 @@
        Truncation in the closed select is browser-handled via the inline
        text width; the full name is visible in the dropdown list. */
     .filter-bar select[name="repo"] { width: 13rem; }
+    /* Multi-toggle dropdown — Pico's <details class="dropdown"> with checkbox
+       <label>s instead of <a>s. Selectors deliberately match Pico's own
+       (details.dropdown > summary + ul, ...) so we beat its default padding /
+       margin / list styles in the cascade. Active state uses :has() rather
+       than a server-rendered class so the summary lights up the moment a
+       checkbox toggles — the form's hx-trigger only swaps the table, not
+       this <details>, so a server-rendered class would only update on the
+       next full-page render. */
+    details.filter-dropdown { margin: 0; min-width: 0; }
+    details.filter-dropdown > summary {
+      display: inline-flex;
+      align-items: center;
+      width: auto;
+      padding: 0.15rem 0.55rem;
+      font-size: 0.82rem;
+      line-height: 1.4;
+      margin: 0;
+    }
+    details.filter-dropdown > summary::after {
+      width: 0.7rem;
+      height: 0.7rem;
+      margin-inline-start: 0.35rem;
+      background-size: contain;
+    }
+    /* Active state: any checkbox inside is checked → filled blue tint. Blue
+       reuses the .is-yours-row accent; warm-yellow stays reserved for
+       "tracked". */
+    details.filter-dropdown:has(input[type="checkbox"]:checked) > summary {
+      background: rgba(73, 147, 248, 0.16);
+      border-color: #4493f8;
+      color: var(--pico-color);
+      font-weight: 600;
+    }
+    details.dropdown.filter-dropdown > summary + ul {
+      font-size: 0.82rem;
+      min-width: 13rem;
+      padding: 0.2rem 0;
+      margin: 0;
+    }
+    details.dropdown.filter-dropdown > summary + ul li {
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+    details.dropdown.filter-dropdown > summary + ul li:hover {
+      background: rgba(140, 149, 159, 0.14);
+    }
+    details.dropdown.filter-dropdown > summary + ul li > label {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.3rem 0.7rem;
+      margin: 0;
+      font-size: 0.82rem;
+      line-height: 1.3;
+      cursor: pointer;
+      user-select: none;
+    }
+    /* Pico checkboxes are ~1.15em by default — too chunky next to 0.82rem text. */
+    details.dropdown.filter-dropdown > summary + ul li input[type="checkbox"] {
+      width: 0.95em;
+      height: 0.95em;
+      margin: 0;
+      flex-shrink: 0;
+    }
     .filter-bar input[type="search"] {
       margin: 0;
       padding: 0.15rem 0.5rem;
