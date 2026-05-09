@@ -136,20 +136,6 @@ def backfetch(conn: sqlite3.Connection, token: str, n: int = 50) -> int:
     return len(items)
 
 
-def fetch_details(token: str, api_url: str | None) -> dict | None:
-    """GET subject.url for a notification thread (the underlying PR or Issue payload).
-
-    Returns parsed JSON, or None if api_url is missing or the resource is gone (404).
-    """
-    if not api_url:
-        return None
-    r = _session.get(api_url, headers=_auth_headers(token), timeout=15)
-    if r.status_code == 404:
-        return None
-    r.raise_for_status()
-    return r.json()
-
-
 def _compute_review_state(reviews: list[dict]) -> str | None:
     """Latest non-comment review per author wins. Returns
     'changes_requested' | 'approved' | None.
@@ -171,40 +157,6 @@ def _compute_review_state(reviews: list[dict]) -> str | None:
     if any(s == "APPROVED" for s in by_author.values()):
         return "approved"
     return None
-
-
-def fetch_unique_commenters(
-    token: str, api_url: str | None, comments_count: int, max_pages: int = 5
-) -> int | None:
-    """Count distinct commenter logins on an Issue or PR.
-    Skips the API call entirely when comments_count == 0.
-    For PRs we use the issue-form comments endpoint (where regular discussion
-    lives, not line-anchored review comments)."""
-    if not api_url or comments_count <= 0:
-        return 0
-    if "/pulls/" in api_url:
-        url = api_url.replace("/pulls/", "/issues/", 1) + "/comments"
-    else:
-        url = api_url + "/comments"
-    logins: set[str] = set()
-    for page in range(1, max_pages + 1):
-        r = _session.get(
-            url,
-            headers=_auth_headers(token),
-            params={"per_page": 100, "page": page},
-            timeout=20,
-        )
-        if r.status_code == 404:
-            return 0
-        r.raise_for_status()
-        items = r.json()
-        for c in items:
-            login = (c.get("user") or {}).get("login")
-            if login:
-                logins.add(login)
-        if len(items) < 100:
-            break
-    return len(logins)
 
 
 _GRAPHQL_URL = "https://api.github.com/graphql"
@@ -525,12 +477,132 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
     }
 
 
+_ISSUE_QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      number
+      title
+      url
+      createdAt
+      updatedAt
+      state
+      stateReason
+      authorAssociation
+      author { login avatarUrl }
+      assignees(first: 10) { nodes { login } }
+      labels(first: 20) { nodes { name color description } }
+      reactionGroups { content reactors { totalCount } }
+      comments(first: 100) {
+        totalCount
+        nodes { author { login } }
+      }
+    }
+  }
+}
+"""
+
+
+def fetch_issue(token: str, api_url: str | None) -> dict | None:
+    """GraphQL fetch for an Issue. Replaces the REST details + commenters
+    pair with a single round trip.
+
+    Returns REST-shaped payload (state / state_reason / reactions live
+    inside details, so web.py reads the same field names from
+    details_json) with one bonus key:
+        _unique_commenters  — distinct comment authors
+    """
+    parsed = _parse_repo_url(api_url, "issues")
+    if parsed is None:
+        return None
+    owner, name, number = parsed
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    r = _session.post(
+        _GRAPHQL_URL,
+        headers=headers,
+        json={
+            "query": _ISSUE_QUERY,
+            "variables": {"owner": owner, "name": name, "number": number},
+        },
+        timeout=20,
+    )
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        log.warning(
+            "GraphQL errors fetching issue %s/%s#%s: %s",
+            owner, name, number, payload["errors"],
+        )
+        return None
+    issue = ((payload.get("data") or {}).get("repository") or {}).get("issue")
+    if not issue:
+        return None
+
+    reactions: dict[str, int] = {v: 0 for v in _GRAPHQL_REACTION_KEYS.values()}
+    rx_total = 0
+    for g in issue.get("reactionGroups") or []:
+        n = ((g.get("reactors") or {}).get("totalCount")) or 0
+        key = _GRAPHQL_REACTION_KEYS.get(g.get("content"))
+        if key is not None:
+            reactions[key] = n
+        rx_total += n
+    reactions["total_count"] = rx_total
+
+    comments_node = issue.get("comments") or {}
+    comment_total = comments_node.get("totalCount") or 0
+    commenter_logins: set[str] = set()
+    for c in comments_node.get("nodes") or []:
+        login = (c.get("author") or {}).get("login")
+        if login:
+            commenter_logins.add(login)
+
+    assignees = [
+        {"login": (a or {}).get("login")}
+        for a in (issue.get("assignees") or {}).get("nodes") or []
+        if (a or {}).get("login")
+    ]
+
+    labels = [
+        {
+            "name": (l or {}).get("name"),
+            "color": (l or {}).get("color"),
+            "description": (l or {}).get("description"),
+        }
+        for l in (issue.get("labels") or {}).get("nodes") or []
+    ]
+
+    state = (issue.get("state") or "").lower()
+    state_reason = issue.get("stateReason")
+    state_reason = state_reason.lower() if state_reason else None
+
+    author = issue.get("author") or {}
+    return {
+        "html_url": issue.get("url"),
+        "created_at": issue.get("createdAt"),
+        "updated_at": issue.get("updatedAt"),
+        "state": state,
+        "state_reason": state_reason,
+        "comments": comment_total,
+        "author_association": issue.get("authorAssociation"),
+        "user": {
+            "login": author.get("login"),
+            "avatar_url": author.get("avatarUrl"),
+        },
+        "assignees": assignees,
+        "labels": labels,
+        "reactions": reactions,
+        "_unique_commenters": len(commenter_logins),
+    }
+
+
 def _enrich(conn: sqlite3.Connection, token: str) -> None:
     """Fetch full details for up to ENRICHMENT_PER_POLL notifications that need it.
 
-    PRs and Discussions go through GraphQL — one round trip each, with
-    reactions / review state / commenter counts folded into the response.
-    Issues stay on REST (single round trip + a separate commenters call).
+    All three subject types now go through GraphQL — one round trip each,
+    with reactions / review state / commenter counts folded into the
+    response.
     """
     rows = conn.execute(
         """
@@ -554,7 +626,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
             elif row["type"] == "PullRequest":
                 details = fetch_pr(token, row["api_url"])
             else:
-                details = fetch_details(token, row["api_url"])
+                details = fetch_issue(token, row["api_url"])
         except Exception:
             log.exception("enrichment failed for %s", row["id"])
             continue
@@ -619,26 +691,12 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
             )
             continue
 
-        if row["type"] == "Discussion":
-            if n_commenters is not None:
-                conn.execute(
-                    "UPDATE notifications SET unique_commenters = ? WHERE id = ?",
-                    (n_commenters, row["id"]),
-                )
-            continue
-
-        # Issue: separate REST commenters call (cheap when comments_count is 0).
-        try:
-            n_commenters = fetch_unique_commenters(
-                token, row["api_url"], details.get("comments") or 0
+        # Issues + Discussions: only bonus key is the commenter count.
+        if n_commenters is not None:
+            conn.execute(
+                "UPDATE notifications SET unique_commenters = ? WHERE id = ?",
+                (n_commenters, row["id"]),
             )
-            if n_commenters is not None:
-                conn.execute(
-                    "UPDATE notifications SET unique_commenters = ? WHERE id = ?",
-                    (n_commenters, row["id"]),
-                )
-        except Exception:
-            log.exception("commenters fetch failed for %s", row["id"])
 
 
 def set_subscribed(token: str, thread_id: str) -> None:
