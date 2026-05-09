@@ -122,6 +122,13 @@ SCHEMA_V15 = """
 ALTER TABLE notifications ADD COLUMN unique_reviewers INTEGER;
 """
 
+# pr_reactions_fetched_at became redundant when PR enrichment moved to a
+# single GraphQL query: reactions now arrive with details, so the column
+# always equalled details_fetched_at. Drop it.
+SCHEMA_V16 = """
+ALTER TABLE notifications DROP COLUMN pr_reactions_fetched_at;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -196,6 +203,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V15)
             _set_version(conn, 15)
             version = 15
+        if version < 16:
+            conn.executescript(SCHEMA_V16)
+            _set_version(conn, 16)
+            version = 16
     finally:
         conn.close()
 

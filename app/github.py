@@ -128,8 +128,7 @@ def backfetch(conn: sqlite3.Connection, token: str, n: int = 50) -> int:
     if ids:
         placeholders = ",".join(["?"] * len(ids))
         conn.execute(
-            f"UPDATE notifications "
-            f"SET details_fetched_at = NULL, pr_reactions_fetched_at = NULL "
+            f"UPDATE notifications SET details_fetched_at = NULL "
             f"WHERE id IN ({placeholders})",
             tuple(ids),
         )
@@ -604,14 +603,13 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
             # fires when the state actually shifts after that.
             conn.execute(
                 "UPDATE notifications SET "
-                "pr_reactions_json = ?, pr_reactions_fetched_at = ?, "
+                "pr_reactions_json = ?, "
                 "unique_commenters = ?, unique_reviewers = ?, "
                 "pr_review_state = ?, "
                 "baseline_review_state = COALESCE(baseline_review_state, ?) "
                 "WHERE id = ?",
                 (
                     json.dumps(pr_reactions) if pr_reactions is not None else None,
-                    now,
                     n_commenters,
                     n_reviewers,
                     review_state,
