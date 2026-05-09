@@ -235,6 +235,10 @@ query($owner: String!, $name: String!, $number: Int!) {
       url
       createdAt
       updatedAt
+      closed
+      isAnswered
+      upvoteCount
+      category { name }
       author { login avatarUrl }
       comments(first: 100) {
         totalCount
@@ -314,6 +318,10 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
             reactions[key] = n
         total += n
     reactions["total_count"] = total
+    # Upvotes fold into the same reactions dict so the positive-max
+    # aggregator picks them up via _POSITIVE_REACTIONS without a special
+    # case. Discussion-only signal; other types omit the key.
+    reactions["upvotes"] = disc.get("upvoteCount") or 0
 
     comments = disc.get("comments") or {}
     comment_total = comments.get("totalCount") or 0
@@ -327,10 +335,22 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
             if rl:
                 logins.add(rl)
 
+    # State flows through the same field as Issues so _type_state can
+    # branch on it. 'answered' wins over 'closed' — an answered then
+    # closed Q&A still reads as a successful outcome.
+    if disc.get("isAnswered"):
+        state = "answered"
+    elif disc.get("closed"):
+        state = "closed"
+    else:
+        state = "open"
+
     author = disc.get("author") or {}
     return {
         "html_url": disc.get("url"),
         "created_at": disc.get("createdAt"),
+        "state": state,
+        "category": (disc.get("category") or {}).get("name"),
         "user": {
             "login": author.get("login"),
             "avatar_url": author.get("avatarUrl"),

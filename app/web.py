@@ -143,7 +143,10 @@ _AUTHOR_BADGE = {
 # GitHub reaction emoji buckets. Same user can react with multiple positives;
 # max() approximates a lower bound on distinct users in that sentiment bucket
 # (sum overcounts; max never overcounts a single category).
-_POSITIVE_REACTIONS = ("+1", "heart", "hooray", "rocket", "laugh")
+# 'upvotes' is a Discussion-only synthetic key: discussion enrichment folds
+# upvoteCount into the reactions dict so it participates in the positive max
+# alongside the emoji buckets. Other types simply lack the key.
+_POSITIVE_REACTIONS = ("+1", "heart", "hooray", "rocket", "laugh", "upvotes")
 _NEGATIVE_REACTIONS = ("-1", "confused")
 _INTEREST_REACTION = "eyes"
 
@@ -458,6 +461,14 @@ def _type_state(details: dict, subject_type: str) -> str:
         if state == "closed":
             return "closed_not_planned" if details.get("state_reason") == "not_planned" else "closed_completed"
         return "unknown"
+    if subject_type == "Discussion":
+        # Discussion enrichment puts 'answered' / 'closed' / 'open' on
+        # details.state; 'answered' is reused as a "successful outcome"
+        # signal even when the discussion is later closed.
+        state = details.get("state")
+        if state in ("answered", "closed", "open"):
+            return state
+        return "unknown"
     return "unknown"
 
 
@@ -546,6 +557,10 @@ def _row_to_dict(
     d["labels_extra"] = all_labels[3:]
     d["type_label"] = TYPE_LABELS.get(d["type"], d["type"])
     d["type_label_long"] = TYPE_LABELS_LONG.get(d["type"], d["type"])
+    # Discussion category (Q&A, Ideas, Show and tell, …) renders as a
+    # separate pill in the meta row alongside labels. GraphQL exposes no
+    # color for categories, so the pill stays neutral.
+    d["category"] = details.get("category") if d["type"] == "Discussion" else None
     d["type_state"] = _type_state(details, d["type"])
     d["bucket"] = _bucket(d["updated_at"])
     d["repo_owner"], d["repo_name"] = repo_owner, repo_name

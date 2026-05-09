@@ -112,6 +112,9 @@
     <div class="meta-row">
       <span class="type-pill state-{{ n.type_state }}"
             title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ n.type_label }}</span>
+      {% if n.category %}
+      <span class="category-pill" title="Discussion category">{{ n.category }}</span>
+      {% endif %}
       {% if m.complexity %}
         <span class="stat-add" title="{{ m.complexity[0] }} lines added">+{{ m.complexity[0] }}</span>
         <span class="stat-del" title="{{ m.complexity[1] }} lines deleted">−{{ m.complexity[1] }}</span>

@@ -138,8 +138,10 @@
     .type-pill.state-open                { background: #1f883d; }
     .type-pill.state-draft               { background: #57606a; }
     .type-pill.state-merged,
-    .type-pill.state-closed_completed    { background: #8250df; }
+    .type-pill.state-closed_completed,
+    .type-pill.state-answered            { background: #8250df; }
     .type-pill.state-closed_pr           { background: #cf222e; }
+    .type-pill.state-closed,
     .type-pill.state-closed_not_planned  { background: #6e7781; }
 
     /* repo cell — owner above, name below, author below that, all clickable.
@@ -397,6 +399,21 @@
       line-height: 1.45;
       white-space: nowrap;
       opacity: 0.9;
+    }
+    /* Discussion category — sibling of .label-pill, sized identically so it
+       slots into the same meta-row. GraphQL exposes no color for categories,
+       so the pill is neutral; the outline + muted text keep it visually
+       distinct from user-colored labels. */
+    .category-pill {
+      display: inline-block;
+      padding: 0.02rem 0.4rem;
+      border-radius: 0.5rem;
+      font-size: 0.62rem;
+      font-weight: 500;
+      line-height: 1.45;
+      white-space: nowrap;
+      border: 1px solid var(--pico-muted-border-color);
+      color: var(--pico-muted-color);
     }
     .label-more {
       font-size: 0.62rem;
