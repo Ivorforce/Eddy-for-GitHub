@@ -193,6 +193,20 @@ _MERGE_STATE_DISPLAY = {
     "behind":   ("behind base", "warning"),
 }
 
+# type_state values that mean "this thread is resolved" — drives the
+# Hide done filter. Distinct from "closed" in any single GitHub sense:
+# PRs report 'merged' or 'closed_pr', Issues report 'closed_completed'
+# or 'closed_not_planned', Discussions report 'answered' or 'closed'.
+# All count as done for triage purposes — nothing left to do.
+DONE_TYPE_STATES = {
+    "merged",
+    "closed_pr",
+    "closed_completed",
+    "closed_not_planned",
+    "answered",
+    "closed",
+}
+
 
 def _merge_state(details: dict, subject_type: str) -> tuple[str, str] | None:
     """Mergeable-state warning for the Status column. (label, severity) or None."""
@@ -585,6 +599,7 @@ def _row_to_dict(
         d.pop("unique_reviewers", None),
     )
     d["age"] = _age_pill(details.get("created_at"), d["type"]) if details else None
+    d["created_at"] = (details.get("created_at") if details else None) or ""
     d["popularity"] = _popularity_pill(d["meta"].get("reception"))
     all_labels = _extract_labels(details_json)
     d["labels_visible"] = all_labels[:3]
@@ -663,6 +678,7 @@ def _filters_from_request() -> dict:
     return {
         "actions":      src.getlist("actions"),
         "hide_read":    bool(src.get("hide_read")),
+        "hide_done":    bool(src.get("hide_done")),
         "tracked_only": bool(src.get("tracked_only")),
         "repo":         src.get("repo") or "",
         "sort":         src.get("sort") or "updated",
@@ -682,6 +698,8 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         ]
     if f["hide_read"]:
         rows = [r for r in rows if r["unread"]]
+    if f["hide_done"]:
+        rows = [r for r in rows if r["type_state"] not in DONE_TYPE_STATES]
     if f["tracked_only"]:
         rows = [
             r for r in rows
@@ -709,6 +727,21 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
             ),
             reverse=True,
         )
+    elif f["sort"] == "stale":
+        # Oldest-updated first. Pairs with Hide done to surface forgotten
+        # open work; on its own, surfaces both forgotten and long-resolved.
+        rows.sort(key=lambda r: r["updated_at"] or "")
+    elif f["sort"] == "oldest":
+        # Oldest-created first. Differs from 'stale': a long-running issue
+        # that just got a comment is old here but fresh by stale's measure.
+        # Items not yet enriched (no created_at) sink to the bottom rather
+        # than bubble to the top with an empty-string sort key.
+        rows.sort(key=lambda r: r["created_at"] or "9999")
+    elif f["sort"] == "newest":
+        # Newest-created first. Differs from 'updated' ("Most recent"): an
+        # ancient issue that just got a comment is most-recent but not newest.
+        # Empty-string created_at sinks to the bottom in this reverse sort.
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
     return rows
 
 

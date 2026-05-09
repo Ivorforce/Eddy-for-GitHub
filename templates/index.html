@@ -39,6 +39,12 @@
       </li>
       <li>
         <label class="filter-toggle">
+          <input type="checkbox" name="hide_done" {% if filters.hide_done %}checked{% endif %}>
+          Hide done
+        </label>
+      </li>
+      <li>
+        <label class="filter-toggle">
           <input type="checkbox" name="tracked_only" {% if filters.tracked_only %}checked{% endif %}>
           Tracked only
         </label>
@@ -87,6 +93,9 @@
     <select name="sort">
       <option value="updated" {% if filters.sort == "updated" %}selected{% endif %}>Most recent</option>
       <option value="engaged" {% if filters.sort == "engaged" %}selected{% endif %}>Most engagement</option>
+      <option value="stale"   {% if filters.sort == "stale"   %}selected{% endif %}>Most stale</option>
+      <option value="newest"  {% if filters.sort == "newest"  %}selected{% endif %}>Newest</option>
+      <option value="oldest"  {% if filters.sort == "oldest"  %}selected{% endif %}>Oldest</option>
     </select>
   </label>
   <span class="filter-spacer"></span>
