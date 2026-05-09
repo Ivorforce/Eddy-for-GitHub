@@ -636,7 +636,9 @@
     .filter-bar input[type="checkbox"] { margin: 0; }
     .filter-bar select {
       margin: 0;
-      padding: 0.15rem 0.4rem;
+      /* Extra right padding clears Pico's caret background-image so a
+         long option label (e.g. "Most engagement") doesn't sit under it. */
+      padding: 0.15rem 1.6rem 0.15rem 0.4rem;
       font-size: 0.82rem;
       min-width: 7rem;
       width: auto;
