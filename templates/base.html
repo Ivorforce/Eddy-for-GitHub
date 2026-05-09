@@ -176,30 +176,34 @@
     .author-icon.icon-firsttime { color: #bf8700; }
     .author-icon.icon-self      { color: #4493f8; }
 
-    /* Entity name = popover trigger. Favorite state shows as a gold tint on
-       the trigger text (no star icon). Plain left-click opens the popover
-       (intercepted in JS); middle/cmd-click navigates the underlying link. */
+    /* Entity name = popover trigger. Tracked state shows as a warm-yellow
+       tint on the trigger text (no icon — see flag inside the popover).
+       Color picked to read as "marked / prioritized" rather than "favorited"
+       — distinct from severity orange (#bf8700) and the old gold (#d4a017).
+       Plain left-click opens the popover (intercepted in JS); middle/cmd-
+       click navigates the underlying link. */
     .entity-trigger { cursor: pointer; }
-    .entity-trigger.is-favorite { color: #d4a017; }
-    /* Item title gets the same gold tint when the item itself is favorited. */
-    a.item-title.is-favorite,
-    span.item-title.is-favorite { color: #d4a017; }
+    .entity-trigger.is-tracked { color: #e69020; }
+    /* Item title gets the same tint when the item itself is tracked. */
+    a.item-title.is-tracked,
+    span.item-title.is-tracked { color: #e69020; }
 
     /* Row-level highlights, in increasing priority:
-         context-fav: any of org/repo/author starred → subtle gold (1.5px, half-alpha)
-         yours      : you authored this              → blue (3px)
-         favorite   : item itself starred            → solid gold (3px)
+         context-track: any of org/repo/author tracked → subtle warm-yellow
+                                                         (1.5px, half-alpha)
+         yours        : you authored this              → blue (3px)
+         tracked      : item itself tracked            → solid warm-yellow (3px)
        Later rules override earlier ones because both write box-shadow on
-       the same first-child cell. Context-fav uses :not(...) on the rows
-       above so a yours-row never gets demoted to subtle gold by an
+       the same first-child cell. Context-track uses :not(...) on the rows
+       above so a yours-row never gets demoted to subtle warm-yellow by an
        attribute-selector match. */
-    tr[data-fav-author="true"]:not(.is-favorite-row):not(.is-yours-row) td:first-child,
-    tr[data-fav-repo="true"]:not(.is-favorite-row):not(.is-yours-row) td:first-child,
-    tr[data-fav-org="true"]:not(.is-favorite-row):not(.is-yours-row) td:first-child {
-      box-shadow: inset 1.5px 0 0 rgba(212, 160, 23, 0.55);
+    tr[data-tracked-author="true"]:not(.is-tracked-row):not(.is-yours-row) td:first-child,
+    tr[data-tracked-repo="true"]:not(.is-tracked-row):not(.is-yours-row) td:first-child,
+    tr[data-tracked-org="true"]:not(.is-tracked-row):not(.is-yours-row) td:first-child {
+      box-shadow: inset 1.5px 0 0 rgba(230, 144, 32, 0.55);
     }
-    tr.is-yours-row td:first-child    { box-shadow: inset 3px 0 0 #4493f8; }
-    tr.is-favorite-row td:first-child { box-shadow: inset 3px 0 0 #d4a017; }
+    tr.is-yours-row td:first-child   { box-shadow: inset 3px 0 0 #4493f8; }
+    tr.is-tracked-row td:first-child { box-shadow: inset 3px 0 0 #e69020; }
 
     /* Item-level popover trigger ("•••") — sits in the actions cell where
        the old inline star + Note button used to live, replacing both. */
@@ -258,20 +262,28 @@
       text-decoration: none;
     }
     .action-popover .popover-name:hover { text-decoration: underline; }
-    .action-popover .popover-fav-btn {
-      display: block;
+    .action-popover .popover-track-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
       width: 100%;
       text-align: left;
       background: none;
       border: 1px solid var(--pico-muted-border-color);
       border-radius: 0.35rem;
-      padding: 0.25rem 0.5rem;
+      padding: 0.3rem 0.55rem;
       margin: 0 0 0.45rem;
-      font-size: 0.85rem;
+      font-size: 0.88rem;
       cursor: pointer;
       color: var(--pico-color);
     }
-    .action-popover .popover-fav-btn:hover { background: rgba(140, 149, 159, 0.12); }
+    .action-popover .popover-track-btn:hover { background: rgba(140, 149, 159, 0.12); }
+    .action-popover .popover-track-btn .track-icon {
+      width: 1.05em;
+      height: 1.05em;
+      flex-shrink: 0;
+      color: #e69020;
+    }
     .action-popover form { margin: 0 0 0.45rem; }
     .action-popover textarea {
       width: 100%;
@@ -543,37 +555,38 @@
       }
     });
 
-    // Entity (person/repo/org) favorite toggles broadcast a single
-    // entityFavoriteChanged event. The originating row is updated by the
+    // Entity (person/repo/org) track toggles broadcast a single
+    // entityTrackedChanged event. The originating row is updated by the
     // HTMX row-swap; this handler updates *every other* affected row's
-    // entity-name triggers (gold-tint via .is-favorite) and the data-fav-*
-    // attribute the row-stripe CSS reads. Idempotent.
+    // entity-name triggers (warm-yellow tint via .is-tracked) and the
+    // data-tracked-* row attribute the stripe CSS reads. Idempotent.
     const ENTITY_ROW_ATTR = { person: "author", repo: "repo", org: "org" };
-    document.addEventListener("entityFavoriteChanged", (e) => {
-      const { kind, key, is_favorite } = e.detail;
+    document.addEventListener("entityTrackedChanged", (e) => {
+      const { kind, key, is_tracked } = e.detail;
       const rowAttr = ENTITY_ROW_ATTR[kind];
       if (!rowAttr) return;
       const escaped = CSS.escape(key);
       // Entity-name triggers of this kind referencing this key.
       document.querySelectorAll(
-        `[data-fav-trigger][data-kind="${kind}"][data-key="${escaped}"]`
+        `[data-tracked-trigger][data-kind="${kind}"][data-key="${escaped}"]`
       ).forEach((el) => {
-        el.classList.toggle("is-favorite", is_favorite);
+        el.classList.toggle("is-tracked", is_tracked);
       });
       // Rows whose author/repo/org matches — drives the subtle row stripe.
+      // dataset key shape: data-tracked-author → tracked + Author camelCase.
       const datasetKey =
-        "fav" + rowAttr.charAt(0).toUpperCase() + rowAttr.slice(1);
+        "tracked" + rowAttr.charAt(0).toUpperCase() + rowAttr.slice(1);
       document.querySelectorAll(
         `tr[data-${rowAttr}="${escaped}"]`
       ).forEach((tr) => {
-        tr.dataset[datasetKey] = String(is_favorite);
+        tr.dataset[datasetKey] = String(is_tracked);
       });
     });
 
     // Preserve which popovers are open (and any unsaved typing) across
     // full-table refreshes. Without this, the visibilitychange auto-refresh
     // would dismiss whatever popover the user has open mid-edit. Scoped to
-    // #notifications-table swaps — per-row swaps (favorite, mark-read)
+    // #notifications-table swaps — per-row swaps (track, mark-read)
     // legitimately close the popover because the originating action is done.
     let popoverSnapshot = null;
     document.addEventListener("htmx:beforeSwap", (e) => {

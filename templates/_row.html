@@ -1,31 +1,31 @@
-<tr class="{% if not n.unread %}read{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_favorite %} is-favorite-row{% endif %}"
+<tr class="{% if not n.unread %}read{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_tracked %} is-tracked-row{% endif %}"
     data-author="{{ n.author_login or '' }}"
     data-repo="{{ n.repo }}"
     data-org="{{ n.repo_owner or '' }}"
-    data-fav-author="{{ 'true' if n.author_is_favorite else 'false' }}"
-    data-fav-repo="{{ 'true' if n.repo_is_favorite else 'false' }}"
-    data-fav-org="{{ 'true' if n.org_is_favorite else 'false' }}">
+    data-tracked-author="{{ 'true' if n.author_is_tracked else 'false' }}"
+    data-tracked-repo="{{ 'true' if n.repo_is_tracked else 'false' }}"
+    data-tracked-org="{{ 'true' if n.org_is_tracked else 'false' }}">
   <td class="repo">
     {% if n.repo_owner %}
     <div class="repo-line">
       {# Entity name doubles as anchor + popover trigger. Plain left-click opens
          the popover (intercepted in JS); middle/cmd-click navigates as a normal
          <a> link, opening GitHub in a new tab. #}
-      <a class="repo-owner entity-trigger{% if n.org_is_favorite %} is-favorite{% endif %}"
+      <a class="repo-owner entity-trigger{% if n.org_is_tracked %} is-tracked{% endif %}"
          href="https://github.com/{{ n.repo_owner }}"
          target="_blank" rel="noopener"
          data-popover-target="pop-org-{{ n.id }}"
-         data-fav-trigger data-kind="org" data-key="{{ n.repo_owner }}"
+         data-tracked-trigger data-kind="org" data-key="{{ n.repo_owner }}"
          style="anchor-name: --pop-org-{{ n.id }}">{{ n.repo_owner }}</a>
       <div class="action-popover" popover id="pop-org-{{ n.id }}"
            data-kind="org" data-thread-id="{{ n.id }}"
            style="position-anchor: --pop-org-{{ n.id }}">
         <div class="popover-title"><span class="popover-kind">org</span> <a class="popover-name" href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a></div>
-        <button type="button" class="popover-fav-btn"
-                hx-post="/orgs/{{ n.repo_owner }}/favorite"
+        <button type="button" class="popover-track-btn"
+                hx-post="/orgs/{{ n.repo_owner }}/track"
                 hx-vals='{"thread_id": "{{ n.id }}"}'
                 hx-target="closest tr"
-                hx-swap="outerHTML">{% if n.org_is_favorite %}★ Unfavorite{% else %}☆ Favorite{% endif %}</button>
+                hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 24 24" {% if n.org_is_tracked %}fill="currentColor"{% else %}fill="none"{% endif %} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>{% if n.org_is_tracked %}Untrack{% else %}Track{% endif %}</button>
         <form hx-post="/orgs/{{ n.repo_owner }}/note"
               hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
               hx-swap="none">
@@ -35,21 +35,21 @@
     </div>
     {% endif %}
     <div class="repo-line">
-      <a class="repo-name entity-trigger{% if n.repo_is_favorite %} is-favorite{% endif %}"
+      <a class="repo-name entity-trigger{% if n.repo_is_tracked %} is-tracked{% endif %}"
          href="https://github.com/{{ n.repo }}"
          target="_blank" rel="noopener"
          data-popover-target="pop-repo-{{ n.id }}"
-         data-fav-trigger data-kind="repo" data-key="{{ n.repo }}"
+         data-tracked-trigger data-kind="repo" data-key="{{ n.repo }}"
          style="anchor-name: --pop-repo-{{ n.id }}">{{ n.repo_name }}</a>
       <div class="action-popover" popover id="pop-repo-{{ n.id }}"
            data-kind="repo" data-thread-id="{{ n.id }}"
            style="position-anchor: --pop-repo-{{ n.id }}">
         <div class="popover-title"><span class="popover-kind">repo</span> <a class="popover-name" href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo }}</a></div>
-        <button type="button" class="popover-fav-btn"
-                hx-post="/repos/{{ n.repo }}/favorite"
+        <button type="button" class="popover-track-btn"
+                hx-post="/repos/{{ n.repo }}/track"
                 hx-vals='{"thread_id": "{{ n.id }}"}'
                 hx-target="closest tr"
-                hx-swap="outerHTML">{% if n.repo_is_favorite %}★ Unfavorite{% else %}☆ Favorite{% endif %}</button>
+                hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 24 24" {% if n.repo_is_tracked %}fill="currentColor"{% else %}fill="none"{% endif %} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>{% if n.repo_is_tracked %}Untrack{% else %}Track{% endif %}</button>
         <form hx-post="/repos/{{ n.repo }}/note"
               hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
               hx-swap="none">
@@ -69,21 +69,21 @@
       {% elif n.author_badge_class == 'first-time' %}
       <svg class="author-icon icon-firsttime" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>first-time contributor</title><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/></svg>
       {% endif %}
-      <a class="author-login entity-trigger{% if n.author_is_favorite %} is-favorite{% endif %}"
+      <a class="author-login entity-trigger{% if n.author_is_tracked %} is-tracked{% endif %}"
          href="https://github.com/{{ n.author_login }}"
          target="_blank" rel="noopener"
          data-popover-target="pop-person-{{ n.id }}"
-         data-fav-trigger data-kind="person" data-key="{{ n.author_login }}"
+         data-tracked-trigger data-kind="person" data-key="{{ n.author_login }}"
          style="anchor-name: --pop-person-{{ n.id }}">{{ n.author_login }}</a>
       <div class="action-popover" popover id="pop-person-{{ n.id }}"
            data-kind="person" data-thread-id="{{ n.id }}"
            style="position-anchor: --pop-person-{{ n.id }}">
         <div class="popover-title"><span class="popover-kind">person</span> <a class="popover-name" href="https://github.com/{{ n.author_login }}" target="_blank" rel="noopener">{{ n.author_login }}</a></div>
-        <button type="button" class="popover-fav-btn"
-                hx-post="/people/{{ n.author_login }}/favorite"
+        <button type="button" class="popover-track-btn"
+                hx-post="/people/{{ n.author_login }}/track"
                 hx-vals='{"thread_id": "{{ n.id }}"}'
                 hx-target="closest tr"
-                hx-swap="outerHTML">{% if n.author_is_favorite %}★ Unfavorite{% else %}☆ Favorite{% endif %}</button>
+                hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 24 24" {% if n.author_is_tracked %}fill="currentColor"{% else %}fill="none"{% endif %} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>{% if n.author_is_tracked %}Untrack{% else %}Track{% endif %}</button>
         <form hx-post="/people/{{ n.author_login }}/note"
               hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
               hx-swap="none">
@@ -96,11 +96,11 @@
   {% set m = n.meta %}
   <td class="title">
     {% if n.html_url %}
-      <a class="item-title{% if n.is_favorite %} is-favorite{% endif %}"
+      <a class="item-title{% if n.is_tracked %} is-tracked{% endif %}"
          href="{{ n.html_url }}" target="_blank" rel="noopener"
          {% if n.unread %}onclick="htmx.ajax('POST', '/set/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML'})"{% endif %}>{{ n.title }}</a>
     {% else %}
-      <span class="item-title{% if n.is_favorite %} is-favorite{% endif %}">{{ n.title }}</span>
+      <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}">{{ n.title }}</span>
     {% endif %}
     <div class="meta-row">
       <span class="type-pill state-{{ n.type_state }}"
@@ -172,10 +172,10 @@
          data-kind="item" data-thread-id="{{ n.id }}"
          style="position-anchor: --pop-item-{{ n.id }}">
       <div class="popover-title"><span class="popover-kind">{{ n.type_label_long }}</span></div>
-      <button type="button" class="popover-fav-btn"
-              hx-post="/toggle/{{ n.id }}/favorite"
+      <button type="button" class="popover-track-btn"
+              hx-post="/toggle/{{ n.id }}/track"
               hx-target="closest tr"
-              hx-swap="outerHTML">{% if n.is_favorite %}★ Unfavorite{% else %}☆ Favorite{% endif %}</button>
+              hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 24 24" {% if n.is_tracked %}fill="currentColor"{% else %}fill="none"{% endif %} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>{% if n.is_tracked %}Untrack{% else %}Track{% endif %}</button>
       <form hx-post="/note/{{ n.id }}"
             hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
             hx-swap="none">

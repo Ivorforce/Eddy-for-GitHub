@@ -108,6 +108,16 @@ CREATE TABLE IF NOT EXISTS orgs (
 );
 """
 
+# Rename is_favorite → is_tracked across all four tables. The user-facing
+# concept shifted from "favorite" (positive) to "tracked" (neutral) so the
+# DB names follow.
+SCHEMA_V14 = """
+ALTER TABLE notifications RENAME COLUMN is_favorite TO is_tracked;
+ALTER TABLE people        RENAME COLUMN is_favorite TO is_tracked;
+ALTER TABLE repos         RENAME COLUMN is_favorite TO is_tracked;
+ALTER TABLE orgs          RENAME COLUMN is_favorite TO is_tracked;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -174,6 +184,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V13)
             _set_version(conn, 13)
             version = 13
+        if version < 14:
+            conn.executescript(SCHEMA_V14)
+            _set_version(conn, 14)
+            version = 14
     finally:
         conn.close()
 

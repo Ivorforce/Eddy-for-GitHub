@@ -92,7 +92,7 @@ _ROW_COLS = (
     "id, repo, type, title, reason, html_url, updated_at, "
     "unread, ignored, action, details_json, seen_reasons, baseline_comments, "
     "pr_reactions_json, unique_commenters, pr_review_state, baseline_review_state, "
-    "note_user, is_favorite"
+    "note_user, is_tracked"
 )
 
 # author_association -> (badge css class, display label).
@@ -421,27 +421,27 @@ def _type_state(details: dict, subject_type: str) -> str:
     return "unknown"
 
 
-def _favorite_people() -> set[str]:
+def _tracked_people() -> set[str]:
     conn = db.connect()
     try:
         return {
             r["login"] for r in conn.execute(
-                "SELECT login FROM people WHERE is_favorite = 1"
+                "SELECT login FROM people WHERE is_tracked = 1"
             ).fetchall()
         }
     finally:
         conn.close()
 
 
-def _favorite_set(table: str) -> set[str]:
-    """Generic favorite-set lookup for the repos / orgs tables (both keyed
-    by 'name'). Mirrors _favorite_people but kept separate because people
+def _tracked_set(table: str) -> set[str]:
+    """Generic tracked-set lookup for the repos / orgs tables (both keyed
+    by 'name'). Mirrors _tracked_people but kept separate because people
     use 'login' as the key."""
     conn = db.connect()
     try:
         return {
             r["name"] for r in conn.execute(
-                f"SELECT name FROM {table} WHERE is_favorite = 1"
+                f"SELECT name FROM {table} WHERE is_tracked = 1"
             ).fetchall()
         }
     finally:
@@ -450,7 +450,7 @@ def _favorite_set(table: str) -> set[str]:
 
 def _entity_notes(table: str, key_col: str) -> dict[str, str]:
     """All non-null notes from people / repos / orgs. Small dict (rows
-    only exist for entities the user has touched: favorited or note-edited)."""
+    only exist for entities the user has touched: tracked or note-edited)."""
     conn = db.connect()
     try:
         return {
@@ -465,9 +465,9 @@ def _entity_notes(table: str, key_col: str) -> dict[str, str]:
 
 def _row_to_dict(
     row,
-    fav_people: set[str] | None = None,
-    fav_repos: set[str] | None = None,
-    fav_orgs: set[str] | None = None,
+    tracked_people: set[str] | None = None,
+    tracked_repos: set[str] | None = None,
+    tracked_orgs: set[str] | None = None,
     notes_people: dict[str, str] | None = None,
     notes_repos: dict[str, str] | None = None,
     notes_orgs: dict[str, str] | None = None,
@@ -524,9 +524,9 @@ def _row_to_dict(
     badge = _AUTHOR_BADGE.get(d["author_assoc"])
     d["author_badge_class"] = badge[0] if badge else ""
     d["author_badge_label"] = badge[1] if badge else ""
-    d["author_is_favorite"] = bool(fav_people) and d["author_login"] in (fav_people or set())
-    d["repo_is_favorite"] = d["repo"] in (fav_repos or set())
-    d["org_is_favorite"] = bool(repo_owner) and repo_owner in (fav_orgs or set())
+    d["author_is_tracked"] = bool(tracked_people) and d["author_login"] in (tracked_people or set())
+    d["repo_is_tracked"] = d["repo"] in (tracked_repos or set())
+    d["org_is_tracked"] = bool(repo_owner) and repo_owner in (tracked_orgs or set())
     d["author_note"] = (notes_people or {}).get(d["author_login"]) if d["author_login"] else None
     d["repo_note"] = (notes_repos or {}).get(d["repo"])
     d["org_note"] = (notes_orgs or {}).get(repo_owner) if repo_owner else None
@@ -535,9 +535,9 @@ def _row_to_dict(
 
 
 def _load_notifications():
-    fav_p = _favorite_people()
-    fav_r = _favorite_set("repos")
-    fav_o = _favorite_set("orgs")
+    t_p = _tracked_people()
+    t_r = _tracked_set("repos")
+    t_o = _tracked_set("orgs")
     n_p = _entity_notes("people", "login")
     n_r = _entity_notes("repos", "name")
     n_o = _entity_notes("orgs", "name")
@@ -548,7 +548,7 @@ def _load_notifications():
             "WHERE COALESCE(action, '') != 'done' "
             "ORDER BY updated_at DESC"
         ).fetchall()
-        return [_row_to_dict(r, fav_p, fav_r, fav_o, n_p, n_r, n_o) for r in rows]
+        return [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
     finally:
         conn.close()
 
@@ -570,11 +570,11 @@ def _load_repos() -> list[str]:
 def _filters_from_request() -> dict:
     src = request.values  # union of query string + form fields
     return {
-        "action_only":    bool(src.get("action_only")),
-        "hide_read":      bool(src.get("hide_read")),
-        "favorites_only": bool(src.get("favorites_only")),
-        "repo":           src.get("repo") or "",
-        "sort":           src.get("sort") or "updated",
+        "action_only":  bool(src.get("action_only")),
+        "hide_read":    bool(src.get("hide_read")),
+        "tracked_only": bool(src.get("tracked_only")),
+        "repo":         src.get("repo") or "",
+        "sort":         src.get("sort") or "updated",
     }
 
 
@@ -583,13 +583,13 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         rows = [r for r in rows if r["action_needed"] or r["mentioned_since"]]
     if f["hide_read"]:
         rows = [r for r in rows if r["unread"]]
-    if f["favorites_only"]:
+    if f["tracked_only"]:
         rows = [
             r for r in rows
-            if r["is_favorite"]
-            or r["author_is_favorite"]
-            or r["repo_is_favorite"]
-            or r["org_is_favorite"]
+            if r["is_tracked"]
+            or r["author_is_tracked"]
+            or r["repo_is_tracked"]
+            or r["org_is_tracked"]
         ]
     if f["repo"]:
         rows = [r for r in rows if r["repo"] == f["repo"]]
@@ -604,9 +604,9 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
 
 
 def _load_one(thread_id: str) -> dict | None:
-    fav_p = _favorite_people()
-    fav_r = _favorite_set("repos")
-    fav_o = _favorite_set("orgs")
+    t_p = _tracked_people()
+    t_r = _tracked_set("repos")
+    t_o = _tracked_set("orgs")
     n_p = _entity_notes("people", "login")
     n_r = _entity_notes("repos", "name")
     n_o = _entity_notes("orgs", "name")
@@ -616,7 +616,7 @@ def _load_one(thread_id: str) -> dict | None:
             f"SELECT {_ROW_COLS} FROM notifications WHERE id = ?",
             (thread_id,),
         ).fetchone()
-        return _row_to_dict(row, fav_p, fav_r, fav_o, n_p, n_r, n_o) if row else None
+        return _row_to_dict(row, t_p, t_r, t_o, n_p, n_r, n_o) if row else None
     finally:
         conn.close()
 
@@ -770,17 +770,17 @@ def action_done(thread_id: str):
     return ("", 200)
 
 
-@app.post("/toggle/<thread_id>/favorite")
-def toggle_favorite(thread_id: str):
-    """Toggle item-level favorite. Persists locally; no GitHub API call."""
+@app.post("/toggle/<thread_id>/track")
+def toggle_track(thread_id: str):
+    """Toggle item-level tracked state. Persists locally; no GitHub API call."""
     n = _load_one(thread_id)
     if not n:
         return ("", 404)
-    new_val = 0 if n["is_favorite"] else 1
+    new_val = 0 if n["is_tracked"] else 1
     conn = db.connect()
     try:
         conn.execute(
-            "UPDATE notifications SET is_favorite = ? WHERE id = ?",
+            "UPDATE notifications SET is_tracked = ? WHERE id = ?",
             (new_val, thread_id),
         )
     finally:
@@ -788,24 +788,24 @@ def toggle_favorite(thread_id: str):
     return render_template("_row.html", n=_load_one(thread_id))
 
 
-def _toggle_entity_favorite(table: str, key_col: str, key: str) -> bool:
-    """Generic upsert-and-toggle for the people / repos / orgs favorite tables.
-    Returns the new is_favorite value."""
+def _toggle_entity_track(table: str, key_col: str, key: str) -> bool:
+    """Generic upsert-and-toggle for the people / repos / orgs tracked flag.
+    Returns the new is_tracked value."""
     conn = db.connect()
     try:
         existing = conn.execute(
-            f"SELECT is_favorite FROM {table} WHERE {key_col} = ?", (key,)
+            f"SELECT is_tracked FROM {table} WHERE {key_col} = ?", (key,)
         ).fetchone()
         if existing:
-            new_val = 0 if existing["is_favorite"] else 1
+            new_val = 0 if existing["is_tracked"] else 1
             conn.execute(
-                f"UPDATE {table} SET is_favorite = ? WHERE {key_col} = ?",
+                f"UPDATE {table} SET is_tracked = ? WHERE {key_col} = ?",
                 (new_val, key),
             )
         else:
             new_val = 1
             conn.execute(
-                f"INSERT INTO {table} ({key_col}, is_favorite, last_seen_at) "
+                f"INSERT INTO {table} ({key_col}, is_tracked, last_seen_at) "
                 "VALUES (?, 1, ?)",
                 (key, int(time.time())),
             )
@@ -814,50 +814,50 @@ def _toggle_entity_favorite(table: str, key_col: str, key: str) -> bool:
     return bool(new_val)
 
 
-def _entity_favorite_response(kind: str, key: str, is_fav: bool):
-    """Build the HTMX response shared by all three favorite endpoints:
+def _entity_track_response(kind: str, key: str, is_tracked: bool):
+    """Build the HTMX response shared by all three track endpoints:
     re-render the originating row (so its server-side state is fresh),
-    plus HX-Trigger 'entityFavoriteChanged' so the JS listener can update
-    matching star icons and the row-highlight on every other affected row."""
+    plus HX-Trigger 'entityTrackedChanged' so the JS listener can update
+    matching trigger tints and the row stripe on every other affected row."""
     thread_id = request.values.get("thread_id")
     body = ""
     if thread_id and (n := _load_one(thread_id)):
         body = render_template("_row.html", n=n)
     response = make_response(body, 200)
     response.headers["HX-Trigger"] = json.dumps({
-        "entityFavoriteChanged": {
-            "kind": kind, "key": key, "is_favorite": is_fav,
+        "entityTrackedChanged": {
+            "kind": kind, "key": key, "is_tracked": is_tracked,
         }
     })
     return response
 
 
-@app.post("/people/<login>/favorite")
-def toggle_person_favorite(login: str):
-    """Toggle person-level favorite. Persists locally; no GitHub API call."""
-    new_val = _toggle_entity_favorite("people", "login", login)
-    return _entity_favorite_response("person", login, new_val)
+@app.post("/people/<login>/track")
+def toggle_person_track(login: str):
+    """Toggle person-level tracked state. Persists locally; no GitHub API call."""
+    new_val = _toggle_entity_track("people", "login", login)
+    return _entity_track_response("person", login, new_val)
 
 
-@app.post("/repos/<owner>/<name>/favorite")
-def toggle_repo_favorite(owner: str, name: str):
-    """Toggle repo-level favorite. The repo key is 'owner/name' to match
+@app.post("/repos/<owner>/<name>/track")
+def toggle_repo_track(owner: str, name: str):
+    """Toggle repo-level tracked state. The repo key is 'owner/name' to match
     notifications.repo's stored format."""
     repo = f"{owner}/{name}"
-    new_val = _toggle_entity_favorite("repos", "name", repo)
-    return _entity_favorite_response("repo", repo, new_val)
+    new_val = _toggle_entity_track("repos", "name", repo)
+    return _entity_track_response("repo", repo, new_val)
 
 
-@app.post("/orgs/<owner>/favorite")
-def toggle_org_favorite(owner: str):
-    """Toggle org-level favorite (the owner half of owner/repo)."""
-    new_val = _toggle_entity_favorite("orgs", "name", owner)
-    return _entity_favorite_response("org", owner, new_val)
+@app.post("/orgs/<owner>/track")
+def toggle_org_track(owner: str):
+    """Toggle org-level tracked state (the owner half of owner/repo)."""
+    new_val = _toggle_entity_track("orgs", "name", owner)
+    return _entity_track_response("org", owner, new_val)
 
 
 def _save_entity_note(table: str, key_col: str, key: str, note: str | None) -> bool:
     """Upsert note_user on people / repos / orgs. Allows attaching a note to
-    an entity that's never been favorited (the row is created on first save).
+    an entity that's never been tracked (the row is created on first save).
     Returns the new has-note flag."""
     conn = db.connect()
     try:
