@@ -33,12 +33,6 @@
     <ul>
       <li>
         <label class="filter-toggle">
-          <input type="checkbox" name="action_only" {% if filters.action_only %}checked{% endif %}>
-          Action needed only
-        </label>
-      </li>
-      <li>
-        <label class="filter-toggle">
           <input type="checkbox" name="hide_read" {% if filters.hide_read %}checked{% endif %}>
           Hide read
         </label>
@@ -49,6 +43,20 @@
           Tracked only
         </label>
       </li>
+    </ul>
+  </details>
+  <details class="dropdown filter-dropdown">
+    <summary role="button" class="secondary outline">Action</summary>
+    <ul>
+      {% for action_key, action_label in action_labels.items() %}
+      <li>
+        <label class="filter-toggle">
+          <input type="checkbox" name="actions" value="{{ action_key }}"
+                 {% if action_key in filters.actions %}checked{% endif %}>
+          {{ action_label }}
+        </label>
+      </li>
+      {% endfor %}
     </ul>
   </details>
   <details class="dropdown filter-dropdown">

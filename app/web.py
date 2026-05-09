@@ -384,6 +384,9 @@ _ACTION_LABELS = {
     "review_you": "Review you",
     "review_team": "Review team",
 }
+# Filter-side labels: same three plus 'mentioned' (a separate row signal,
+# not a value of action_needed). Drives the "Action" filter-bar dropdown.
+ACTION_FILTER_LABELS = {**_ACTION_LABELS, "mentioned": "Mentioned"}
 _REVIEW_LABELS = {
     "approved": "Approved",
     "changes_requested": "Changes requested",
@@ -658,7 +661,7 @@ def _load_repos() -> list[str]:
 def _filters_from_request() -> dict:
     src = request.values  # union of query string + form fields
     return {
-        "action_only":  bool(src.get("action_only")),
+        "actions":      src.getlist("actions"),
         "hide_read":    bool(src.get("hide_read")),
         "tracked_only": bool(src.get("tracked_only")),
         "repo":         src.get("repo") or "",
@@ -669,8 +672,14 @@ def _filters_from_request() -> dict:
 
 
 def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
-    if f["action_only"]:
-        rows = [r for r in rows if r["action_needed"] or r["mentioned_since"]]
+    if f["actions"]:
+        actions = set(f["actions"])
+        want_mentioned = "mentioned" in actions
+        rows = [
+            r for r in rows
+            if r["action_needed"] in actions
+            or (want_mentioned and r["mentioned_since"])
+        ]
     if f["hide_read"]:
         rows = [r for r in rows if r["unread"]]
     if f["tracked_only"]:
@@ -731,6 +740,7 @@ def index():
         repos=_load_repos(),
         filters=f,
         type_labels=TYPE_LABELS_LONG,
+        action_labels=ACTION_FILTER_LABELS,
     )
 
 
