@@ -388,6 +388,40 @@
       min-height: 2.6rem;
       padding: 0.3rem 0.45rem;
     }
+    /* Done row sits at the popover bottom with a separator above to
+       signal "destructive category" — irreversible from GitHub's API,
+       so the placement + visual divider is the affordance, not a modal. */
+    .action-popover .popover-done-row {
+      display: flex;
+      gap: 0.35rem;
+      margin-top: 0.35rem;
+      padding-top: 0.4rem;
+      border-top: 1px solid var(--pico-muted-border-color);
+    }
+    .action-popover .popover-done-btn {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      background: none;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.3rem;
+      padding: 0.2rem 0.45rem;
+      margin: 0;
+      font-size: 0.74rem;
+      line-height: 1.4;
+      cursor: pointer;
+      color: var(--pico-color);
+    }
+    .action-popover .popover-done-btn svg {
+      width: 0.95em;
+      height: 0.95em;
+      flex-shrink: 0;
+    }
+    .action-popover .popover-done-btn:hover {
+      background: rgba(140, 149, 159, 0.12);
+    }
 
     /* title meta-row — type pill, PR diff (if any), and labels share one
        wrapping line so they fit when narrow but stay grouped when wide. */
@@ -764,7 +798,15 @@
        OS-controlled delay (~500–1500ms on macOS) we can't tune. This
        takes over the title attribute, showing after ~120ms instead. */
     .custom-tooltip {
+      /* popover="manual" puts the tooltip in the top layer so it stacks
+         above any open .action-popover (which is also a top-layer
+         popover — z-index alone can't beat that). The reset of
+         inset/margin/border overrides UA defaults that would otherwise
+         center / box-stretch the popover element. */
       position: fixed;
+      inset: auto;
+      margin: 0;
+      border: none;
       z-index: 1000;
       background: rgba(20, 22, 30, 0.95);
       color: #fff;
@@ -861,6 +903,11 @@
       if (!tooltipEl) {
         tooltipEl = document.createElement("div");
         tooltipEl.className = "custom-tooltip";
+        // popover="manual" so showPopover() lifts the tooltip into the
+        // browser top layer — necessary to stack above any open
+        // .action-popover (also top-layer). Older browsers without
+        // popover support fall back to plain z-index behavior.
+        tooltipEl.setAttribute("popover", "manual");
         document.body.appendChild(tooltipEl);
       }
       return tooltipEl;
@@ -868,7 +915,10 @@
 
     const hideTooltip = () => {
       clearTimeout(tooltipTimer);
-      if (tooltipEl) tooltipEl.classList.remove("shown");
+      if (tooltipEl) {
+        tooltipEl.classList.remove("shown");
+        try { tooltipEl.hidePopover(); } catch (_) {}
+      }
       if (tooltipTarget) {
         const stashed = tooltipTarget.getAttribute("data-stashed-title");
         if (stashed !== null) {
@@ -936,6 +986,9 @@
       tooltipTimer = setTimeout(() => {
         const tip = ensureTooltip();
         tip.textContent = text;
+        // Show as popover *before* measuring — popovers are display:none
+        // until shown, and getBoundingClientRect would return zeros.
+        try { tip.showPopover(); } catch (_) {}
         // Position above the trigger, clamping to viewport.
         const rect = target.getBoundingClientRect();
         tip.style.left = "0px";

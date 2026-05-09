@@ -956,8 +956,17 @@ def set_muted(thread_id: str):
 
 @app.post("/action/<thread_id>/done")
 def action_done(thread_id: str):
-    github.mark_done(app.config["GITHUB_TOKEN"], thread_id)
-    _apply_action(thread_id, "done", unread=0)
+    """Archive a thread on GitHub. With ?unsubscribe=1, also stop future
+    notifications from it (set_ignored) — the common workflow when you
+    don't care about a watch-driven thread, separate from plain Done
+    where future activity may legitimately resurface the thread."""
+    token = app.config["GITHUB_TOKEN"]
+    github.mark_done(token, thread_id)
+    state: dict = {"unread": 0}
+    if request.values.get("unsubscribe"):
+        github.set_ignored(token, thread_id)
+        state["ignored"] = 1
+    _apply_action(thread_id, "done", **state)
     return ("", 200)
 
 

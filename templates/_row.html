@@ -203,6 +203,21 @@
             hx-swap="none">
         <textarea name="note_user" rows="3" placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
       </form>
+      {# Done section is intentionally bottom + separated: GitHub's mark-
+         done has no API undo, so it's the destructive category. The
+         popover-then-click is the friction; no extra confirm dialog. #}
+      <div class="popover-done-row">
+        <button type="button" class="popover-done-btn"
+                hx-post="/action/{{ n.id }}/done"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                title="Archive this thread on GitHub. Future activity may resurface it."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg>Done</button>
+        <button type="button" class="popover-done-btn"
+                hx-post="/action/{{ n.id }}/done?unsubscribe=1"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                title="Archive and unsubscribe — won't notify you again unless you re-subscribe."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg>Done &amp; unsubscribe</button>
+      </div>
     </div>
   </td>
 </tr>
