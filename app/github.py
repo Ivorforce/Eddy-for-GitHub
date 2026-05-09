@@ -19,6 +19,11 @@ ENRICHMENT_PER_POLL = 20
 
 log = logging.getLogger(__name__)
 
+# Module-level session so HTTP keep-alive + connection pooling apply across
+# every call to api.github.com — saves a TCP + TLS handshake per request,
+# which adds up when _enrich runs ~20 calls back-to-back.
+_session = requests.Session()
+
 
 def derive_html_url(item: dict[str, Any]) -> str | None:
     """Convert subject.url (api.github.com) to a github.com browser URL."""
@@ -54,7 +59,7 @@ def _thread_url(thread_id: str) -> str:
 
 def mark_read(token: str, thread_id: str) -> None:
     """Mark a notification thread as read. Stays in the inbox."""
-    r = requests.patch(_thread_url(thread_id), headers=_auth_headers(token), timeout=10)
+    r = _session.patch(_thread_url(thread_id), headers=_auth_headers(token), timeout=10)
     if r.status_code in (200, 205, 304):
         return
     r.raise_for_status()
@@ -62,7 +67,7 @@ def mark_read(token: str, thread_id: str) -> None:
 
 def mark_done(token: str, thread_id: str) -> None:
     """Mark as done — clears the notification from the inbox."""
-    r = requests.delete(_thread_url(thread_id), headers=_auth_headers(token), timeout=10)
+    r = _session.delete(_thread_url(thread_id), headers=_auth_headers(token), timeout=10)
     if r.status_code in (204, 404):
         return  # 404 if already gone — idempotent
     r.raise_for_status()
@@ -70,7 +75,7 @@ def mark_done(token: str, thread_id: str) -> None:
 
 def set_ignored(token: str, thread_id: str) -> None:
     """Set thread subscription to ignored — stops future notifications on this thread."""
-    r = requests.put(
+    r = _session.put(
         f"{_thread_url(thread_id)}/subscription",
         headers=_auth_headers(token),
         json={"ignored": True},
@@ -97,9 +102,9 @@ def backfetch(conn: sqlite3.Connection, token: str, n: int = 50) -> int:
 
     while len(items) < n:
         if next_url:
-            r = requests.get(next_url, headers=headers, timeout=30)
+            r = _session.get(next_url, headers=headers, timeout=30)
         else:
-            r = requests.get(
+            r = _session.get(
                 API_NOTIFICATIONS,
                 headers=headers,
                 params={"per_page": per_page, "all": "true"},
@@ -139,7 +144,7 @@ def fetch_details(token: str, api_url: str | None) -> dict | None:
     """
     if not api_url:
         return None
-    r = requests.get(api_url, headers=_auth_headers(token), timeout=15)
+    r = _session.get(api_url, headers=_auth_headers(token), timeout=15)
     if r.status_code == 404:
         return None
     r.raise_for_status()
@@ -169,37 +174,6 @@ def _compute_review_state(reviews: list[dict]) -> str | None:
     return None
 
 
-def fetch_pr_reviews(token: str, pr_api_url: str | None) -> list[dict] | None:
-    """Fetch all reviews on a PR. Returns the raw review list, or None if the
-    URL isn't a PR or the resource is gone. Caller derives state + reviewer
-    count from the same response so we only hit /reviews once per enrichment."""
-    if not pr_api_url or "/pulls/" not in pr_api_url:
-        return None
-    r = requests.get(
-        pr_api_url + "/reviews",
-        headers=_auth_headers(token),
-        params={"per_page": 100},
-        timeout=15,
-    )
-    if r.status_code == 404:
-        return None
-    r.raise_for_status()
-    return r.json()
-
-
-def _count_unique_reviewers(reviews: list[dict]) -> int:
-    """Distinct review-author logins, excluding PENDING drafts (those are
-    in-progress reviews not yet visible to anyone else)."""
-    logins: set[str] = set()
-    for r in reviews:
-        if r.get("state") == "PENDING":
-            continue
-        login = (r.get("user") or {}).get("login")
-        if login:
-            logins.add(login)
-    return len(logins)
-
-
 def fetch_unique_commenters(
     token: str, api_url: str | None, comments_count: int, max_pages: int = 5
 ) -> int | None:
@@ -215,7 +189,7 @@ def fetch_unique_commenters(
         url = api_url + "/comments"
     logins: set[str] = set()
     for page in range(1, max_pages + 1):
-        r = requests.get(
+        r = _session.get(
             url,
             headers=_auth_headers(token),
             params={"per_page": 100, "page": page},
@@ -273,16 +247,18 @@ query($owner: String!, $name: String!, $number: Int!) {
 """
 
 
-def _parse_discussion_url(api_url: str | None) -> tuple[str, str, int] | None:
-    """Extract (owner, name, number) from .../repos/{owner}/{name}/discussions/{n}."""
-    if not api_url or "/discussions/" not in api_url:
+def _parse_repo_url(
+    api_url: str | None, segment: str
+) -> tuple[str, str, int] | None:
+    """Extract (owner, name, number) from .../repos/{owner}/{name}/{segment}/{n}.
+    `segment` is 'discussions' for Discussion URLs, 'pulls' for PR URLs."""
+    if not api_url or f"/{segment}/" not in api_url:
         return None
     prefix = "https://api.github.com/repos/"
     if not api_url.startswith(prefix):
         return None
     parts = api_url[len(prefix):].split("/")
-    # owner / name / "discussions" / number
-    if len(parts) < 4 or parts[2] != "discussions":
+    if len(parts) < 4 or parts[2] != segment:
         return None
     try:
         return parts[0], parts[1], int(parts[3])
@@ -298,12 +274,12 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
     one bonus key '_unique_commenters' (folded in here because we already paged
     the comments to compute it).
     """
-    parsed = _parse_discussion_url(api_url)
+    parsed = _parse_repo_url(api_url, "discussions")
     if parsed is None:
         return None
     owner, name, number = parsed
     headers = {**_auth_headers(token), "Content-Type": "application/json"}
-    r = requests.post(
+    r = _session.post(
         _GRAPHQL_URL,
         headers=headers,
         json={
@@ -362,25 +338,200 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
     }
 
 
-def fetch_pr_reactions(token: str, pr_api_url: str | None) -> dict | None:
-    """The PR endpoint omits reactions; the issue-form of a PR includes them.
-    Returns the full reactions dict (per-emoji counts + total_count), or None."""
-    if not pr_api_url or "/pulls/" not in pr_api_url:
+# Single GraphQL query that replaces the four sequential REST calls (PR
+# details, issue-form reactions, /reviews, /issues/N/comments). Connection
+# limits are sized to cover the long tail without inflating points cost:
+# 100 covers virtually every PR's commenters and reviews; 20 covers labels
+# and review requests on even chunky PRs; 10 for assignees (rarely > 2).
+_PR_QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number
+      title
+      url
+      createdAt
+      updatedAt
+      state
+      isDraft
+      merged
+      mergeStateStatus
+      additions
+      deletions
+      authorAssociation
+      author { login avatarUrl }
+      assignees(first: 10) { nodes { login } }
+      reviewRequests(first: 20) {
+        nodes {
+          requestedReviewer {
+            __typename
+            ... on User { login }
+            ... on Team { slug }
+          }
+        }
+      }
+      labels(first: 20) { nodes { name color description } }
+      reactionGroups { content reactors { totalCount } }
+      comments(first: 100) {
+        totalCount
+        nodes { author { login } }
+      }
+      reviews(first: 100) {
+        nodes {
+          state
+          author { login }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def fetch_pr(token: str, api_url: str | None) -> dict | None:
+    """GraphQL fetch for a PR. Replaces four REST round trips with one.
+
+    Returns a payload shaped like a REST PullRequest (so web.py reads the
+    same field names from details_json) plus four bonus keys folded in
+    while we already have the data:
+        _pr_reactions       — REST-shaped reactions dict (per-emoji + total)
+        _unique_commenters  — distinct issue-comment authors
+        _unique_reviewers   — distinct review authors (excluding PENDING)
+        _review_state       — 'approved' | 'changes_requested' | None
+
+    Connection limits (100 comments / 100 reviews / 20 labels) cover the
+    long tail; counts above the cap are undercounted, matching the
+    Discussion path's behavior.
+    """
+    parsed = _parse_repo_url(api_url, "pulls")
+    if parsed is None:
         return None
-    issue_url = pr_api_url.replace("/pulls/", "/issues/", 1)
-    r = requests.get(issue_url, headers=_auth_headers(token), timeout=15)
+    owner, name, number = parsed
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    r = _session.post(
+        _GRAPHQL_URL,
+        headers=headers,
+        json={
+            "query": _PR_QUERY,
+            "variables": {"owner": owner, "name": name, "number": number},
+        },
+        timeout=20,
+    )
     if r.status_code == 404:
         return None
     r.raise_for_status()
-    return r.json().get("reactions")
+    payload = r.json()
+    if payload.get("errors"):
+        log.warning(
+            "GraphQL errors fetching PR %s/%s#%s: %s",
+            owner, name, number, payload["errors"],
+        )
+        return None
+    pr = ((payload.get("data") or {}).get("repository") or {}).get("pullRequest")
+    if not pr:
+        return None
+
+    # Reactions: REST shape {emoji: count, total_count: n}.
+    reactions: dict[str, int] = {v: 0 for v in _GRAPHQL_REACTION_KEYS.values()}
+    rx_total = 0
+    for g in pr.get("reactionGroups") or []:
+        n = ((g.get("reactors") or {}).get("totalCount")) or 0
+        key = _GRAPHQL_REACTION_KEYS.get(g.get("content"))
+        if key is not None:
+            reactions[key] = n
+        rx_total += n
+    reactions["total_count"] = rx_total
+
+    # Commenters.
+    comments_node = pr.get("comments") or {}
+    comment_total = comments_node.get("totalCount") or 0
+    commenter_logins: set[str] = set()
+    for c in comments_node.get("nodes") or []:
+        login = (c.get("author") or {}).get("login")
+        if login:
+            commenter_logins.add(login)
+
+    # Reviews — feed _compute_review_state in REST shape, count distinct
+    # non-PENDING authors.
+    rest_reviews: list[dict] = []
+    reviewer_logins: set[str] = set()
+    for rev in (pr.get("reviews") or {}).get("nodes") or []:
+        state = rev.get("state")
+        author_login = (rev.get("author") or {}).get("login")
+        rest_reviews.append({"state": state, "user": {"login": author_login}})
+        if state != "PENDING" and author_login:
+            reviewer_logins.add(author_login)
+    review_state = _compute_review_state(rest_reviews)
+
+    # Assignees / requested reviewers / requested teams — REST shape.
+    assignees = [
+        {"login": (a or {}).get("login")}
+        for a in (pr.get("assignees") or {}).get("nodes") or []
+        if (a or {}).get("login")
+    ]
+    requested_reviewers: list[dict] = []
+    requested_teams: list[dict] = []
+    for rr in (pr.get("reviewRequests") or {}).get("nodes") or []:
+        rev = rr.get("requestedReviewer") or {}
+        if rev.get("__typename") == "User" and rev.get("login"):
+            requested_reviewers.append({"login": rev["login"]})
+        elif rev.get("__typename") == "Team" and rev.get("slug"):
+            requested_teams.append({"slug": rev["slug"]})
+
+    labels = [
+        {
+            "name": (l or {}).get("name"),
+            "color": (l or {}).get("color"),
+            "description": (l or {}).get("description"),
+        }
+        for l in (pr.get("labels") or {}).get("nodes") or []
+    ]
+
+    # State: GraphQL OPEN/CLOSED/MERGED → REST 'open'/'closed'. _type_state
+    # checks merged + draft *before* state, so a merged PR ends up correctly
+    # classified regardless.
+    gql_state = (pr.get("state") or "").lower()
+    state = "closed" if gql_state == "merged" else gql_state
+
+    # mergeStateStatus enum → REST mergeable_state string. _MERGE_STATE_DISPLAY
+    # only acts on 'dirty' / 'unstable' / 'behind'; the rest fall through to
+    # None and silently match REST's behavior on those values.
+    merge_status = (pr.get("mergeStateStatus") or "").lower() or None
+
+    author = pr.get("author") or {}
+    return {
+        "html_url": pr.get("url"),
+        "created_at": pr.get("createdAt"),
+        "updated_at": pr.get("updatedAt"),
+        "state": state,
+        "draft": pr.get("isDraft"),
+        "merged": pr.get("merged"),
+        "mergeable_state": merge_status,
+        "additions": pr.get("additions"),
+        "deletions": pr.get("deletions"),
+        "comments": comment_total,
+        "author_association": pr.get("authorAssociation"),
+        "user": {
+            "login": author.get("login"),
+            "avatar_url": author.get("avatarUrl"),
+        },
+        "assignees": assignees,
+        "requested_reviewers": requested_reviewers,
+        "requested_teams": requested_teams,
+        "labels": labels,
+        "_pr_reactions": reactions,
+        "_unique_commenters": len(commenter_logins),
+        "_unique_reviewers": len(reviewer_logins),
+        "_review_state": review_state,
+    }
 
 
 def _enrich(conn: sqlite3.Connection, token: str) -> None:
     """Fetch full details for up to ENRICHMENT_PER_POLL notifications that need it.
 
-    For PRs, also fetches reactions via the issue-form (PR API omits them).
-    Reaction fetch fires only when main details fetch fires, so cadence matches
-    notification activity rather than poll frequency.
+    PRs and Discussions go through GraphQL — one round trip each, with
+    reactions / review state / commenter counts folded into the response.
+    Issues stay on REST (single round trip + a separate commenters call).
     """
     rows = conn.execute(
         """
@@ -401,6 +552,8 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
         try:
             if row["type"] == "Discussion":
                 details = fetch_discussion(token, row["api_url"])
+            elif row["type"] == "PullRequest":
+                details = fetch_pr(token, row["api_url"])
             else:
                 details = fetch_details(token, row["api_url"])
         except Exception:
@@ -414,6 +567,14 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 (now, row["id"]),
             )
             continue
+
+        # Pop the bonus keys so they don't leak into details_json (which is
+        # supposed to be REST-shaped). Bonus keys live in dedicated columns.
+        pr_reactions = details.pop("_pr_reactions", None)
+        n_commenters = details.pop("_unique_commenters", None)
+        n_reviewers = details.pop("_unique_reviewers", None)
+        review_state = details.pop("_review_state", None)
+
         # COALESCE captures baseline_comments on first enrichment so the
         # '+N new comments' indicator stays alive through Read actions and
         # only shifts when actual notification activity changes the count.
@@ -436,11 +597,31 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 (author["login"], author.get("avatar_url"), now),
             )
 
+        if row["type"] == "PullRequest":
+            # All four bonus signals come from the same GraphQL call — write
+            # them in one statement. COALESCE on baseline_review_state keeps
+            # the first-seen review state pinned so the 'pill-new' dot only
+            # fires when the state actually shifts after that.
+            conn.execute(
+                "UPDATE notifications SET "
+                "pr_reactions_json = ?, pr_reactions_fetched_at = ?, "
+                "unique_commenters = ?, unique_reviewers = ?, "
+                "pr_review_state = ?, "
+                "baseline_review_state = COALESCE(baseline_review_state, ?) "
+                "WHERE id = ?",
+                (
+                    json.dumps(pr_reactions) if pr_reactions is not None else None,
+                    now,
+                    n_commenters,
+                    n_reviewers,
+                    review_state,
+                    review_state,
+                    row["id"],
+                ),
+            )
+            continue
+
         if row["type"] == "Discussion":
-            # GraphQL fetch already includes unique_commenters; skip the REST
-            # commenters call (the discussion comments endpoint doesn't exist
-            # in REST). Reactions are embedded in details_json like Issues.
-            n_commenters = details.get("_unique_commenters")
             if n_commenters is not None:
                 conn.execute(
                     "UPDATE notifications SET unique_commenters = ? WHERE id = ?",
@@ -448,38 +629,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 )
             continue
 
-        if row["type"] == "PullRequest":
-            try:
-                reactions = fetch_pr_reactions(token, row["api_url"])
-                if reactions is not None:
-                    conn.execute(
-                        "UPDATE notifications "
-                        "SET pr_reactions_json = ?, pr_reactions_fetched_at = ? "
-                        "WHERE id = ?",
-                        (json.dumps(reactions), now, row["id"]),
-                    )
-            except Exception:
-                log.exception("pr_reactions fetch failed for %s", row["id"])
-            try:
-                reviews = fetch_pr_reviews(token, row["api_url"])
-                if reviews is not None:
-                    review_state = _compute_review_state(reviews)
-                    n_reviewers = _count_unique_reviewers(reviews)
-                    # COALESCE captures baseline on the first time we know the
-                    # review state — the 'pill-new' dot only fires once it
-                    # actually changes after that point, surviving Read actions
-                    # in between.
-                    conn.execute(
-                        "UPDATE notifications SET pr_review_state = ?, "
-                        "baseline_review_state = COALESCE(baseline_review_state, ?), "
-                        "unique_reviewers = ? "
-                        "WHERE id = ?",
-                        (review_state, review_state, n_reviewers, row["id"]),
-                    )
-            except Exception:
-                log.exception("review fetch failed for %s", row["id"])
-
-        # Unique commenters (cheap when comments_count is 0).
+        # Issue: separate REST commenters call (cheap when comments_count is 0).
         try:
             n_commenters = fetch_unique_commenters(
                 token, row["api_url"], details.get("comments") or 0
@@ -495,7 +645,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
 
 def set_subscribed(token: str, thread_id: str) -> None:
     """Re-subscribe to a thread (reverse of set_ignored)."""
-    r = requests.put(
+    r = _session.put(
         f"{_thread_url(thread_id)}/subscription",
         headers=_auth_headers(token),
         json={"subscribed": True, "ignored": False},
@@ -581,7 +731,7 @@ def _get_paginated(
     headers = _auth_headers(token)
     if last_modified:
         headers["If-Modified-Since"] = last_modified
-    r = requests.get(API_NOTIFICATIONS, headers=headers, params=params, timeout=30)
+    r = _session.get(API_NOTIFICATIONS, headers=headers, params=params, timeout=30)
     if r.status_code == 304:
         return [], last_modified, 304
     r.raise_for_status()
@@ -590,7 +740,7 @@ def _get_paginated(
     page_headers = _auth_headers(token)  # no If-Modified-Since on subsequent pages
     pages = 1
     while "next" in r.links and pages < max_pages:
-        r = requests.get(r.links["next"]["url"], headers=page_headers, timeout=30)
+        r = _session.get(r.links["next"]["url"], headers=page_headers, timeout=30)
         r.raise_for_status()
         items.extend(r.json())
         pages += 1
