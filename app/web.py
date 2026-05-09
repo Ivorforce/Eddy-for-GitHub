@@ -51,7 +51,7 @@ app.jinja_env.filters["humanize"] = _humanize
 AGE_GRADIENT_MAX_DAYS = 1825  # 5y; older items pin to the warm end
 
 
-def _age_pill(iso: str | None) -> dict | None:
+def _age_pill(iso: str | None, subject_type: str | None = None) -> dict | None:
     if not iso:
         return None
     try:
@@ -84,7 +84,8 @@ def _age_pill(iso: str | None) -> dict | None:
     color = f"hsl({hue:.0f} {sat:.0f}% {lit:.0f}%)"
 
     days_int = int(days)
-    title = f"Created {days_int} day{'' if days_int == 1 else 's'} ago ({iso})"
+    verb = "Published" if subject_type == "Release" else "Created"
+    title = f"{verb} {days_int} day{'' if days_int == 1 else 's'} ago ({iso})"
     return {"text": text, "color": color, "title": title}
 
 
@@ -236,7 +237,7 @@ def _format_meta(
             rx_dict = json.loads(pr_reactions_json)
         except (ValueError, TypeError):
             rx_dict = None
-    elif subject_type in ("Issue", "Discussion"):
+    elif subject_type in ("Issue", "Discussion", "Release"):
         rx_dict = d.get("reactions")
     pos, neg, eyes = _aggregate_reactions(rx_dict)
 
@@ -550,7 +551,7 @@ def _row_to_dict(
         d.pop("unique_commenters", None),
         d.pop("unique_reviewers", None),
     )
-    d["age"] = _age_pill(details.get("created_at")) if details else None
+    d["age"] = _age_pill(details.get("created_at"), d["type"]) if details else None
     d["popularity"] = _popularity_pill(d["meta"].get("reception"))
     all_labels = _extract_labels(details_json)
     d["labels_visible"] = all_labels[:3]

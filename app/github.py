@@ -669,17 +669,48 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
     }
 
 
+def fetch_release(token: str, api_url: str | None) -> dict | None:
+    """REST fetch for a Release. Returns a payload shaped to slot into the
+    same details_json path as Issues (html_url / created_at / user /
+    reactions) so popularity + age pills read it without branching.
+
+    Releases use REST not GraphQL because the GraphQL release(tagName: …)
+    lookup needs the tag name, and the notification subject only carries
+    a numeric id.
+    """
+    if not api_url or not api_url.startswith("https://api.github.com/repos/"):
+        return None
+    r = _session.get(api_url, headers=_auth_headers(token), timeout=20)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    rel = r.json()
+    user = rel.get("author") or {}
+    return {
+        "html_url": rel.get("html_url"),
+        # published_at is the user-meaningful date; created_at can be days
+        # earlier for releases drafted in advance. Falls back to created_at
+        # for the rare case of a pre-publish notification.
+        "created_at": rel.get("published_at") or rel.get("created_at"),
+        "user": {
+            "login": user.get("login"),
+            "avatar_url": user.get("avatar_url"),
+        },
+        "reactions": rel.get("reactions"),
+    }
+
+
 def _enrich(conn: sqlite3.Connection, token: str) -> None:
     """Fetch full details for up to ENRICHMENT_PER_POLL notifications that need it.
 
-    All three subject types now go through GraphQL — one round trip each,
-    with reactions / review state / commenter counts folded into the
-    response.
+    PR / Issue / Discussion go through GraphQL (one round trip each, with
+    reactions / review state / commenter counts folded in). Release goes
+    through REST since the GraphQL release lookup needs the tag name.
     """
     rows = conn.execute(
         """
         SELECT id, api_url, type FROM notifications
-        WHERE type IN ('PullRequest', 'Issue', 'Discussion')
+        WHERE type IN ('PullRequest', 'Issue', 'Discussion', 'Release')
           AND (
             details_json IS NULL
             OR details_fetched_at IS NULL
@@ -697,6 +728,8 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 details = fetch_discussion(token, row["api_url"])
             elif row["type"] == "PullRequest":
                 details = fetch_pr(token, row["api_url"])
+            elif row["type"] == "Release":
+                details = fetch_release(token, row["api_url"])
             else:
                 details = fetch_issue(token, row["api_url"])
         except Exception:
