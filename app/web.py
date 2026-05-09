@@ -694,14 +694,15 @@ def _table_response(error: str | None) -> "Response":
 def refresh():
     token = app.config["GITHUB_TOKEN"]
     error: str | None = None
+    # ?auto=1 marks browser-driven refreshes (visibilitychange handler) so
+    # they ride the poll predicate and skip the unread fetch on a quiet
+    # inbox. A user-clicked refresh has no flag and forces a full sync so
+    # the click never feels like it missed something.
+    force_full = not request.values.get("auto")
     conn = db.connect()
     try:
         try:
-            # Manual refresh forces the dedicated unread fetch — auto-polls
-            # rely on the predicate to skip it most of the time, but a user-
-            # triggered refresh should always reconcile read state fully so
-            # the click never feels like it missed something.
-            github.poll_once(conn, token, force_full=True)
+            github.poll_once(conn, token, force_full=force_full)
         except Exception as e:
             log.exception("on-demand refresh failed")
             error = f"Refresh failed: {e}"

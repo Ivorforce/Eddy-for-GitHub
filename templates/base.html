@@ -744,7 +744,10 @@
       const target = document.querySelector("#notifications-table");
       if (!target) return;
       lastFocusRefresh = Date.now();
-      htmx.ajax("POST", "/refresh", { target, swap: "innerHTML" });
+      // ?auto=1 lets /refresh skip the dedicated unread fetch when the
+      // poll predicate says it isn't needed (faster auto-refresh on a
+      // quiet inbox). Manual button click omits the flag → full sync.
+      htmx.ajax("POST", "/refresh?auto=1", { target, swap: "innerHTML" });
     });
 
     // Plain-left-click on a popover trigger opens its popover. Modifier
