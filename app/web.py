@@ -125,7 +125,8 @@ def _popularity_pill(reception: dict | None) -> dict | None:
 _ROW_COLS = (
     "id, repo, type, title, reason, html_url, updated_at, "
     "unread, ignored, action, details_json, seen_reasons, baseline_comments, "
-    "pr_reactions_json, unique_commenters, pr_review_state, baseline_review_state, "
+    "pr_reactions_json, unique_commenters, unique_reviewers, "
+    "pr_review_state, baseline_review_state, "
     "note_user, is_tracked"
 )
 
@@ -203,6 +204,7 @@ def _format_meta(
     baseline_comments: int | None,
     pr_reactions_json: str | None = None,
     unique_commenters: int | None = None,
+    unique_reviewers: int | None = None,
 ) -> dict:
     """Title sub-line metrics, split along three independent axes:
         complexity: PR diff size (additions, deletions)
@@ -246,14 +248,18 @@ def _format_meta(
         if comments > 0 and baseline_comments is not None and comments > baseline_comments
         else None
     )
-    # Engagement = max-aggregated reactions + unique commenter count.
-    engaged = pos + neg + eyes + (unique_commenters or 0)
+    # Engagement = max-aggregated reactions + unique commenter count + unique
+    # reviewer count. Reviewers and commenters can overlap (and reactions can
+    # overlap with both); engaged is an approximation, matching the existing
+    # double-counting between reactions and commenters.
+    engaged = pos + neg + eyes + (unique_commenters or 0) + (unique_reviewers or 0)
     if comments > 0 or engaged > 0:
         out["interest"] = {
             "comments": comments,
             "new_comments": new_comments,
             "engaged": engaged,
             "commenters": unique_commenters,
+            "reviewers": unique_reviewers,
         }
 
     return out
@@ -531,6 +537,7 @@ def _row_to_dict(
         baseline_comments,
         d.pop("pr_reactions_json", None),
         d.pop("unique_commenters", None),
+        d.pop("unique_reviewers", None),
     )
     d["age"] = _age_pill(details.get("created_at")) if details else None
     d["popularity"] = _popularity_pill(d["meta"].get("reception"))

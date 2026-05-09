@@ -118,6 +118,10 @@ ALTER TABLE repos         RENAME COLUMN is_favorite TO is_tracked;
 ALTER TABLE orgs          RENAME COLUMN is_favorite TO is_tracked;
 """
 
+SCHEMA_V15 = """
+ALTER TABLE notifications ADD COLUMN unique_reviewers INTEGER;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -188,6 +192,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V14)
             _set_version(conn, 14)
             version = 14
+        if version < 15:
+            conn.executescript(SCHEMA_V15)
+            _set_version(conn, 15)
+            version = 15
     finally:
         conn.close()
 

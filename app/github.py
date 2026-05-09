@@ -169,8 +169,10 @@ def _compute_review_state(reviews: list[dict]) -> str | None:
     return None
 
 
-def fetch_pr_review_state(token: str, pr_api_url: str | None) -> str | None:
-    """Returns 'approved' | 'changes_requested' | None for a PR's review state."""
+def fetch_pr_reviews(token: str, pr_api_url: str | None) -> list[dict] | None:
+    """Fetch all reviews on a PR. Returns the raw review list, or None if the
+    URL isn't a PR or the resource is gone. Caller derives state + reviewer
+    count from the same response so we only hit /reviews once per enrichment."""
     if not pr_api_url or "/pulls/" not in pr_api_url:
         return None
     r = requests.get(
@@ -182,7 +184,20 @@ def fetch_pr_review_state(token: str, pr_api_url: str | None) -> str | None:
     if r.status_code == 404:
         return None
     r.raise_for_status()
-    return _compute_review_state(r.json())
+    return r.json()
+
+
+def _count_unique_reviewers(reviews: list[dict]) -> int:
+    """Distinct review-author logins, excluding PENDING drafts (those are
+    in-progress reviews not yet visible to anyone else)."""
+    logins: set[str] = set()
+    for r in reviews:
+        if r.get("state") == "PENDING":
+            continue
+        login = (r.get("user") or {}).get("login")
+        if login:
+            logins.add(login)
+    return len(logins)
 
 
 def fetch_unique_commenters(
@@ -446,18 +461,23 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
             except Exception:
                 log.exception("pr_reactions fetch failed for %s", row["id"])
             try:
-                review_state = fetch_pr_review_state(token, row["api_url"])
-                # COALESCE captures baseline on the first time we know the
-                # review state — the 'pill-new' dot only fires once it actually
-                # changes after that point, surviving Read actions in between.
-                conn.execute(
-                    "UPDATE notifications SET pr_review_state = ?, "
-                    "baseline_review_state = COALESCE(baseline_review_state, ?) "
-                    "WHERE id = ?",
-                    (review_state, review_state, row["id"]),
-                )
+                reviews = fetch_pr_reviews(token, row["api_url"])
+                if reviews is not None:
+                    review_state = _compute_review_state(reviews)
+                    n_reviewers = _count_unique_reviewers(reviews)
+                    # COALESCE captures baseline on the first time we know the
+                    # review state — the 'pill-new' dot only fires once it
+                    # actually changes after that point, surviving Read actions
+                    # in between.
+                    conn.execute(
+                        "UPDATE notifications SET pr_review_state = ?, "
+                        "baseline_review_state = COALESCE(baseline_review_state, ?), "
+                        "unique_reviewers = ? "
+                        "WHERE id = ?",
+                        (review_state, review_state, n_reviewers, row["id"]),
+                    )
             except Exception:
-                log.exception("review state fetch failed for %s", row["id"])
+                log.exception("review fetch failed for %s", row["id"])
 
         # Unique commenters (cheap when comments_count is 0).
         try:
