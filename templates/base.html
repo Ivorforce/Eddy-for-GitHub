@@ -8,6 +8,12 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/pico.min.css') }}">
   <script src="{{ url_for('static', filename='vendor/htmx.min.js') }}" defer></script>
   <style>
+    /* Capture root body text color in a non-Pico variable so anchors can
+       reach for the body color without fighting Pico's anchor-scoped
+       --pico-color redefinition (Pico rebinds --pico-color to the link
+       primary inside `a` selectors, which is fine for ordinary links but
+       wrong when we want the anchor to read as content text). */
+    :root { --content-color: var(--pico-color); }
     main.container { max-width: 1400px; padding: 1.5rem 1.5rem 0; }
     table { font-size: 0.9rem; }
     th, td { vertical-align: middle; }
@@ -165,7 +171,6 @@
       position: relative;
     }
     .repo-author .author-by { opacity: 0.7; }
-    .repo-author .author-login { color: var(--pico-color); }
     .author-icon {
       width: 0.95em;
       height: 0.95em;
@@ -176,17 +181,54 @@
     .author-icon.icon-firsttime { color: #bf8700; }
     .author-icon.icon-self      { color: #4493f8; }
 
-    /* Entity name = popover trigger. Tracked state shows as a warm-yellow
-       tint on the trigger text (no icon — see flag inside the popover).
-       Color picked to read as "marked / prioritized" rather than "favorited"
-       — distinct from severity orange (#bf8700) and the old gold (#d4a017).
-       Plain left-click opens the popover (intercepted in JS); middle/cmd-
-       click navigates the underlying link. */
+    /* Entity name = popover trigger. Reads as content (body color), not as
+       a styled link — same readability fix as the item title. The repo-owner
+       (org) stays muted because it's secondary context, not a primary scan
+       target. Tracked state tint takes priority. Plain left-click opens the
+       popover (intercepted in JS); middle/cmd-click navigates the link. */
     .entity-trigger { cursor: pointer; }
-    .entity-trigger.is-tracked { color: #e69020; }
-    /* Item title gets the same tint when the item itself is tracked. */
+    a.entity-trigger { color: var(--content-color); }
+    .repo-owner.entity-trigger { color: var(--pico-muted-color); }
+    .author-login.entity-trigger { font-weight: 500; }
+    .entity-trigger.is-tracked { color: #eaa54a; }
+    /* Item title is the longest piece of free-text prose on the row, so it
+       reads as text rather than as a styled link: inherits body color (NOT
+       Pico's anchor-scoped --pico-color, which is the link primary blue —
+       hence the explicit `inherit`), no underline at rest, hover gets the
+       underline as the click affordance. Slight font-weight bump matches
+       GitHub's content-link convention (bold-ish text, blue only on hover).
+       Tracked-state tint takes priority over the default color. */
+    a.item-title {
+      color: var(--content-color);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    a.item-title:hover { text-decoration: underline; }
     a.item-title.is-tracked,
-    span.item-title.is-tracked { color: #e69020; }
+    a.item-title.is-tracked:hover,
+    span.item-title.is-tracked { color: #eaa54a; }
+
+    /* "Never visited" dot. Polarity is flipped: most rows get visited at
+       some point, so we mark the *rare* unvisited case rather than the
+       common visited case. The :visited selector is privacy-locked and
+       additionally clamps the alpha channel to match :link — that's why
+       `color: transparent` (alpha 0) doesn't work and falls back to the
+       inherited text color (black on light mode). The workaround is to
+       set :visited's color to a same-alpha value that blends visually
+       with the row background. */
+    a.item-title::after {
+      content: "●";
+      color: #8ea4c4;
+      margin-left: 0.4em;
+      font-size: 0.55em;
+      vertical-align: 0.3em;
+    }
+    /* Literal hex required: var() doesn't resolve in :visited (privacy
+       clamp). Values mirror Pico's --pico-background-color in each scheme. */
+    a.item-title:visited::after { color: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      a.item-title:visited::after { color: #13161e; }
+    }
 
     /* Row-level highlights, in increasing priority:
          context-track: any of org/repo/author tracked → subtle warm-yellow
@@ -200,10 +242,10 @@
     tr[data-tracked-author="true"]:not(.is-tracked-row):not(.is-yours-row) td:first-child,
     tr[data-tracked-repo="true"]:not(.is-tracked-row):not(.is-yours-row) td:first-child,
     tr[data-tracked-org="true"]:not(.is-tracked-row):not(.is-yours-row) td:first-child {
-      box-shadow: inset 1.5px 0 0 rgba(230, 144, 32, 0.55);
+      box-shadow: inset 1.5px 0 0 rgba(234, 165, 74, 0.55);
     }
     tr.is-yours-row td:first-child   { box-shadow: inset 3px 0 0 #4493f8; }
-    tr.is-tracked-row td:first-child { box-shadow: inset 3px 0 0 #e69020; }
+    tr.is-tracked-row td:first-child { box-shadow: inset 3px 0 0 #eaa54a; }
 
     /* Item-level popover trigger ("•••") — sits in the actions cell where
        the old inline star + Note button used to live, replacing both. */
@@ -282,7 +324,7 @@
       width: 1.05em;
       height: 1.05em;
       flex-shrink: 0;
-      color: #e69020;
+      color: #eaa54a;
     }
     .action-popover form { margin: 0 0 0.45rem; }
     .action-popover textarea {
