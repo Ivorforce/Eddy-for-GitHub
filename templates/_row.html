@@ -97,9 +97,13 @@
   </td>
   {% set m = n.meta %}
   <td class="title">
-    {% if n.html_url %}
+    {# Prefer link_url (per-event pointer captured while unread) over the
+       generic item URL — sends the user to the first comment they haven't
+       seen on this aggregated thread. #}
+    {% set click_url = n.link_url or n.html_url %}
+    {% if click_url %}
       <a class="item-title{% if n.is_tracked %} is-tracked{% endif %}"
-         href="{{ n.html_url }}" target="_blank" rel="noopener"
+         href="{{ click_url }}" target="_blank" rel="noopener"
          title="{{ n.title }}"
          {% if n.unread %}onclick="htmx.ajax('POST', '/set/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML'})"{% endif %}><span class="item-title-text">{{ n.title }}</span></a>
     {% else %}

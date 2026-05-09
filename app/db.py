@@ -129,6 +129,14 @@ SCHEMA_V16 = """
 ALTER TABLE notifications DROP COLUMN pr_reactions_fetched_at;
 """
 
+# link_url: per-event browser URL derived from subject.latest_comment_url.
+# Updated whenever a poll surfaces a new latest_comment_url, otherwise
+# preserved across read/unread transitions. Lets the title link land on the
+# latest event instead of scrolling the user back to the top of a long thread.
+SCHEMA_V17 = """
+ALTER TABLE notifications ADD COLUMN link_url TEXT;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -207,6 +215,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V16)
             _set_version(conn, 16)
             version = 16
+        if version < 17:
+            conn.executescript(SCHEMA_V17)
+            _set_version(conn, 17)
+            version = 17
     finally:
         conn.close()
 

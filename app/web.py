@@ -123,7 +123,7 @@ def _popularity_pill(reception: dict | None) -> dict | None:
 
 
 _ROW_COLS = (
-    "id, repo, type, title, reason, html_url, updated_at, "
+    "id, repo, type, title, reason, html_url, link_url, updated_at, "
     "unread, ignored, action, details_json, seen_reasons, baseline_comments, "
     "pr_reactions_json, unique_commenters, unique_reviewers, "
     "pr_review_state, baseline_review_state, "

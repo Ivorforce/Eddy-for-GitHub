@@ -44,6 +44,59 @@ def derive_html_url(item: dict[str, Any]) -> str | None:
     return f"https://github.com/{path}"
 
 
+_API_REPOS_PREFIX = "https://api.github.com/repos/"
+
+
+def derive_link_url(item: dict[str, Any]) -> str | None:
+    """Convert subject.latest_comment_url to a per-event github.com URL.
+
+    The Notifications API gives us only the latest event URL — not a list —
+    so this is the best we can pin while a thread is unread. Falls back to
+    None on unrecognized shapes (Releases, CheckSuites, Discussions); caller
+    uses html_url instead.
+
+    Patterns:
+      issues/comments/{cid}        → /issues/{n}#issuecomment-{cid}      (Issue)
+      issues/comments/{cid}        → /pull/{n}#issuecomment-{cid}        (PR thread comment)
+      pulls/comments/{cid}         → /pull/{n}#discussion_r{cid}         (review-line)
+      pulls/{n}/reviews/{rid}      → /pull/{n}#pullrequestreview-{rid}   (review)
+    """
+    subject = item.get("subject") or {}
+    api_comment = subject.get("latest_comment_url")
+    api_subject = subject.get("url")
+    if not api_comment or not api_subject or api_comment == api_subject:
+        return None
+    if not (api_comment.startswith(_API_REPOS_PREFIX)
+            and api_subject.startswith(_API_REPOS_PREFIX)):
+        return None
+
+    subj_parts = api_subject[len(_API_REPOS_PREFIX):].split("/")
+    com_parts = api_comment[len(_API_REPOS_PREFIX):].split("/")
+    if len(subj_parts) < 4 or len(com_parts) < 5:
+        return None
+    owner, repo, kind, number = subj_parts[0], subj_parts[1], subj_parts[2], subj_parts[3]
+    base = f"https://github.com/{owner}/{repo}"
+
+    # /repos/{o}/{r}/issues/comments/{cid} — generic issue/PR thread comment.
+    if com_parts[2] == "issues" and com_parts[3] == "comments":
+        cid = com_parts[4]
+        if kind == "pulls":
+            return f"{base}/pull/{number}#issuecomment-{cid}"
+        if kind == "issues":
+            return f"{base}/issues/{number}#issuecomment-{cid}"
+        return None
+    # /repos/{o}/{r}/pulls/comments/{cid} — review-line comment.
+    if com_parts[2] == "pulls" and com_parts[3] == "comments":
+        cid = com_parts[4]
+        return f"{base}/pull/{number}#discussion_r{cid}"
+    # /repos/{o}/{r}/pulls/{n}/reviews/{rid}
+    if (com_parts[2] == "pulls" and len(com_parts) >= 6
+            and com_parts[4] == "reviews"):
+        rid = com_parts[5]
+        return f"{base}/pull/{number}#pullrequestreview-{rid}"
+    return None
+
+
 def _auth_headers(token: str) -> dict[str, str]:
     return {
         "Authorization": f"token {token}",
@@ -715,12 +768,17 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
     subject = item.get("subject") or {}
     repo = item.get("repository") or {}
     reason = item.get("reason") or ""
+    # link_url lifecycle: replace whenever the API gives us a new
+    # latest_comment_url; otherwise preserve the previous capture (so the
+    # link survives read state and only shifts when fresh activity arrives).
+    # Mirrors the "indicators persist across user actions" rule.
+    link_candidate = derive_link_url(item)
     conn.execute(
         """
         INSERT INTO notifications (
             id, repo, type, title, reason, api_url, html_url,
-            updated_at, last_read_at, unread, raw_json, fetched_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            updated_at, last_read_at, unread, raw_json, fetched_at, link_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             repo=excluded.repo,
             type=excluded.type,
@@ -732,7 +790,8 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
             last_read_at=excluded.last_read_at,
             unread=excluded.unread,
             raw_json=excluded.raw_json,
-            fetched_at=excluded.fetched_at
+            fetched_at=excluded.fetched_at,
+            link_url = COALESCE(excluded.link_url, notifications.link_url)
         """,
         (
             item["id"],
@@ -747,6 +806,7 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
             1 if item.get("unread") else 0,
             json.dumps(item),
             now,
+            link_candidate,
         ),
     )
     if reason:
