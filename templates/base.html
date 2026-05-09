@@ -547,6 +547,9 @@
 
     // Auto-refresh when the tab regains focus (catches reads done on github.com).
     // Debounced to once per 30s to avoid hammering the API on tab-switching.
+    // Open drawers, dirty textarea content, focus, and cursor position are
+    // preserved across the swap by the htmx:beforeSwap/afterSwap handlers
+    // below, so it's safe to fire even while the user is mid-edit.
     let lastFocusRefresh = Date.now();
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) return;
@@ -600,6 +603,65 @@
       if (!drawer) return;
       e.preventDefault();
       drawer.classList.remove("open");
+    });
+
+    // Preserve which note drawers are open (and any unsaved typing) across
+    // table refreshes. Without this, the visibilitychange auto-refresh
+    // closes whatever drawer the user has open. Snapshots before the swap;
+    // re-applies .open class and restores dirty textarea content after.
+    // Scoped to #notifications-table (the /refresh swap) — per-row swaps
+    // (item/entity favorite) replace one main row at a time and the
+    // server-rendered drawers in the response start with no .open class
+    // anyway, so there's nothing to preserve there in practice.
+    let drawerSnapshot = null;
+    document.addEventListener("htmx:beforeSwap", (e) => {
+      const tgt = e.detail.target;
+      if (!tgt || tgt.id !== "notifications-table") return;
+      drawerSnapshot = [];
+      tgt.querySelectorAll(".note-drawer.open").forEach((d) => {
+        const ta = d.querySelector("textarea");
+        const focused = ta === document.activeElement;
+        drawerSnapshot.push({
+          threadId: d.dataset.threadId,
+          kind: d.dataset.kind,
+          dirty: ta && ta.value !== ta.defaultValue ? ta.value : null,
+          focused,
+          selStart: focused ? ta.selectionStart : 0,
+          selEnd: focused ? ta.selectionEnd : 0,
+        });
+      });
+    });
+    document.addEventListener("htmx:afterSwap", (e) => {
+      const tgt = e.detail.target;
+      if (!tgt || tgt.id !== "notifications-table" || !drawerSnapshot) return;
+      for (const s of drawerSnapshot) {
+        if (!s.threadId) continue;
+        const drawer = tgt.querySelector(
+          `tr.note-drawer[data-thread-id="${CSS.escape(s.threadId)}"]` +
+          `[data-kind="${s.kind}"]`
+        );
+        if (!drawer) continue;
+        drawer.classList.add("open");
+        const ta = drawer.querySelector("textarea");
+        if (!ta) continue;
+        if (s.dirty !== null) {
+          ta.value = s.dirty;
+          // The new textarea has no HTMX debounce timer running, so without
+          // a nudge an unsaved edit would just sit there until the user
+          // typed again or blurred. Fire the save directly.
+          const url = ta.closest("form")?.getAttribute("hx-post");
+          if (url) {
+            const data = new FormData();
+            data.append("note_user", s.dirty);
+            fetch(url, { method: "POST", body: data, keepalive: true });
+          }
+        }
+        if (s.focused) {
+          ta.focus();
+          try { ta.setSelectionRange(s.selStart, s.selEnd); } catch (_) {}
+        }
+      }
+      drawerSnapshot = null;
     });
 
     // Note drawer toggle — exclusive within a row group (item / org / repo /

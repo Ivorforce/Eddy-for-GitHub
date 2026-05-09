@@ -147,7 +147,7 @@
             title="{% if n.note_user %}View/edit note{% else %}Add note{% endif %}"><span class="action-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></span>Note</button>
   </td>
 </tr>
-<tr class="note-drawer" data-kind="item">
+<tr class="note-drawer" data-kind="item" data-thread-id="{{ n.id }}">
   <td colspan="5">
     <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
     <form hx-post="/note/{{ n.id }}"
@@ -158,7 +158,7 @@
   </td>
 </tr>
 {% if n.repo_owner %}
-<tr class="note-drawer" data-kind="org">
+<tr class="note-drawer" data-kind="org" data-thread-id="{{ n.id }}">
   <td colspan="5">
     <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
     <div class="drawer-label">Note for <a href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a></div>
@@ -170,7 +170,7 @@
   </td>
 </tr>
 {% endif %}
-<tr class="note-drawer" data-kind="repo">
+<tr class="note-drawer" data-kind="repo" data-thread-id="{{ n.id }}">
   <td colspan="5">
     <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
     <div class="drawer-label">Note for <a href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo }}</a></div>
@@ -182,7 +182,7 @@
   </td>
 </tr>
 {% if n.author_login %}
-<tr class="note-drawer" data-kind="person">
+<tr class="note-drawer" data-kind="person" data-thread-id="{{ n.id }}">
   <td colspan="5">
     <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
     <div class="drawer-label">Note for <a href="https://github.com/{{ n.author_login }}" target="_blank" rel="noopener">{{ n.author_login }}</a></div>
