@@ -149,6 +149,7 @@
 </tr>
 <tr class="note-drawer" data-kind="item">
   <td colspan="5">
+    <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
     <form hx-post="/note/{{ n.id }}"
           hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
           hx-swap="none">
@@ -159,6 +160,7 @@
 {% if n.repo_owner %}
 <tr class="note-drawer" data-kind="org">
   <td colspan="5">
+    <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
     <div class="drawer-label">Note for <a href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a></div>
     <form hx-post="/orgs/{{ n.repo_owner }}/note"
           hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
@@ -170,6 +172,7 @@
 {% endif %}
 <tr class="note-drawer" data-kind="repo">
   <td colspan="5">
+    <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
     <div class="drawer-label">Note for <a href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo }}</a></div>
     <form hx-post="/repos/{{ n.repo }}/note"
           hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
@@ -181,6 +184,7 @@
 {% if n.author_login %}
 <tr class="note-drawer" data-kind="person">
   <td colspan="5">
+    <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
     <div class="drawer-label">Note for <a href="https://github.com/{{ n.author_login }}" target="_blank" rel="noopener">{{ n.author_login }}</a></div>
     <form hx-post="/people/{{ n.author_login }}/note"
           hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
