@@ -219,6 +219,132 @@ def fetch_unique_commenters(
     return len(logins)
 
 
+_GRAPHQL_URL = "https://api.github.com/graphql"
+
+# GraphQL ReactionContent enum -> the REST reaction-key the rest of the app
+# expects in details_json["reactions"].
+_GRAPHQL_REACTION_KEYS = {
+    "THUMBS_UP": "+1",
+    "THUMBS_DOWN": "-1",
+    "LAUGH": "laugh",
+    "HOORAY": "hooray",
+    "CONFUSED": "confused",
+    "HEART": "heart",
+    "ROCKET": "rocket",
+    "EYES": "eyes",
+}
+
+_DISCUSSION_QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    discussion(number: $number) {
+      number
+      title
+      url
+      updatedAt
+      author { login avatarUrl }
+      comments(first: 100) {
+        totalCount
+        nodes {
+          author { login }
+          replies(first: 100) { nodes { author { login } } }
+        }
+      }
+      reactionGroups { content reactors { totalCount } }
+    }
+  }
+}
+"""
+
+
+def _parse_discussion_url(api_url: str | None) -> tuple[str, str, int] | None:
+    """Extract (owner, name, number) from .../repos/{owner}/{name}/discussions/{n}."""
+    if not api_url or "/discussions/" not in api_url:
+        return None
+    prefix = "https://api.github.com/repos/"
+    if not api_url.startswith(prefix):
+        return None
+    parts = api_url[len(prefix):].split("/")
+    # owner / name / "discussions" / number
+    if len(parts) < 4 or parts[2] != "discussions":
+        return None
+    try:
+        return parts[0], parts[1], int(parts[3])
+    except ValueError:
+        return None
+
+
+def fetch_discussion(token: str, api_url: str | None) -> dict | None:
+    """GraphQL fetch for a Discussion (REST has no equivalent endpoint).
+
+    Returns a payload shaped like a REST Issue (reactions dict + comments count
+    + user) so it can flow through the same details_json path as Issues, with
+    one bonus key '_unique_commenters' (folded in here because we already paged
+    the comments to compute it).
+    """
+    parsed = _parse_discussion_url(api_url)
+    if parsed is None:
+        return None
+    owner, name, number = parsed
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    r = requests.post(
+        _GRAPHQL_URL,
+        headers=headers,
+        json={
+            "query": _DISCUSSION_QUERY,
+            "variables": {"owner": owner, "name": name, "number": number},
+        },
+        timeout=20,
+    )
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    payload = r.json()
+    if payload.get("errors"):
+        log.warning(
+            "GraphQL errors fetching discussion %s/%s#%s: %s",
+            owner, name, number, payload["errors"],
+        )
+        return None
+    disc = ((payload.get("data") or {}).get("repository") or {}).get("discussion")
+    if not disc:
+        return None
+
+    reactions: dict[str, int] = {v: 0 for v in _GRAPHQL_REACTION_KEYS.values()}
+    total = 0
+    for g in disc.get("reactionGroups") or []:
+        n = ((g.get("reactors") or {}).get("totalCount")) or 0
+        key = _GRAPHQL_REACTION_KEYS.get(g.get("content"))
+        if key is not None:
+            reactions[key] = n
+        total += n
+    reactions["total_count"] = total
+
+    comments = disc.get("comments") or {}
+    comment_total = comments.get("totalCount") or 0
+    logins: set[str] = set()
+    for c in comments.get("nodes") or []:
+        login = (c.get("author") or {}).get("login")
+        if login:
+            logins.add(login)
+        for rep in ((c.get("replies") or {}).get("nodes")) or []:
+            rl = (rep.get("author") or {}).get("login")
+            if rl:
+                logins.add(rl)
+
+    author = disc.get("author") or {}
+    return {
+        "html_url": disc.get("url"),
+        "user": {
+            "login": author.get("login"),
+            "avatar_url": author.get("avatarUrl"),
+        },
+        "comments": comment_total,
+        "reactions": reactions,
+        "_unique_commenters": len(logins),
+    }
+
+
 def fetch_pr_reactions(token: str, pr_api_url: str | None) -> dict | None:
     """The PR endpoint omits reactions; the issue-form of a PR includes them.
     Returns the full reactions dict (per-emoji counts + total_count), or None."""
@@ -242,7 +368,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
     rows = conn.execute(
         """
         SELECT id, api_url, type FROM notifications
-        WHERE type IN ('PullRequest', 'Issue')
+        WHERE type IN ('PullRequest', 'Issue', 'Discussion')
           AND (
             details_json IS NULL
             OR details_fetched_at IS NULL
@@ -256,7 +382,10 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
 
     for row in rows:
         try:
-            details = fetch_details(token, row["api_url"])
+            if row["type"] == "Discussion":
+                details = fetch_discussion(token, row["api_url"])
+            else:
+                details = fetch_details(token, row["api_url"])
         except Exception:
             log.exception("enrichment failed for %s", row["id"])
             continue
@@ -289,6 +418,19 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 "  last_seen_at = excluded.last_seen_at",
                 (author["login"], author.get("avatar_url"), now),
             )
+
+        if row["type"] == "Discussion":
+            # GraphQL fetch already includes unique_commenters; skip the REST
+            # commenters call (the discussion comments endpoint doesn't exist
+            # in REST). Reactions are embedded in details_json like Issues.
+            n_commenters = details.get("_unique_commenters")
+            if n_commenters is not None:
+                conn.execute(
+                    "UPDATE notifications SET unique_commenters = ? WHERE id = ?",
+                    (n_commenters, row["id"]),
+                )
+            continue
+
         if row["type"] == "PullRequest":
             try:
                 reactions = fetch_pr_reactions(token, row["api_url"])

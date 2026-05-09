@@ -139,7 +139,7 @@ def _format_meta(
             rx_dict = json.loads(pr_reactions_json)
         except (ValueError, TypeError):
             rx_dict = None
-    elif subject_type == "Issue":
+    elif subject_type in ("Issue", "Discussion"):
         rx_dict = d.get("reactions")
     pos, neg, eyes = _aggregate_reactions(rx_dict)
 
