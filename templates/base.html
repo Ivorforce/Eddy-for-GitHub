@@ -658,8 +658,13 @@
     }
     .filter-spacer { flex: 1; }
     .error { color: var(--pico-color-red-500); margin-bottom: 1rem; }
-    tr.read { opacity: 0.45; }
-    tr.read:hover { opacity: 1; }
+    /* Unread rows get a subtle blue tint instead of dimming the read rows.
+       Earlier approach (tr.read opacity: 0.45) made read items hard to
+       scan and flickered on hover. GitHub-style: unread is what stands
+       out, read stays at full readability. */
+    tr:not(.read):not(.bucket-separator) > td {
+      background-color: rgba(73, 147, 248, 0.08);
+    }
     tr.action-error { outline: 1px solid var(--pico-color-red-500); }
 
     /* Custom tooltip layer. Browser-native title tooltips have an
