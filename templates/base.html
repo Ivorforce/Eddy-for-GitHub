@@ -155,9 +155,6 @@
       overflow-wrap: anywhere;
       min-width: 0;
     }
-    /* org/repo stars match the smaller person-star sizing — they're context
-       indicators, not the row's primary action. */
-    .org-star svg, .repo-star svg { width: 0.85em; height: 0.85em; }
     .repo-author {
       display: flex;
       align-items: center;
@@ -179,30 +176,14 @@
     .author-icon.icon-firsttime { color: #bf8700; }
     .author-icon.icon-self      { color: #4493f8; }
 
-    /* Favorite stars — inline-block with negative vertical-align trick keeps
-       the SVG sitting at the same baseline as adjacent text (same approach
-       used by the comment/eye icons in the meta row). */
-    .star-btn {
-      background: none;
-      border: none;
-      padding: 0;
-      margin: 0;
-      cursor: pointer;
-      color: var(--pico-muted-color);
-      width: auto;
-      line-height: 1;
-      display: inline-block;
-    }
-    .star-btn svg {
-      width: 0.95em;
-      height: 0.95em;
-      vertical-align: -0.13em;
-    }
-    .star-btn:not(.is-favorite) svg { fill: none; stroke: currentColor; stroke-width: 2; }
-    .star-btn.is-favorite { color: #d4a017; }
-    .star-btn.is-favorite svg { fill: currentColor; stroke: currentColor; stroke-width: 2; }
-    .item-star { margin-right: 0.45rem; }
-    .person-star svg { width: 0.85em; height: 0.85em; }
+    /* Entity name = popover trigger. Favorite state shows as a gold tint on
+       the trigger text (no star icon). Plain left-click opens the popover
+       (intercepted in JS); middle/cmd-click navigates the underlying link. */
+    .entity-trigger { cursor: pointer; }
+    .entity-trigger.is-favorite { color: #d4a017; }
+    /* Item title gets the same gold tint when the item itself is favorited. */
+    a.item-title.is-favorite,
+    span.item-title.is-favorite { color: #d4a017; }
 
     /* Row-level highlights, in increasing priority:
          context-fav: any of org/repo/author starred → subtle gold (1.5px, half-alpha)
@@ -220,80 +201,84 @@
     tr.is-yours-row td:first-child    { box-shadow: inset 3px 0 0 #4493f8; }
     tr.is-favorite-row td:first-child { box-shadow: inset 3px 0 0 #d4a017; }
 
-    /* Notes — pencil button in actions toggles a full-width drawer row
-       beneath the main row. Drawer is collapsed by default. */
-    .note-btn {
+    /* Item-level popover trigger ("•••") — sits in the actions cell where
+       the old inline star + Note button used to live, replacing both. */
+    .item-trigger-btn {
       background: none;
       border: none;
-      padding: 0.2rem 0.4rem;
-      margin: 0;
       cursor: pointer;
       color: var(--pico-muted-color);
-      display: inline-block;
-      width: auto;
+      font-size: 1rem;
       line-height: 1;
+      padding: 0.15rem 0.4rem;
+      margin-top: 0.3rem;
+      letter-spacing: 0.1em;
+      justify-content: center;
+      text-align: center;
     }
-    .note-btn svg {
-      width: 1em;
-      height: 1em;
-      vertical-align: -0.18em;
-    }
-    .note-btn.has-note { color: #bf8700; }
-    .note-btn:hover { color: var(--pico-color); }
+    .item-trigger-btn:hover { color: var(--pico-color); background: rgba(140, 149, 159, 0.18); border-radius: 0.3rem; }
 
-    /* Entity-note pencil — sits absolutely at the right edge of its
-       repo-line / repo-author parent. Hidden by default to keep idle rows
-       clean; fades in on row hover; always visible (orange) when the
-       entity has a note saved. The right-aligned float overlaps the link
-       on long-wrap names — acceptable; uncommon. */
-    .entity-note {
-      position: absolute;
-      right: 0;
-      top: 0;
-      padding: 0;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.1s ease-in-out;
-    }
-    .entity-note svg { width: 0.9em; height: 0.9em; vertical-align: middle; }
-    tr:hover .entity-note { opacity: 0.55; pointer-events: auto; }
-    tr:hover .entity-note:hover { opacity: 1; }
-    .entity-note.has-note { opacity: 1; pointer-events: auto; color: #bf8700; }
-
-    tr.note-drawer { display: none; }
-    tr.note-drawer.open { display: table-row; }
-    tr.note-drawer td {
-      padding: 0.5rem 2.4rem 0.8rem 1.2rem;  /* extra right padding for the × */
+    /* Action popover panel — shared chrome for org / repo / person / item.
+       Anchored below its trigger via CSS Anchor Positioning (anchor-name on
+       the trigger, position-anchor here). Falls back to default popover
+       placement on browsers that don't support anchor positioning yet. */
+    .action-popover[popover] {
+      /* Reset UA defaults so anchor positioning is the only thing placing it. */
+      inset: auto;
+      margin: 0;
+      padding: 0.55rem 0.65rem;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.5rem;
       background: var(--pico-card-background-color);
-      border-top: none;
-      position: relative;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+      min-width: 18rem;
+      max-width: 26rem;
+      font-size: 0.85rem;
+      color: var(--pico-color);
     }
-    tr.note-drawer .drawer-close {
-      position: absolute;
-      top: 0.35rem;
-      right: 0.6rem;
+    .action-popover[popover]:popover-open {
+      position-area: bottom span-right;
+      margin-top: 0.3rem;
+      position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+    }
+    .action-popover .popover-title {
+      margin-bottom: 0.4rem;
+      font-size: 0.85rem;
+    }
+    .action-popover .popover-kind {
+      font-size: 0.68rem;
+      color: var(--pico-muted-color);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-right: 0.35rem;
+    }
+    .action-popover .popover-name {
+      color: var(--pico-color);
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .action-popover .popover-name:hover { text-decoration: underline; }
+    .action-popover .popover-fav-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
       background: none;
-      border: none;
-      padding: 0.1rem 0.5rem;
-      margin: 0;
-      width: auto;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.35rem;
+      padding: 0.25rem 0.5rem;
+      margin: 0 0 0.45rem;
+      font-size: 0.85rem;
       cursor: pointer;
-      color: var(--pico-muted-color);
-      font-size: 1.1rem;
-      line-height: 1;
+      color: var(--pico-color);
     }
-    tr.note-drawer .drawer-close:hover { color: var(--pico-color); }
-    tr.note-drawer .drawer-label {
-      font-size: 0.78rem;
-      color: var(--pico-muted-color);
-      margin-bottom: 0.3rem;
-    }
-    tr.note-drawer textarea {
+    .action-popover .popover-fav-btn:hover { background: rgba(140, 149, 159, 0.12); }
+    .action-popover form { margin: 0 0 0.45rem; }
+    .action-popover textarea {
       width: 100%;
       margin: 0;
       font-size: 0.85rem;
       min-height: 3rem;
-      padding: 0.5rem 0.7rem;
+      padding: 0.4rem 0.55rem;
     }
 
     /* title meta-row — type pill, PR diff (if any), and labels share one
@@ -372,9 +357,6 @@
       height: 100%;
     }
     td.actions .action-line.active .action-mark { color: #1a7f37; }
-    /* Note sits outside the Read/Muted pill — small breathing room. */
-    td.actions .note-line { margin-top: 0.3rem; }
-    td.actions .note-line.has-note .action-mark { color: #bf8700; }
 
     /* time bucket separators */
     tr.bucket-separator td {
@@ -543,26 +525,40 @@
       htmx.ajax("POST", "/refresh", { target, swap: "innerHTML" });
     });
 
+    // Plain-left-click on a popover trigger opens its popover. Modifier
+    // clicks (cmd/ctrl/shift/alt) and middle-click fall through to the
+    // browser's native link behavior — for entity-name triggers (which are
+    // <a href=...>), that opens GitHub in a new tab. For the item-level
+    // ••• button (no href), modifier-clicks just do nothing, which is fine.
+    document.addEventListener("click", (e) => {
+      const trigger = e.target.closest("[data-popover-target]");
+      if (!trigger) return;
+      if (e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      const pop = document.getElementById(trigger.dataset.popoverTarget);
+      if (pop && typeof pop.showPopover === "function") {
+        // togglePopover() makes the trigger idempotent for repeat clicks.
+        pop.togglePopover();
+      }
+    });
+
     // Entity (person/repo/org) favorite toggles broadcast a single
     // entityFavoriteChanged event. The originating row is updated by the
     // HTMX row-swap; this handler updates *every other* affected row's
-    // star icons and the data-fav-* attribute the row-highlight CSS reads.
-    // Idempotent (force-set toggle), so a stray repeat is harmless.
+    // entity-name triggers (gold-tint via .is-favorite) and the data-fav-*
+    // attribute the row-stripe CSS reads. Idempotent.
     const ENTITY_ROW_ATTR = { person: "author", repo: "repo", org: "org" };
     document.addEventListener("entityFavoriteChanged", (e) => {
       const { kind, key, is_favorite } = e.detail;
       const rowAttr = ENTITY_ROW_ATTR[kind];
       if (!rowAttr) return;
       const escaped = CSS.escape(key);
-      // Star buttons of this kind referencing this key.
+      // Entity-name triggers of this kind referencing this key.
       document.querySelectorAll(
-        `button.${kind}-star[data-key="${escaped}"]`
-      ).forEach((btn) => {
-        btn.classList.toggle("is-favorite", is_favorite);
-        btn.setAttribute(
-          "title",
-          `${is_favorite ? "Unfavorite" : "Favorite"} ${key}`
-        );
+        `[data-fav-trigger][data-kind="${kind}"][data-key="${escaped}"]`
+      ).forEach((el) => {
+        el.classList.toggle("is-favorite", is_favorite);
       });
       // Rows whose author/repo/org matches — drives the subtle row stripe.
       const datasetKey =
@@ -574,64 +570,47 @@
       });
     });
 
-    // Esc closes the drawer that owns the focused textarea. The drawer
-    // collapsing to display:none auto-blurs the textarea, which fires
-    // HTMX's blur trigger and saves any in-flight typing. preventDefault
-    // so Safari doesn't also use the same Esc to exit fullscreen.
-    document.addEventListener("keydown", (e) => {
-      if (e.key !== "Escape") return;
-      const ta = document.activeElement;
-      if (!(ta instanceof HTMLTextAreaElement)) return;
-      const drawer = ta.closest(".note-drawer.open");
-      if (!drawer) return;
-      e.preventDefault();
-      drawer.classList.remove("open");
-    });
-
-    // Preserve which note drawers are open (and any unsaved typing) across
-    // table refreshes. Without this, the visibilitychange auto-refresh
-    // closes whatever drawer the user has open. Snapshots before the swap;
-    // re-applies .open class and restores dirty textarea content after.
-    // Scoped to #notifications-table (the /refresh swap) — per-row swaps
-    // (item/entity favorite) replace one main row at a time and the
-    // server-rendered drawers in the response start with no .open class
-    // anyway, so there's nothing to preserve there in practice.
-    let drawerSnapshot = null;
+    // Preserve which popovers are open (and any unsaved typing) across
+    // full-table refreshes. Without this, the visibilitychange auto-refresh
+    // would dismiss whatever popover the user has open mid-edit. Scoped to
+    // #notifications-table swaps — per-row swaps (favorite, mark-read)
+    // legitimately close the popover because the originating action is done.
+    let popoverSnapshot = null;
     document.addEventListener("htmx:beforeSwap", (e) => {
       const tgt = e.detail.target;
       if (!tgt || tgt.id !== "notifications-table") return;
-      drawerSnapshot = [];
-      tgt.querySelectorAll(".note-drawer.open").forEach((d) => {
-        const ta = d.querySelector("textarea");
+      popoverSnapshot = [];
+      tgt.querySelectorAll(".action-popover").forEach((p) => {
+        if (!p.matches(":popover-open")) return;
+        const ta = p.querySelector("textarea");
         const focused = ta === document.activeElement;
-        drawerSnapshot.push({
-          threadId: d.dataset.threadId,
-          kind: d.dataset.kind,
+        popoverSnapshot.push({
+          threadId: p.dataset.threadId,
+          kind: p.dataset.kind,
           dirty: ta && ta.value !== ta.defaultValue ? ta.value : null,
           focused,
-          selStart: focused ? ta.selectionStart : 0,
-          selEnd: focused ? ta.selectionEnd : 0,
+          selStart: focused && ta ? ta.selectionStart : 0,
+          selEnd: focused && ta ? ta.selectionEnd : 0,
         });
       });
     });
     document.addEventListener("htmx:afterSwap", (e) => {
       const tgt = e.detail.target;
-      if (!tgt || tgt.id !== "notifications-table" || !drawerSnapshot) return;
-      for (const s of drawerSnapshot) {
+      if (!tgt || tgt.id !== "notifications-table" || !popoverSnapshot) return;
+      for (const s of popoverSnapshot) {
         if (!s.threadId) continue;
-        const drawer = tgt.querySelector(
-          `tr.note-drawer[data-thread-id="${CSS.escape(s.threadId)}"]` +
+        const pop = tgt.querySelector(
+          `.action-popover[data-thread-id="${CSS.escape(s.threadId)}"]` +
           `[data-kind="${s.kind}"]`
         );
-        if (!drawer) continue;
-        drawer.classList.add("open");
-        const ta = drawer.querySelector("textarea");
+        if (!pop || typeof pop.showPopover !== "function") continue;
+        try { pop.showPopover(); } catch (_) {}
+        const ta = pop.querySelector("textarea");
         if (!ta) continue;
         if (s.dirty !== null) {
           ta.value = s.dirty;
-          // The new textarea has no HTMX debounce timer running, so without
-          // a nudge an unsaved edit would just sit there until the user
-          // typed again or blurred. Fire the save directly.
+          // New textarea has no HTMX debounce timer running, so nudge a save
+          // so an unsaved edit doesn't just sit there until the next keystroke.
           const url = ta.closest("form")?.getAttribute("hx-post");
           if (url) {
             const data = new FormData();
@@ -644,36 +623,7 @@
           try { ta.setSelectionRange(s.selStart, s.selEnd); } catch (_) {}
         }
       }
-      drawerSnapshot = null;
-    });
-
-    // Note drawer toggle — exclusive within a row group (item / org / repo /
-    // person). Walks forward from the main row collecting adjacent
-    // .note-drawer rows, then opens the matching one and closes the rest.
-    function toggleNoteDrawer(btn, kind) {
-      let row = btn.closest("tr");
-      // The main row is the closest ancestor tr that is NOT a note-drawer.
-      while (row && row.classList.contains("note-drawer")) {
-        row = row.previousElementSibling;
-      }
-      if (!row) return;
-      let n = row.nextElementSibling;
-      while (n && n.classList.contains("note-drawer")) {
-        if (n.dataset.kind === kind) n.classList.toggle("open");
-        else n.classList.remove("open");
-        n = n.nextElementSibling;
-      }
-    }
-
-    // Note save broadcasts entityNoteChanged so every matching pencil
-    // (across rows referencing the same entity) updates its has-note state
-    // without re-rendering the row. Symmetric with entityFavoriteChanged.
-    document.addEventListener("entityNoteChanged", (e) => {
-      const { kind, key, has_note } = e.detail;
-      const escaped = CSS.escape(key);
-      document.querySelectorAll(
-        `.note-btn[data-kind="${kind}"][data-key="${escaped}"]`
-      ).forEach((b) => b.classList.toggle("has-note", has_note));
+      popoverSnapshot = null;
     });
 
     // bfcache restoration: when a page comes back from the back-forward
@@ -688,7 +638,7 @@
     // sendBeacon is the browser-native API for fire-and-forget POSTs that
     // survive page unload (regular fetch/XHR may be cancelled mid-flight).
     window.addEventListener("pagehide", () => {
-      document.querySelectorAll(".note-drawer form").forEach((form) => {
+      document.querySelectorAll(".action-popover form").forEach((form) => {
         const ta = form.querySelector("textarea");
         if (!ta) return;
         if (ta.value === ta.defaultValue) return;

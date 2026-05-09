@@ -120,6 +120,15 @@ TYPE_LABELS = {
     "CheckSuite": "Check",
 }
 
+# Long form for places that have room (e.g. popover headers).
+TYPE_LABELS_LONG = {
+    "PullRequest": "Pull Request",
+    "Issue": "Issue",
+    "Discussion": "Discussion",
+    "Release": "Release",
+    "CheckSuite": "Check Suite",
+}
+
 # Each row carries up to three independent indicators:
 #   action_needed: 'assigned' | 'review_you' | 'review_team' | None  (mutually exclusive)
 #   mentioned_since: bool      (since last action)
@@ -494,6 +503,7 @@ def _row_to_dict(
     d["labels_visible"] = all_labels[:3]
     d["labels_extra"] = all_labels[3:]
     d["type_label"] = TYPE_LABELS.get(d["type"], d["type"])
+    d["type_label_long"] = TYPE_LABELS_LONG.get(d["type"], d["type"])
     d["type_state"] = _type_state(details, d["type"])
     d["bucket"] = _bucket(d["updated_at"])
     d["repo_owner"], d["repo_name"] = repo_owner, repo_name

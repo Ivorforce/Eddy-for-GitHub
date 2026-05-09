@@ -8,48 +8,60 @@
   <td class="repo">
     {% if n.repo_owner %}
     <div class="repo-line">
-      <button class="star-btn org-star{% if n.org_is_favorite %} is-favorite{% endif %}"
-              data-key="{{ n.repo_owner }}"
-              hx-post="/orgs/{{ n.repo_owner }}/favorite"
-              hx-vals='{"thread_id": "{{ n.id }}"}'
-              hx-target="closest tr"
-              hx-swap="outerHTML"
-              title="{% if n.org_is_favorite %}Unfavorite{% else %}Favorite{% endif %} {{ n.repo_owner }}"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
-      <a class="repo-owner" href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a>
-      <button type="button"
-              class="note-btn entity-note{% if n.org_note %} has-note{% endif %}"
-              data-kind="org" data-key="{{ n.repo_owner }}"
-              onclick="toggleNoteDrawer(this, 'org')"
-              title="{% if n.org_note %}Edit{% else %}Add{% endif %} note for {{ n.repo_owner }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button>
+      {# Entity name doubles as anchor + popover trigger. Plain left-click opens
+         the popover (intercepted in JS); middle/cmd-click navigates as a normal
+         <a> link, opening GitHub in a new tab. #}
+      <a class="repo-owner entity-trigger{% if n.org_is_favorite %} is-favorite{% endif %}"
+         href="https://github.com/{{ n.repo_owner }}"
+         target="_blank" rel="noopener"
+         data-popover-target="pop-org-{{ n.id }}"
+         data-fav-trigger data-kind="org" data-key="{{ n.repo_owner }}"
+         style="anchor-name: --pop-org-{{ n.id }}">{{ n.repo_owner }}</a>
+      <div class="action-popover" popover id="pop-org-{{ n.id }}"
+           data-kind="org" data-thread-id="{{ n.id }}"
+           style="position-anchor: --pop-org-{{ n.id }}">
+        <div class="popover-title"><span class="popover-kind">org</span> <a class="popover-name" href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a></div>
+        <button type="button" class="popover-fav-btn"
+                hx-post="/orgs/{{ n.repo_owner }}/favorite"
+                hx-vals='{"thread_id": "{{ n.id }}"}'
+                hx-target="closest tr"
+                hx-swap="outerHTML">{% if n.org_is_favorite %}★ Unfavorite{% else %}☆ Favorite{% endif %}</button>
+        <form hx-post="/orgs/{{ n.repo_owner }}/note"
+              hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
+              hx-swap="none">
+          <textarea name="note_user" rows="3" placeholder="Note about {{ n.repo_owner }} (saved automatically)…">{{ n.org_note or '' }}</textarea>
+        </form>
+      </div>
     </div>
     {% endif %}
     <div class="repo-line">
-      <button class="star-btn repo-star{% if n.repo_is_favorite %} is-favorite{% endif %}"
-              data-key="{{ n.repo }}"
-              hx-post="/repos/{{ n.repo }}/favorite"
-              hx-vals='{"thread_id": "{{ n.id }}"}'
-              hx-target="closest tr"
-              hx-swap="outerHTML"
-              title="{% if n.repo_is_favorite %}Unfavorite{% else %}Favorite{% endif %} {{ n.repo }}"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
-      <a class="repo-name" href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo_name }}</a>
-      <button type="button"
-              class="note-btn entity-note{% if n.repo_note %} has-note{% endif %}"
-              data-kind="repo" data-key="{{ n.repo }}"
-              onclick="toggleNoteDrawer(this, 'repo')"
-              title="{% if n.repo_note %}Edit{% else %}Add{% endif %} note for {{ n.repo }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button>
+      <a class="repo-name entity-trigger{% if n.repo_is_favorite %} is-favorite{% endif %}"
+         href="https://github.com/{{ n.repo }}"
+         target="_blank" rel="noopener"
+         data-popover-target="pop-repo-{{ n.id }}"
+         data-fav-trigger data-kind="repo" data-key="{{ n.repo }}"
+         style="anchor-name: --pop-repo-{{ n.id }}">{{ n.repo_name }}</a>
+      <div class="action-popover" popover id="pop-repo-{{ n.id }}"
+           data-kind="repo" data-thread-id="{{ n.id }}"
+           style="position-anchor: --pop-repo-{{ n.id }}">
+        <div class="popover-title"><span class="popover-kind">repo</span> <a class="popover-name" href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo }}</a></div>
+        <button type="button" class="popover-fav-btn"
+                hx-post="/repos/{{ n.repo }}/favorite"
+                hx-vals='{"thread_id": "{{ n.id }}"}'
+                hx-target="closest tr"
+                hx-swap="outerHTML">{% if n.repo_is_favorite %}★ Unfavorite{% else %}☆ Favorite{% endif %}</button>
+        <form hx-post="/repos/{{ n.repo }}/note"
+              hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
+              hx-swap="none">
+          <textarea name="note_user" rows="3" placeholder="Note about {{ n.repo }} (saved automatically)…">{{ n.repo_note or '' }}</textarea>
+        </form>
+      </div>
     </div>
     {% if n.author_login %}
     <div class="repo-author">
       {# Author icon priority: self trumps member trumps first-time. Each
          encodes a distinct signal to scan for at a glance. #}
       <span class="author-by">by</span>
-      <button class="star-btn person-star{% if n.author_is_favorite %} is-favorite{% endif %}"
-              data-key="{{ n.author_login }}"
-              hx-post="/people/{{ n.author_login }}/favorite"
-              hx-vals='{"thread_id": "{{ n.id }}"}'
-              hx-target="closest tr"
-              hx-swap="outerHTML"
-              title="{% if n.author_is_favorite %}Unfavorite{% else %}Favorite{% endif %} {{ n.author_login }}"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
       {% if n.is_author %}
       <svg class="author-icon icon-self" viewBox="0 0 24 24" fill="currentColor"><title>you (authored this)</title><circle cx="12" cy="8" r="5"/><path d="M3 21a9 9 0 0 1 18 0H3z"/></svg>
       {% elif n.author_badge_class == 'member' %}
@@ -57,27 +69,38 @@
       {% elif n.author_badge_class == 'first-time' %}
       <svg class="author-icon icon-firsttime" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>first-time contributor</title><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/></svg>
       {% endif %}
-      <a class="author-login" href="https://github.com/{{ n.author_login }}" target="_blank" rel="noopener">{{ n.author_login }}</a>
-      <button type="button"
-              class="note-btn entity-note{% if n.author_note %} has-note{% endif %}"
-              data-kind="person" data-key="{{ n.author_login }}"
-              onclick="toggleNoteDrawer(this, 'person')"
-              title="{% if n.author_note %}Edit{% else %}Add{% endif %} note for {{ n.author_login }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button>
+      <a class="author-login entity-trigger{% if n.author_is_favorite %} is-favorite{% endif %}"
+         href="https://github.com/{{ n.author_login }}"
+         target="_blank" rel="noopener"
+         data-popover-target="pop-person-{{ n.id }}"
+         data-fav-trigger data-kind="person" data-key="{{ n.author_login }}"
+         style="anchor-name: --pop-person-{{ n.id }}">{{ n.author_login }}</a>
+      <div class="action-popover" popover id="pop-person-{{ n.id }}"
+           data-kind="person" data-thread-id="{{ n.id }}"
+           style="position-anchor: --pop-person-{{ n.id }}">
+        <div class="popover-title"><span class="popover-kind">person</span> <a class="popover-name" href="https://github.com/{{ n.author_login }}" target="_blank" rel="noopener">{{ n.author_login }}</a></div>
+        <button type="button" class="popover-fav-btn"
+                hx-post="/people/{{ n.author_login }}/favorite"
+                hx-vals='{"thread_id": "{{ n.id }}"}'
+                hx-target="closest tr"
+                hx-swap="outerHTML">{% if n.author_is_favorite %}★ Unfavorite{% else %}☆ Favorite{% endif %}</button>
+        <form hx-post="/people/{{ n.author_login }}/note"
+              hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
+              hx-swap="none">
+          <textarea name="note_user" rows="3" placeholder="Note about {{ n.author_login }} (saved automatically)…">{{ n.author_note or '' }}</textarea>
+        </form>
+      </div>
     </div>
     {% endif %}
   </td>
   {% set m = n.meta %}
   <td class="title">
-    <button class="star-btn item-star{% if n.is_favorite %} is-favorite{% endif %}"
-            hx-post="/toggle/{{ n.id }}/favorite"
-            hx-target="closest tr"
-            hx-swap="outerHTML"
-            title="{% if n.is_favorite %}Unfavorite{% else %}Favorite{% endif %} this item"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
     {% if n.html_url %}
-      <a href="{{ n.html_url }}" target="_blank" rel="noopener"
+      <a class="item-title{% if n.is_favorite %} is-favorite{% endif %}"
+         href="{{ n.html_url }}" target="_blank" rel="noopener"
          {% if n.unread %}onclick="htmx.ajax('POST', '/set/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML'})"{% endif %}>{{ n.title }}</a>
     {% else %}
-      {{ n.title }}
+      <span class="item-title{% if n.is_favorite %} is-favorite{% endif %}">{{ n.title }}</span>
     {% endif %}
     <div class="meta-row">
       <span class="type-pill state-{{ n.type_state }}"
@@ -140,57 +163,24 @@
               hx-swap="outerHTML"
               title="Mute thread (also marks read). Click again to unmute and stay read."><span class="action-mark">{% if n.ignored %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{% endif %}</span>Muted</button>
     </div>
-    <button type="button"
-            class="note-btn action-line note-line{% if n.note_user %} has-note{% endif %}"
-            data-kind="item" data-key="{{ n.id }}"
-            onclick="toggleNoteDrawer(this, 'item')"
-            title="{% if n.note_user %}View/edit note{% else %}Add note{% endif %}"><span class="action-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></span>Note</button>
+    {# Item-level popover trigger: replaces the inline star + Note button. #}
+    <button type="button" class="action-line item-trigger-btn"
+            data-popover-target="pop-item-{{ n.id }}"
+            style="anchor-name: --pop-item-{{ n.id }}"
+            title="Item actions">•••</button>
+    <div class="action-popover" popover id="pop-item-{{ n.id }}"
+         data-kind="item" data-thread-id="{{ n.id }}"
+         style="position-anchor: --pop-item-{{ n.id }}">
+      <div class="popover-title"><span class="popover-kind">{{ n.type_label_long }}</span></div>
+      <button type="button" class="popover-fav-btn"
+              hx-post="/toggle/{{ n.id }}/favorite"
+              hx-target="closest tr"
+              hx-swap="outerHTML">{% if n.is_favorite %}★ Unfavorite{% else %}☆ Favorite{% endif %}</button>
+      <form hx-post="/note/{{ n.id }}"
+            hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
+            hx-swap="none">
+        <textarea name="note_user" rows="3" placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
+      </form>
+    </div>
   </td>
 </tr>
-<tr class="note-drawer" data-kind="item" data-thread-id="{{ n.id }}">
-  <td colspan="5">
-    <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
-    <form hx-post="/note/{{ n.id }}"
-          hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
-          hx-swap="none">
-      <textarea name="note_user" rows="3" placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
-    </form>
-  </td>
-</tr>
-{% if n.repo_owner %}
-<tr class="note-drawer" data-kind="org" data-thread-id="{{ n.id }}">
-  <td colspan="5">
-    <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
-    <div class="drawer-label">Note for <a href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a></div>
-    <form hx-post="/orgs/{{ n.repo_owner }}/note"
-          hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
-          hx-swap="none">
-      <textarea name="note_user" rows="3" placeholder="Note about {{ n.repo_owner }} (saved automatically)…">{{ n.org_note or '' }}</textarea>
-    </form>
-  </td>
-</tr>
-{% endif %}
-<tr class="note-drawer" data-kind="repo" data-thread-id="{{ n.id }}">
-  <td colspan="5">
-    <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
-    <div class="drawer-label">Note for <a href="https://github.com/{{ n.repo }}" target="_blank" rel="noopener">{{ n.repo }}</a></div>
-    <form hx-post="/repos/{{ n.repo }}/note"
-          hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
-          hx-swap="none">
-      <textarea name="note_user" rows="3" placeholder="Note about {{ n.repo }} (saved automatically)…">{{ n.repo_note or '' }}</textarea>
-    </form>
-  </td>
-</tr>
-{% if n.author_login %}
-<tr class="note-drawer" data-kind="person" data-thread-id="{{ n.id }}">
-  <td colspan="5">
-    <button type="button" class="drawer-close" onclick="this.closest('.note-drawer').classList.remove('open')" title="Close (Esc)" aria-label="Close">×</button>
-    <div class="drawer-label">Note for <a href="https://github.com/{{ n.author_login }}" target="_blank" rel="noopener">{{ n.author_login }}</a></div>
-    <form hx-post="/people/{{ n.author_login }}/note"
-          hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
-          hx-swap="none">
-      <textarea name="note_user" rows="3" placeholder="Note about {{ n.author_login }} (saved automatically)…">{{ n.author_note or '' }}</textarea>
-    </form>
-  </td>
-</tr>
-{% endif %}
