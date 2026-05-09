@@ -98,9 +98,10 @@
     {% if n.html_url %}
       <a class="item-title{% if n.is_tracked %} is-tracked{% endif %}"
          href="{{ n.html_url }}" target="_blank" rel="noopener"
-         {% if n.unread %}onclick="htmx.ajax('POST', '/set/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML'})"{% endif %}>{{ n.title }}</a>
+         title="{{ n.title }}"
+         {% if n.unread %}onclick="htmx.ajax('POST', '/set/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML'})"{% endif %}><span class="item-title-text">{{ n.title }}</span></a>
     {% else %}
-      <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}">{{ n.title }}</span>
+      <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}" title="{{ n.title }}"><span class="item-title-text">{{ n.title }}</span></span>
     {% endif %}
     <div class="meta-row">
       <span class="type-pill state-{{ n.type_state }}"

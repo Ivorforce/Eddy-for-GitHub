@@ -17,6 +17,10 @@
     main.container { max-width: 1400px; padding: 1rem 1.25rem 0; }
     table { font-size: 0.86rem; }
     th, td { vertical-align: middle; }
+    /* Pico's default td padding is ~1rem vertical, which sets the floor on
+       row height. Halve it so per-column padding-top overrides actually
+       show up — bottom padding had been the hidden constraint. */
+    table td { padding: 0.45rem 0.5rem; }
     /* Headline pill carries the single most action-defining signal;
        everything else demotes to a muted prose subhead below. Cell wraps
        so prose can breathe and a future AI sentence (1–3 lines) drops in
@@ -83,14 +87,14 @@
       width: 1%;
       white-space: nowrap;
       vertical-align: middle;
-      padding-right: 1rem;
+      padding-right: 0.5rem;
       text-align: center;
       font-size: 0.78rem;
     }
     td.activity .activity-stats {
       display: inline-grid;
       grid-template-columns: auto auto;
-      gap: 0.15rem 0.7rem;
+      gap: 0.05rem 0.7rem;
       color: var(--pico-muted-color);
       cursor: help;
     }
@@ -140,7 +144,7 @@
        title column. overflow-wrap: anywhere lets the break land on dots/hyphens.
        repo-line wraps the star + link per row so the star sits inline with
        the link's first text line even when the link wraps onto two lines. */
-    td.repo { width: 1%; max-width: 14rem; line-height: 1.15; padding-right: 1rem; }
+    td.repo { width: 1%; max-width: 14rem; line-height: 1.1; padding-right: 1rem; }
     td.repo a { text-decoration: none; }
     td.repo a:hover { text-decoration: underline; }
     .repo-line {
@@ -165,7 +169,7 @@
       display: flex;
       align-items: center;
       gap: 0.3rem;
-      margin-top: 0.2rem;
+      margin-top: 0.1rem;
       font-size: 0.72rem;
       color: var(--pico-muted-color);
       position: relative;
@@ -198,12 +202,26 @@
        underline as the click affordance. Slight font-weight bump matches
        GitHub's content-link convention (bold-ish text, blue only on hover).
        Tracked-state tint takes priority over the default color. */
-    a.item-title {
+    /* Title is clamped to 1 line: text ellipsizes, full string lives in
+       the title attribute (hover tooltip). Flex layout lets the trailing
+       "never visited" dot stay pinned to the right while only the inner
+       .item-title-text is the ellipsis target. */
+    a.item-title, span.item-title {
       color: var(--content-color);
       text-decoration: none;
       font-weight: 500;
+      display: flex;
+      align-items: baseline;
+      min-width: 0;
     }
-    a.item-title:hover { text-decoration: underline; }
+    a.item-title .item-title-text,
+    span.item-title .item-title-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+    a.item-title:hover .item-title-text { text-decoration: underline; }
     a.item-title.is-tracked,
     a.item-title.is-tracked:hover,
     span.item-title.is-tracked { color: #eaa54a; }
@@ -222,6 +240,7 @@
       margin-left: 0.4em;
       font-size: 0.55em;
       vertical-align: 0.3em;
+      flex-shrink: 0;
     }
     /* Literal hex required: var() doesn't resolve in :visited (privacy
        clamp). Values mirror Pico's --pico-background-color in each scheme. */
@@ -254,10 +273,10 @@
       border: none;
       cursor: pointer;
       color: var(--pico-muted-color);
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       line-height: 1;
-      padding: 0.1rem 0.4rem;
-      margin-top: 0.15rem;
+      padding: 0.05rem 0.4rem;
+      margin-top: 0.05rem;
       letter-spacing: 0.1em;
       justify-content: center;
       text-align: center;
@@ -370,29 +389,29 @@
     }
 
     /* actions — vertical 3-line list: Read / Muted (mutually exclusive) + Note */
-    td.actions { white-space: nowrap; width: 1%; vertical-align: top; padding-top: 0.25rem; }
+    td.actions { white-space: nowrap; width: 1%; vertical-align: top; padding-top: 0.2rem; }
     td.actions .action-line {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.45rem;
       width: 100%;
-      padding: 0.1rem 0.4rem;
+      padding: 0.05rem 0.35rem;
       margin: 0;
       background: none;
       border: none;
       border-radius: 0.3rem;
       cursor: pointer;
-      font-size: 0.82rem;
+      font-size: 0.76rem;
       color: var(--pico-color);
       text-align: left;
-      line-height: 1.25;
+      line-height: 1.2;
     }
     /* Wrap Read + Muted in a subtle pill so the radio group reads as one unit
        (Note sits outside it). */
     td.actions .action-group {
       background: rgba(140, 149, 159, 0.08);
       border-radius: 0.45rem;
-      padding: 0.15rem;
+      padding: 0.1rem;
     }
     td.actions .action-line:hover {
       background: rgba(140, 149, 159, 0.18);
