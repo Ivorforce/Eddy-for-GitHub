@@ -264,29 +264,6 @@
     a.item-title.is-tracked:hover,
     span.item-title.is-tracked { color: #eaa54a; }
 
-    /* "Never visited" dot. Polarity is flipped: most rows get visited at
-       some point, so we mark the *rare* unvisited case rather than the
-       common visited case. The :visited selector is privacy-locked and
-       additionally clamps the alpha channel to match :link — that's why
-       `color: transparent` (alpha 0) doesn't work and falls back to the
-       inherited text color (black on light mode). The workaround is to
-       set :visited's color to a same-alpha value that blends visually
-       with the row background. */
-    a.item-title::after {
-      content: "●";
-      color: #8ea4c4;
-      margin-left: 0.4em;
-      font-size: 0.55em;
-      vertical-align: 0.3em;
-      flex-shrink: 0;
-    }
-    /* Literal hex required: var() doesn't resolve in :visited (privacy
-       clamp). Values mirror Pico's --pico-background-color in each scheme. */
-    a.item-title:visited::after { color: #ffffff; }
-    @media (prefers-color-scheme: dark) {
-      a.item-title:visited::after { color: #13161e; }
-    }
-
     /* Row-level highlights, in increasing priority:
          context-track: any of org/repo/author tracked → subtle warm-yellow
                                                          (1.5px, half-alpha)
