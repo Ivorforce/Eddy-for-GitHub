@@ -1060,6 +1060,19 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
     # link survives read state and only shifts when fresh activity arrives).
     # Mirrors the "indicators persist across user actions" rule.
     link_candidate = derive_link_url(item)
+    # Detect a "marked read on GitHub" event before the upsert overwrites
+    # the prior unread state. Our local mark-read flow updates the row's
+    # unread column before the next poll runs, so a 1→0 transition observed
+    # HERE must have come from outside the app — the user clicking the
+    # notification on github.com, the notifications-feed auto-clear, etc.
+    # We don't know whether they actually opened the underlying page or
+    # just dismissed the notification, so the action label reflects that
+    # uncertainty (distinct from the local 'visited' / 'read' labels).
+    prev = conn.execute(
+        "SELECT unread FROM notifications WHERE id = ?", (item["id"],)
+    ).fetchone()
+    new_unread = 1 if item.get("unread") else 0
+    external_read = (prev is not None and prev["unread"] == 1 and new_unread == 0)
     conn.execute(
         """
         INSERT INTO notifications (
@@ -1090,7 +1103,7 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
             derive_html_url(item),
             item.get("updated_at") or "",
             item.get("last_read_at"),
-            1 if item.get("unread") else 0,
+            new_unread,
             json.dumps(item),
             now,
             link_candidate,
@@ -1098,6 +1111,15 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
     )
     if reason:
         _accumulate_seen_reason(conn, item["id"], reason)
+    if external_read:
+        db.write_thread_event(
+            conn,
+            thread_id=item["id"],
+            ts=now,
+            kind="user_action",
+            source="github",
+            payload={"action": "read_on_github"},
+        )
 
 
 def _accumulate_seen_reason(

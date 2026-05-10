@@ -743,7 +743,9 @@ def _humanize_age(secs: int) -> str:
 # apply_verdict / dismiss_verdict; keep this in sync if either grows new
 # action labels. Unknown actions render as the raw key (forward-compat).
 _USER_ACTION_LABELS = {
+    "visited":          "Opened link",
     "read":             "Marked read",
+    "read_on_github":   "Marked read remotely",
     "muted":            "Muted",
     "done":             "Archived",
     "kept_unread":      "Kept unread",
@@ -933,7 +935,10 @@ def _format_event_for_render(row, now: int, user_login: str | None = None) -> di
         out["review_state_label"] = label
         out["review_state_class"] = cls
     elif kind == "user_action":
-        out["actor"] = "AI" if source == "ai" else "You"
+        # AI applied the action; GitHub observed the state change without
+        # us doing anything locally; otherwise the user clicked something
+        # in our app.
+        out["actor"] = {"ai": "AI", "github": "GitHub"}.get(source, "You")
         action = payload.get("action") or "?"
         out["summary"] = _USER_ACTION_LABELS.get(action, action)
     elif kind == "lifecycle":
@@ -1533,6 +1538,47 @@ def _apply_action(
         )
     finally:
         conn.close()
+
+
+@app.post("/visit/<thread_id>")
+def visit(thread_id: str):
+    """User clicked the external link to the underlying GitHub thread.
+    Always log a `visited` user_action event so the AI sees the engagement
+    distinct from a plain mark-read click (which means "dismissed without
+    opening"). State side effects mirror the prior link-click behavior
+    that used /set/<id>/read: mark read on GitHub if unread; unsubscribe
+    if ignored (visiting a muted thread unmutes it). Returns the
+    re-rendered row so the read pill updates in place."""
+    token = app.config["GITHUB_TOKEN"]
+    n = _load_one(thread_id)
+    if not n:
+        return ("", 404)
+    needs_state_change = bool(n["unread"]) or bool(n["ignored"])
+    if n["unread"]:
+        github.mark_read(token, thread_id)
+    if n["ignored"]:
+        github.set_subscribed(token, thread_id)
+    if needs_state_change:
+        # _apply_action writes the thread_events row AND updates the
+        # notifications columns; one-shot for the state-changing path.
+        _apply_action(thread_id, "visited", unread=0, ignored=0)
+    else:
+        # Already in clean read state — log the visit alone, no
+        # notifications.action overwrite (preserves any prior label
+        # like 'muted' or 'kept_unread' as the row's last state).
+        conn = db.connect()
+        try:
+            db.write_thread_event(
+                conn,
+                thread_id=thread_id,
+                ts=int(time.time()),
+                kind="user_action",
+                source="user",
+                payload={"action": "visited"},
+            )
+        finally:
+            conn.close()
+    return _render_row(_load_one(thread_id))
 
 
 @app.post("/set/<thread_id>/read")

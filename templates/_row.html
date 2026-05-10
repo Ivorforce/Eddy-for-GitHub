@@ -106,10 +106,15 @@
        seen on this aggregated thread. #}
     {% set click_url = n.link_url or n.html_url %}
     {% if click_url %}
+      {# Link click always logs a 'visited' user_action event (distinct
+         from a plain mark-read click) so the AI sees engagement with
+         the underlying content rather than just dismissal of the row.
+         The visit endpoint also marks read / unsubscribes if needed,
+         matching the previous mark-read-on-click behavior. #}
       <a class="item-title{% if n.is_tracked %} is-tracked{% endif %}"
          href="{{ click_url }}" target="_blank" rel="noopener"
          title="{{ n.title }}"
-         {% if n.unread %}onclick="htmx.ajax('POST', '/set/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML', source: '#filters'})"{% endif %}><span class="item-title-text">{{ n.title }}</span></a>
+         onclick="htmx.ajax('POST', '/visit/{{ n.id }}', {target: this.closest('tr'), swap: 'outerHTML', source: '#filters'})"><span class="item-title-text">{{ n.title }}</span></a>
     {% else %}
       <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}" title="{{ n.title }}"><span class="item-title-text">{{ n.title }}</span></span>
     {% endif %}
