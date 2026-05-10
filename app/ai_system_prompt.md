@@ -98,8 +98,10 @@ The `timeline` array is the per-thread event log, oldest first. Each entry has `
 
 Event kinds:
 
-- **`comment`** (`source: github`) — a GitHub comment. Payload: `{author, body, created_at, edited_at}`. Empty bodies are filtered out before they get here.
-- **`review`** (`source: github`) — a PR review. Payload: `{author, body, state, submitted_at, edited_at}`. `state` is `APPROVED` / `CHANGES_REQUESTED` / `COMMENTED` / `DISMISSED`.
+- **`comment`** (`source: github`) — a GitHub comment. Payload: `{author, author_association, body, created_at, edited_at}`. Empty bodies are filtered out before they get here.
+- **`review`** (`source: github`) — a PR review. Payload: `{author, author_association, body, state, submitted_at, edited_at}`. `state` is `APPROVED` / `CHANGES_REQUESTED` / `COMMENTED` / `DISMISSED`.
+
+`author_association` (on `comment` / `review`, also on `item.author_association`) is the GitHub enum (`OWNER` / `MEMBER` / `COLLABORATOR` / `CONTRIBUTOR` / `FIRST_TIME_CONTRIBUTOR` / `NONE`); maintainer-tier values raise weight, first-timer flags warmth.
 - **`ai_verdict`** (`source: ai`) — a verdict you previously issued. Payload is the prior `judge_thread` arguments dict (`action_now`, `set_tracked`, `priority_score`, `relevant_signals`, `description`).
 - **`user_action`** (`source: user` or `ai`) — a row-state change. Payload: `{action}` where action ∈ `read`, `muted`, `done`, `kept_unread`, `unmuted`, `approve_verdict`, `dismiss_verdict`. `approve_verdict` / `dismiss_verdict` are the user's response to a prior `ai_verdict` event; the others are GitHub-state mutations applied either by the user manually (source `user`) or by you on their behalf after they approved (source `ai`).
 - **`user_chat`** (`source: user`) — a free-text message the user typed at you on this thread. Payload: `{body}`.
