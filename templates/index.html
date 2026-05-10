@@ -90,6 +90,12 @@
       </li>
       <li>
         <label class="filter-toggle">
+          <input type="checkbox" name="show_archived" {% if filters.show_archived %}checked{% endif %}>
+          Show archived
+        </label>
+      </li>
+      <li>
+        <label class="filter-toggle">
           <input type="checkbox" name="tracked_only" {% if filters.tracked_only %}checked{% endif %}>
           Tracked only
         </label>

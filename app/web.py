@@ -1235,9 +1235,10 @@ def _load_notifications():
     n_o = _entity_notes("orgs", "name")
     conn = db.connect()
     try:
+        # Archived (action='done') rows are loaded unconditionally; the
+        # `show_archived` filter in _filter_and_sort decides visibility.
         rows = conn.execute(
             f"SELECT {_ROW_COLS} FROM notifications "
-            "WHERE COALESCE(action, '') != 'done' "
             "ORDER BY updated_at DESC"
         ).fetchall()
         out = [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
@@ -1251,16 +1252,23 @@ def _load_notifications():
         conn.close()
 
 
-def _load_repo_options() -> tuple[list[str], list[str]]:
-    """Distinct owners and repo names from active (non-done) notifications.
-    Drives the Owner and Repo filter dropdowns. Names are de-duplicated
-    across owners — if 'godot' shows up under two owners it appears once."""
+def _load_repo_options(show_archived: bool = False) -> tuple[list[str], list[str]]:
+    """Distinct owners and repo names from notifications. Drives the Owner
+    and Repo filter dropdowns. Names are de-duplicated across owners — if
+    'godot' shows up under two owners it appears once. Archived rows are
+    excluded unless `show_archived` is set, so the dropdowns mirror what's
+    visible in the table under the active filter."""
     conn = db.connect()
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT repo FROM notifications "
-            "WHERE COALESCE(action, '') != 'done' AND repo != ''"
-        ).fetchall()
+        if show_archived:
+            rows = conn.execute(
+                "SELECT DISTINCT repo FROM notifications WHERE repo != ''"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT DISTINCT repo FROM notifications "
+                "WHERE COALESCE(action, '') != 'done' AND repo != ''"
+            ).fetchall()
     finally:
         conn.close()
     owners: set[str] = set()
@@ -1277,16 +1285,17 @@ def _load_repo_options() -> tuple[list[str], list[str]]:
 def _filters_from_request() -> dict:
     src = request.values  # union of query string + form fields
     return {
-        "actions":      src.getlist("actions"),
-        "hide_read":    bool(src.get("hide_read")),
-        "hide_done":    bool(src.get("hide_done")),
-        "tracked_only": bool(src.get("tracked_only")),
-        "mine_only":    bool(src.get("mine_only")),
-        "owner":        src.get("owner") or "",
-        "repo":         src.get("repo") or "",
-        "sort":         src.get("sort") or "updated",
-        "q":            (src.get("q") or "").strip(),
-        "types":        src.getlist("types"),
+        "actions":       src.getlist("actions"),
+        "hide_read":     bool(src.get("hide_read")),
+        "hide_done":     bool(src.get("hide_done")),
+        "show_archived": bool(src.get("show_archived")),
+        "tracked_only":  bool(src.get("tracked_only")),
+        "mine_only":     bool(src.get("mine_only")),
+        "owner":         src.get("owner") or "",
+        "repo":          src.get("repo") or "",
+        "sort":          src.get("sort") or "updated",
+        "q":             (src.get("q") or "").strip(),
+        "types":         src.getlist("types"),
     }
 
 
@@ -1321,6 +1330,11 @@ def _render_row(n: dict):
 
 
 def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
+    # Archived (locally action='done') rows are hidden by default and only
+    # surface when Show archived is on. Distinct from Hide done below, which
+    # filters by GitHub-side resolution state (merged/closed/answered).
+    if not f.get("show_archived"):
+        rows = [r for r in rows if r["action"] != "done"]
     if f["actions"]:
         actions = set(f["actions"])
         want_mentioned = "mentioned" in actions
@@ -1422,7 +1436,7 @@ def _load_one(thread_id: str) -> dict | None:
 def index():
     f = _filters_from_request()
     rows = _filter_and_sort(_load_notifications(), f)
-    owners, repo_names = _load_repo_options()
+    owners, repo_names = _load_repo_options(show_archived=f["show_archived"])
     return render_template(
         "index.html",
         notifications=rows,
