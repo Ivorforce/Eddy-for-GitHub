@@ -188,7 +188,7 @@
          right) once it does. The signal pills below replace the manual-
          mode prose, and only show signals the AI deemed relevant. #}
       {% if n.ai_verdict %}
-      <span class="ai-verdict-pill-group priority-{{ n.ai_verdict.priority }}{% if n.ai_verdict.stale %} stale{% endif %}">
+      <span class="ai-verdict-pill-group{% if n.ai_verdict.stale %} stale{% endif %}" style="--imp: {{ '%.3f' % n.ai_verdict.priority_score }}">
         {# popovertarget (native) instead of data-popover-target (JS) so the
            browser's built-in toggle handles repeat clicks correctly. The
            JS path always-reopens because light-dismiss on pointerdown
