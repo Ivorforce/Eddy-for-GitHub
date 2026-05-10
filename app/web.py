@@ -822,6 +822,28 @@ def _verdict_render_dict(payload: dict) -> dict:
 _COMMENT_COALESCE_GAP_SECS = 30 * 86400
 
 
+def _coalesce_visits(events: list[dict]) -> list[dict]:
+    """Drop earlier `visited` user_actions when adjacent in the timeline
+    (no other event of any kind between them). Repeated link-clicks all
+    carry the same payload, so only the most-recent one is informative —
+    older ones are redundant noise that pushes the composer down."""
+    out: list[dict] = []
+    for ev in events:
+        is_visit = (
+            ev.get("kind") == "user_action"
+            and (ev.get("payload") or {}).get("action") == "visited"
+        )
+        prev_is_visit = bool(out) and (
+            out[-1].get("kind") == "user_action"
+            and (out[-1].get("payload") or {}).get("action") == "visited"
+        )
+        if is_visit and prev_is_visit:
+            out[-1] = ev   # replace older visit with newer
+        else:
+            out.append(ev)
+    return out
+
+
 def _is_comment_like(ev: dict) -> bool:
     """A `review` with state COMMENTED is a top-level review with no
     verdict, just prose — semantically the same as a regular comment
@@ -990,10 +1012,14 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     now = int(time.time())
     user_login = app.config.get("USER_LOGIN")
     timeline = [_format_event_for_render(r, now, user_login=user_login) for r in rows]
-    # Coalesce comment runs BEFORE marking the pending ai_verdict —
-    # ai_verdict events aren't touched by coalescing, so the in-bubble
-    # approve/dismiss markers still land on the same object identity.
+    # Coalesce comment runs and repeated visits BEFORE marking the
+    # pending ai_verdict — neither pass touches ai_verdict events, so
+    # the in-bubble approve/dismiss markers still land on the same
+    # object identity. Visit coalescing runs after comments so a run
+    # like (comment, visit, visit, visit, comment) ends up with one
+    # comment_group + one visit + one comment.
     timeline = _coalesce_comments(timeline)
+    timeline = _coalesce_visits(timeline)
     # Walk from newest backward; first ai_verdict wins.
     for ev in reversed(timeline):
         if ev["kind"] == "ai_verdict":
