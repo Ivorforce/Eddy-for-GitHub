@@ -167,6 +167,28 @@ def _read_preferences() -> str:
         return "(No preferences file found at config/preferences.md. Judge using the heuristics in the system prompt only.)"
 
 
+def _identity_block(user_login: str | None, user_teams) -> str | None:
+    """Short prefix telling the model whose inbox it's triaging. Without it,
+    the AI sees logins like 'lukastenbrink' as anonymous strings and can't
+    tell author/assignee/reviewer fields apart from any other commenter.
+    Returns None when the login isn't known (auth.fetch_identity failed)."""
+    if not user_login:
+        return None
+    parts = [
+        f"You are judging on behalf of GitHub user @{user_login}. "
+        f'Treat the login "{user_login}" appearing in any field (author, assignee, '
+        f"requested_reviewer, commenter, etc.) as the user themselves."
+    ]
+    if user_teams:
+        team_strs = sorted(f"{org}/{slug}" for org, slug in user_teams)
+        parts.append(
+            "The user belongs to these GitHub teams: "
+            + ", ".join(team_strs)
+            + ". A requested_teams entry matching one of these is a team-level review request to the user."
+        )
+    return " ".join(parts)
+
+
 # ---- Context assembly ---------------------------------------------------
 
 # Body truncation limit when building the per-thread context. Sized to fit
@@ -473,9 +495,21 @@ class AIError(RuntimeError):
     Routes catch this and surface via the existing showError HX-Trigger."""
 
 
-def judge(thread_id: str, conn: sqlite3.Connection) -> dict:
+def judge(
+    thread_id: str,
+    conn: sqlite3.Connection,
+    *,
+    user_login: str | None = None,
+    user_teams=None,
+) -> dict:
     """Generate a verdict for one thread, persist it on the row, log the
-    call, and return the verdict dict. Raises AIError on failure."""
+    call, and return the verdict dict. Raises AIError on failure.
+
+    user_login / user_teams come from auth.fetch_identity at startup
+    (stored in app.config); when present, they're prepended to the system
+    prompt so the model can recognize the user's own login in author /
+    assignee / reviewer / commenter fields. Both default to None so this
+    module remains callable without web's app context."""
     model = _model_id()
     cap = _daily_cap()
     spent = _spent_today(conn)
@@ -494,6 +528,9 @@ def judge(thread_id: str, conn: sqlite3.Connection) -> dict:
         raise AIError(f"Thread {thread_id} not found")
 
     system_prompt = _read_system_prompt()
+    identity = _identity_block(user_login, user_teams)
+    if identity:
+        system_prompt = f"{identity}\n\n{system_prompt}"
     prefs = _read_preferences()
     user_msg = _build_user_message(ctx)
 

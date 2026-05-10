@@ -1409,7 +1409,12 @@ def ai_judge(thread_id: str):
     conn = db.connect()
     try:
         try:
-            ai.judge(thread_id, conn)
+            ai.judge(
+                thread_id,
+                conn,
+                user_login=app.config.get("USER_LOGIN"),
+                user_teams=app.config.get("USER_TEAMS"),
+            )
         except ai.AIError as e:
             log.warning("AI judge failed for %s: %s", thread_id, e)
             error = f"AI judge failed: {e}"
