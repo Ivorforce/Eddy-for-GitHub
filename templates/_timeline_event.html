@@ -92,6 +92,14 @@
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
+  {% elif ev.kind == 'lifecycle' %}
+    <div class="timeline-line">
+      <span class="timeline-summary">
+        {{ author_chip(ev.actor, ev.author_badge_class) }}
+        <span class="lifecycle-verb {{ ev.lifecycle_class }}">{{ ev.lifecycle_verb }}</span>
+      </span>
+      <span class="timeline-age">{{ ev.age_text }}</span>
+    </div>
   {% else %}
     <div class="timeline-line">
       <span class="timeline-actor-mini">{{ ev.actor }}</span>

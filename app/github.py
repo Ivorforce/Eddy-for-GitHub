@@ -445,10 +445,57 @@ query($owner: String!, $name: String!, $number: Int!) {
           lastEditedAt
         }
       }
+      timelineItems(last: 50, itemTypes: [
+        MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT,
+        READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT
+      ]) {
+        nodes {
+          __typename
+          ... on MergedEvent          { id createdAt actor { login } }
+          ... on ClosedEvent          { id createdAt actor { login } stateReason }
+          ... on ReopenedEvent        { id createdAt actor { login } }
+          ... on ReadyForReviewEvent  { id createdAt actor { login } }
+          ... on ConvertToDraftEvent  { id createdAt actor { login } }
+        }
+      }
     }
   }
 }
 """
+
+
+# GraphQL __typename → our payload's `action` string. The kind covers all
+# state transitions we surface; the action discriminates what actually
+# happened. Centralized here so the parsers in fetch_pr / fetch_issue and
+# the renderer in app/web.py stay in sync via a single source of truth.
+_LIFECYCLE_TYPENAME_TO_ACTION = {
+    "MergedEvent":         "merged",
+    "ClosedEvent":         "closed",
+    "ReopenedEvent":       "reopened",
+    "ReadyForReviewEvent": "ready_for_review",
+    "ConvertToDraftEvent": "converted_to_draft",
+}
+
+
+def _parse_lifecycle_events(nodes) -> list[dict]:
+    """timelineItems nodes → list of REST-ish dicts ({id, action, actor,
+    created_at, reason}). `reason` is the close-reason for Issue
+    ClosedEvents (`completed` / `not_planned` / `duplicate`); PRs and
+    other events return None there. The GraphQL global node `id` is
+    the dedup key used as external_id when written to thread_events."""
+    out: list[dict] = []
+    for n in nodes or []:
+        action = _LIFECYCLE_TYPENAME_TO_ACTION.get(n.get("__typename") or "")
+        if not action:
+            continue
+        out.append({
+            "id":         n.get("id"),
+            "action":     action,
+            "actor":      (n.get("actor") or {}).get("login"),
+            "created_at": n.get("createdAt"),
+            "reason":     ((n.get("stateReason") or "").lower() or None),
+        })
+    return out
 
 
 def fetch_pr(token: str, api_url: str | None) -> dict | None:
@@ -612,6 +659,9 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "comments": comment_total,
         "_comment_history": comment_history,
         "_reviews": rest_reviews,
+        "_lifecycle_events": _parse_lifecycle_events(
+            (pr.get("timelineItems") or {}).get("nodes")
+        ),
         "author_association": pr.get("authorAssociation"),
         "user": {
             "login": author.get("login"),
@@ -654,6 +704,13 @@ query($owner: String!, $name: String!, $number: Int!) {
           bodyText
           createdAt
           lastEditedAt
+        }
+      }
+      timelineItems(last: 50, itemTypes: [CLOSED_EVENT, REOPENED_EVENT]) {
+        nodes {
+          __typename
+          ... on ClosedEvent   { id createdAt actor { login } stateReason }
+          ... on ReopenedEvent { id createdAt actor { login } }
         }
       }
     }
@@ -755,6 +812,9 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         "state_reason": state_reason,
         "comments": comment_total,
         "_comment_history": comment_history,
+        "_lifecycle_events": _parse_lifecycle_events(
+            (issue.get("timelineItems") or {}).get("nodes")
+        ),
         "author_association": issue.get("authorAssociation"),
         "user": {
             "login": author.get("login"),
@@ -852,6 +912,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
         review_state = details.pop("_review_state", None)
         comment_history = details.pop("_comment_history", None) or []
         pr_reviews = details.pop("_reviews", None) or []
+        lifecycle_events = details.pop("_lifecycle_events", None) or []
 
         # COALESCE captures baseline_comments on first enrichment so the
         # '+N new comments' indicator stays alive through Read actions and
@@ -920,6 +981,30 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                     "submitted_at": rev.get("submitted_at"),
                     "edited_at": rev.get("edited_at"),
                 },
+            )
+        # State transitions (merged / closed / reopened / draft↔ready).
+        # Deduped on the GraphQL global node id; re-fetch leaves them
+        # untouched (the events are immutable on GitHub's side once
+        # they happen).
+        for ev in lifecycle_events:
+            ev_id = ev.get("id")
+            if ev_id is None:
+                continue
+            ts = db.iso_to_unix(ev.get("created_at")) or now
+            payload = {
+                "action": ev.get("action"),
+                "actor":  ev.get("actor"),
+            }
+            if ev.get("reason"):
+                payload["reason"] = ev["reason"]
+            db.write_thread_event(
+                conn,
+                thread_id=row["id"],
+                ts=ts,
+                kind="lifecycle",
+                source="github",
+                external_id=str(ev_id),
+                payload=payload,
             )
 
         if row["type"] == "PullRequest":

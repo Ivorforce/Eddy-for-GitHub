@@ -823,6 +823,14 @@
     .ai-verdict-popover .timeline-line .state-changes-requested { color: #a8676b; }
     .ai-verdict-popover .timeline-line .state-dismissed         { color: var(--pico-muted-color); }
     .ai-verdict-popover .timeline-line .state-pending           { color: var(--pico-muted-color); }
+    /* Lifecycle verbs (merged / closed / reopened / draft↔ready). Same
+       weight + tint scheme as review states so the timeline reads
+       consistently — merged purple matches GitHub's convention; closed
+       red, reopened green, draft transitions stay neutral. */
+    .ai-verdict-popover .timeline-line .lifecycle-verb { font-weight: 500; }
+    .ai-verdict-popover .timeline-line .lifecycle-merged   { color: #8957e5; }
+    .ai-verdict-popover .timeline-line .lifecycle-closed   { color: #a8676b; }
+    .ai-verdict-popover .timeline-line .lifecycle-reopened { color: #1a7f37; }
     .ai-verdict-popover .timeline-age {
       font-size: 0.65rem;
       color: var(--pico-muted-color);

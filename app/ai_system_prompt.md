@@ -100,6 +100,7 @@ Event kinds:
 
 - **`comment`** (`source: github`) — a GitHub comment. Payload: `{author, author_association, body, created_at, edited_at}`. Empty bodies are filtered out before they get here.
 - **`review`** (`source: github`) — a PR review. Payload: `{author, author_association, body, state, submitted_at, edited_at}`. `state` is `APPROVED` / `CHANGES_REQUESTED` / `COMMENTED` / `DISMISSED`.
+- **`lifecycle`** (`source: github`) — a state transition on the thread. Payload: `{action, actor, reason?}`. action is `merged` / `closed` / `reopened` / `ready_for_review` / `converted_to_draft`; reason is the close-reason for issues (`completed` / `not_planned` / `duplicate`).
 
 `author_association` (on `comment` / `review`, also on `item.author_association`) is the GitHub enum (`OWNER` / `MEMBER` / `COLLABORATOR` / `CONTRIBUTOR` / `FIRST_TIME_CONTRIBUTOR` / `NONE`); maintainer-tier values raise weight, first-timer flags warmth.
 - **`ai_verdict`** (`source: ai`) — a verdict you previously issued. Payload is the prior `judge_thread` arguments dict (`action_now`, `set_tracked`, `priority_score`, `relevant_signals`, `description`).

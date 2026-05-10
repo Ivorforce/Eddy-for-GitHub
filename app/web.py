@@ -768,6 +768,21 @@ _REVIEW_STATE = {
 }
 
 
+# Lifecycle action → (display verb, CSS modifier class). The verb reads
+# as past tense following the actor name ("alice merged"); the class
+# colors the verb so a thread's chronology is scannable at a glance —
+# merged purple-ish (matches GitHub's merge color), closed muted-red,
+# reopened green, draft↔ready stays neutral. Issue close-reasons append
+# a parenthetical to "closed" via app/web.py rendering.
+_LIFECYCLE_LABEL = {
+    "merged":             ("merged",                  "lifecycle-merged"),
+    "closed":             ("closed",                  "lifecycle-closed"),
+    "reopened":           ("reopened",                "lifecycle-reopened"),
+    "ready_for_review":   ("marked ready for review", "lifecycle-neutral"),
+    "converted_to_draft": ("converted to draft",      "lifecycle-neutral"),
+}
+
+
 def _verdict_render_dict(payload: dict) -> dict:
     """Display-ready bits of a past ai_verdict event's payload, for
     rendering inside the timeline list. Distinct from _ai_verdict_dict,
@@ -921,6 +936,20 @@ def _format_event_for_render(row, now: int, user_login: str | None = None) -> di
         out["actor"] = "AI" if source == "ai" else "You"
         action = payload.get("action") or "?"
         out["summary"] = _USER_ACTION_LABELS.get(action, action)
+    elif kind == "lifecycle":
+        actor = payload.get("actor") or "?"
+        out["actor"] = actor
+        # Lifecycle events come from GraphQL timelineItems and don't
+        # carry author_association, so the chip falls through to the
+        # generic icon (or 'self' when the actor is the user).
+        out["author_badge_class"] = _author_badge_class(actor, None, user_login)
+        action = payload.get("action") or "?"
+        verb, cls = _LIFECYCLE_LABEL.get(action, (action, ""))
+        reason = payload.get("reason")
+        if reason and action == "closed":
+            verb = f"{verb} ({reason.replace('_', ' ')})"
+        out["lifecycle_verb"] = verb
+        out["lifecycle_class"] = cls
     elif kind == "ai_verdict":
         out["actor"] = "AI"
         out["verdict"] = _verdict_render_dict(payload)
