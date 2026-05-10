@@ -130,28 +130,22 @@ _ROW_COLS = (
     "seen_reasons, baseline_comments, "
     "pr_reactions_json, unique_commenters, unique_reviewers, "
     "pr_review_state, baseline_review_state, "
-    "note_user, note_ai, is_tracked, "
+    "note_user, is_tracked, "
     "ai_verdict_json, ai_verdict_at, ai_verdict_model"
 )
 
 
 # Human-readable labels for the action_now and set_tracked enums in the
 # AI verdict pill. Mirrors the JSON enum values defined in app/ai.py:TOOL_DEF.
-# 'none' is intentionally absent — when the AI proposes no state change,
-# the priority is the verdict (see _AI_NONE_BY_PRIORITY) and the pill
-# carries that word instead. For the other actions, the action itself
-# is the user-facing instruction ("mark read" already implies "noise"),
-# so priority is conveyed only via the pill's color tint.
+# action_now is a suggestion to the user (not an auto-applied mutation):
+# 'look' = open the link, 'ignore' = mark read without engaging, 'mute' =
+# silence, 'archive' = nothing left to do. The pill's color tint conveys
+# priority independently.
 _AI_ACTION_LABELS = {
-    "mark_read": "mark read",
-    "mute":      "mute",
-    "archive":   "archive",
-}
-# When action_now == "none", priority bucket drives the headline word.
-_AI_NONE_BY_BUCKET = {
-    "low":    "ignore",
-    "normal": "when convenient",
-    "high":   "important",
+    "look":    "look",
+    "ignore":  "ignore",
+    "mute":    "mute",
+    "archive": "archive",
 }
 _AI_TRACK_LABELS = {
     "track":   "track",
@@ -159,68 +153,11 @@ _AI_TRACK_LABELS = {
     # 'leave' intentionally absent — pill omits it.
 }
 
-# Sentence-case verbs for the Approve button's tooltip — we want the user
-# to know exactly what clicking ✓ will do, not the generic "apply all
-# proposed actions". When action_now=='none' AND set_tracked=='leave',
-# there's nothing to apply and the button is disabled.
-_AI_APPROVE_ACTION_VERBS = {
-    "mark_read": "Mark read",
-    "mute":      "Mute",
-    "archive":   "Archive",
-}
-_AI_APPROVE_TRACK_VERBS = {
-    "track":   "track",
-    "untrack": "untrack",
-}
-
-
-def _approve_label(action_now: str, set_tracked: str, row: dict) -> str | None:
-    """Build the Approve-button tooltip from the verdict's action/track
-    fields, accounting for what's already true on the row. Returns None
-    when every proposed change is already in effect (so the click would
-    be a no-op) — caller should disable the button.
-
-    Rules:
-      mark_read on a read+subscribed row → drop (already read)
-      mute      on an already-muted row  → drop
-      archive   on a done row            → drop
-      track     on an already-tracked    → drop
-      untrack   on an already-untracked  → drop
-    """
-    is_unread  = bool(row.get("unread"))
-    is_ignored = bool(row.get("ignored"))
-    is_done    = (row.get("action") == "done")
-    is_tracked = bool(row.get("is_tracked"))
-
-    action_part: str | None = None
-    if action_now == "mark_read" and (is_unread or is_ignored):
-        action_part = _AI_APPROVE_ACTION_VERBS["mark_read"]
-    elif action_now == "mute" and not is_ignored:
-        action_part = _AI_APPROVE_ACTION_VERBS["mute"]
-    elif action_now == "archive" and not is_done:
-        action_part = _AI_APPROVE_ACTION_VERBS["archive"]
-
-    track_part: str | None = None
-    if set_tracked == "track" and not is_tracked:
-        track_part = _AI_APPROVE_TRACK_VERBS["track"]
-    elif set_tracked == "untrack" and is_tracked:
-        track_part = _AI_APPROVE_TRACK_VERBS["untrack"]
-
-    if action_part and track_part:
-        return f"{action_part} and {track_part}"
-    if action_part:
-        return action_part
-    if track_part:
-        return track_part.capitalize()
-    return None
-
 
 def _priority_bucket(score: float) -> str:
     """Map a 0.0-1.0 priority score to one of three buckets — drives the
-    pill's color class. Boundaries chosen so the three named anchors
-    ('ignore' at 0.1, 'when convenient' at 0.5, 'important' at 0.7) all
-    fall in the bucket their word suggests. Sort order uses the float
-    directly for finer-grained ranking."""
+    pill's color class. Sort order uses the float directly for
+    finer-grained ranking."""
     if score < 0.34:
         return "low"
     if score < 0.67:
@@ -339,11 +276,11 @@ _MERGE_STATE_DISPLAY = {
 }
 
 # type_state values that mean "this thread is resolved" — drives the
-# Hide done filter. Distinct from "closed" in any single GitHub sense:
+# Hide resolved filter. Distinct from "closed" in any single GitHub sense:
 # PRs report 'merged' or 'closed_pr', Issues report 'closed_completed'
 # or 'closed_not_planned', Discussions report 'answered' or 'closed'.
-# All count as done for triage purposes — nothing left to do.
-DONE_TYPE_STATES = {
+# All count as resolved for triage purposes — nothing left to do.
+RESOLVED_TYPE_STATES = {
     "merged",
     "closed_pr",
     "closed_completed",
@@ -739,9 +676,9 @@ def _humanize_age(secs: int) -> str:
 
 
 # Display labels for user_action events in the popover timeline. Source
-# of truth for action strings is web._apply_action and ai._set_state /
-# apply_verdict / dismiss_verdict; keep this in sync if either grows new
-# action labels. Unknown actions render as the raw key (forward-compat).
+# of truth for action strings is web._apply_action; keep this in sync if
+# it grows new action labels. Unknown actions render as the raw key
+# (forward-compat).
 _USER_ACTION_LABELS = {
     "visited":          "Opened link",
     "read":             "Marked read",
@@ -750,8 +687,6 @@ _USER_ACTION_LABELS = {
     "done":             "Archived",
     "kept_unread":      "Kept unread",
     "unmuted":          "Unmuted",
-    "approve_verdict":  "Approved verdict",
-    "dismiss_verdict":  "Dismissed verdict",
 }
 
 
@@ -786,10 +721,10 @@ _LIFECYCLE_LABEL = {
 
 
 def _verdict_render_dict(payload: dict) -> dict:
-    """Display-ready bits of a past ai_verdict event's payload, for
-    rendering inside the timeline list. Distinct from _ai_verdict_dict,
-    which shapes the *cached pending* verdict (and includes approve_label
-    / stale logic that don't apply to historical entries)."""
+    """Display-ready bits of an ai_verdict event's payload, for rendering
+    inside the timeline list. Distinct from _ai_verdict_dict, which shapes
+    the *cached* verdict for the row pill (and adds stale logic that
+    doesn't apply to historical entries)."""
     score_raw = payload.get("priority_score")
     if isinstance(score_raw, (int, float)):
         priority_score = max(0.0, min(1.0, float(score_raw)))
@@ -957,10 +892,9 @@ def _format_event_for_render(row, now: int, user_login: str | None = None) -> di
         out["review_state_label"] = label
         out["review_state_class"] = cls
     elif kind == "user_action":
-        # AI applied the action; GitHub observed the state change without
-        # us doing anything locally; otherwise the user clicked something
-        # in our app.
-        out["actor"] = {"ai": "AI", "github": "GitHub"}.get(source, "You")
+        # GitHub observed the state change without us doing anything
+        # locally; otherwise the user clicked something in our app.
+        out["actor"] = "GitHub" if source == "github" else "You"
         action = payload.get("action") or "?"
         out["summary"] = _USER_ACTION_LABELS.get(action, action)
     elif kind == "lifecycle":
@@ -990,13 +924,7 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     """Mutate `d` in place: attach `timeline` + `events_since_verdict`
     fields when the row has a cached verdict (i.e., the popover will
     render). Skipped otherwise so bulk list rendering doesn't pay the
-    cost on rows that aren't going to display a popover.
-
-    The latest `ai_verdict` event in the timeline gets `is_pending=True`
-    and inherits the cached verdict's `approve_label`. The popover
-    template renders the in-bubble Approve / Dismiss buttons only on
-    that event — past verdicts are history; you can't approve them
-    retroactively."""
+    cost on rows that aren't going to display a popover."""
     verdict = d.get("ai_verdict")
     if not verdict:
         return
@@ -1012,26 +940,13 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     now = int(time.time())
     user_login = app.config.get("USER_LOGIN")
     timeline = [_format_event_for_render(r, now, user_login=user_login) for r in rows]
-    # Coalesce comment runs and repeated visits BEFORE marking the
-    # pending ai_verdict — neither pass touches ai_verdict events, so
-    # the in-bubble approve/dismiss markers still land on the same
-    # object identity. Visit coalescing runs after comments so a run
-    # like (comment, visit, visit, visit, comment) ends up with one
-    # comment_group + one visit + one comment.
     timeline = _coalesce_comments(timeline)
     timeline = _coalesce_visits(timeline)
-    # Walk from newest backward; first ai_verdict wins.
-    for ev in reversed(timeline):
-        if ev["kind"] == "ai_verdict":
-            ev["is_pending"] = True
-            ev["approve_label"] = verdict.get("approve_label")
-            break
     d["timeline"] = timeline
     # "Stale" count: GitHub events + the user's own typed messages that
-    # postdate the cached verdict. user_action events on the verdict
-    # itself (approve/dismiss) clear the cache, so they never appear
-    # here; other user_actions (mark-read on the row directly) don't
-    # really "invalidate" a verdict, so they're excluded.
+    # postdate the cached verdict. Row-state user_actions (mark-read,
+    # mute, etc.) aren't counted — they're the user's response to the
+    # verdict, not new context that invalidates it.
     after = verdict.get("at") or 0
     d["events_since_verdict"] = sum(
         1 for r in rows
@@ -1053,47 +968,25 @@ def _ai_verdict_dict(
         verdict = json.loads(verdict_json)
     except (ValueError, TypeError):
         return None
-    action_now = verdict.get("action_now") or "none"
+    action_now = verdict.get("action_now") or "look"
     set_tracked = verdict.get("set_tracked") or "leave"
 
-    # priority_score is the canonical priority signal (0.0-1.0 float).
-    # Legacy verdicts cached before the schema change carry the old
-    # 'priority' enum (low/normal/high) — map it to a representative float
-    # so old verdicts still render and sort sensibly.
     score_raw = verdict.get("priority_score")
-    if isinstance(score_raw, (int, float)):
-        priority_score = max(0.0, min(1.0, float(score_raw)))
-    else:
-        # Legacy fallback: low → 0.2, normal → 0.5, high → 0.8.
-        legacy_priority = verdict.get("priority")
-        priority_score = {"low": 0.2, "normal": 0.5, "high": 0.8}.get(
-            legacy_priority, 0.5
-        )
+    priority_score = (
+        max(0.0, min(1.0, float(score_raw)))
+        if isinstance(score_raw, (int, float))
+        else 0.5
+    )
     priority_bucket = _priority_bucket(priority_score)
 
-    parts: list[str] = []
-    if action_now == "none":
-        # No state change proposed — priority bucket becomes the verdict
-        # word so the pill answers "what do I do?" instead of "what's
-        # changing?".
-        parts.append(_AI_NONE_BY_BUCKET.get(priority_bucket, "review"))
-    else:
-        parts.append(_AI_ACTION_LABELS.get(action_now, action_now))
+    parts = [_AI_ACTION_LABELS.get(action_now, action_now)]
     if set_tracked in _AI_TRACK_LABELS:
         parts.append(_AI_TRACK_LABELS[set_tracked])
     pill_text = " · ".join(parts)
 
     age_text = _humanize_age(int(time.time()) - at)
 
-    # description is the single-field replacement for summary+rationale.
-    # Legacy verdicts (cached before the schema change) still have the old
-    # split; join them so the popover renders consistently regardless of
-    # which shape the cached blob happens to use.
     description = (verdict.get("description") or "").strip()
-    if not description and (verdict.get("summary") or verdict.get("rationale")):
-        s = (verdict.get("summary") or "").strip()
-        r = (verdict.get("rationale") or "").strip()
-        description = " — ".join(p for p in (s, r) if p)
 
     # Render relevant_signals (priority-ordered enum keys) into displayable
     # (key, label, cls) triples. Drop unknown keys silently — they're
@@ -1119,9 +1012,6 @@ def _ai_verdict_dict(
         "at":              at,
         "age_text":        age_text,
         "pill_text":       pill_text,
-        # approve_label is set by _row_to_dict — it depends on the row's
-        # current state (already read? already tracked?) which this
-        # function doesn't see.
         "stale":           bool(details_fetched_at and details_fetched_at > at),
     }
 
@@ -1210,18 +1100,10 @@ def _row_to_dict(
     d["repo_note"] = (notes_repos or {}).get(d["repo"])
     d["org_note"] = (notes_orgs or {}).get(repo_owner) if repo_owner else None
 
-    # Pending AI verdict (None if no judgment is queued for this row).
+    # Cached AI verdict (None if Ask AI hasn't been run on this row).
     d["ai_verdict"] = _ai_verdict_dict(
         ai_verdict_json, ai_verdict_at, ai_verdict_model, details_fetched_at,
     )
-    # approve_label depends on row state (no-op detection), so it's set
-    # here rather than inside _ai_verdict_dict.
-    if d["ai_verdict"]:
-        d["ai_verdict"]["approve_label"] = _approve_label(
-            d["ai_verdict"]["action_now"],
-            d["ai_verdict"]["set_tracked"],
-            d,
-        )
 
     return d
 
@@ -1287,7 +1169,7 @@ def _filters_from_request() -> dict:
     return {
         "actions":       src.getlist("actions"),
         "hide_read":     bool(src.get("hide_read")),
-        "hide_done":     bool(src.get("hide_done")),
+        "hide_resolved": bool(src.get("hide_resolved")),
         "show_archived": bool(src.get("show_archived")),
         "tracked_only":  bool(src.get("tracked_only")),
         "mine_only":     bool(src.get("mine_only")),
@@ -1331,8 +1213,8 @@ def _render_row(n: dict):
 
 def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
     # Archived (locally action='done') rows are hidden by default and only
-    # surface when Show archived is on. Distinct from Hide done below, which
-    # filters by GitHub-side resolution state (merged/closed/answered).
+    # surface when Show archived is on. Distinct from Hide resolved below,
+    # which filters by GitHub-side resolution state (merged/closed/answered).
     if not f.get("show_archived"):
         rows = [r for r in rows if r["action"] != "done"]
     if f["actions"]:
@@ -1345,8 +1227,8 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         ]
     if f["hide_read"]:
         rows = [r for r in rows if r["unread"]]
-    if f["hide_done"]:
-        rows = [r for r in rows if r["type_state"] not in DONE_TYPE_STATES]
+    if f["hide_resolved"]:
+        rows = [r for r in rows if r["type_state"] not in RESOLVED_TYPE_STATES]
     if f["tracked_only"]:
         rows = [
             r for r in rows
@@ -1379,7 +1261,7 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
             reverse=True,
         )
     elif f["sort"] == "stale":
-        # Oldest-updated first. Pairs with Hide done to surface forgotten
+        # Oldest-updated first. Pairs with Hide resolved to surface forgotten
         # open work; on its own, surfaces both forgotten and long-resolved.
         rows.sort(key=lambda r: r["updated_at"] or "")
     elif f["sort"] == "oldest":
@@ -1899,38 +1781,6 @@ def ai_judge(thread_id: str):
     finally:
         conn.close()
     return _ai_response(thread_id, error)
-
-
-@app.post("/ai/<thread_id>/approve")
-def ai_approve(thread_id: str):
-    """Execute the cached verdict's proposed mutations (read/mute/archive,
-    track toggle, AI summary into note_ai), then clear the verdict cache."""
-    token = app.config["GITHUB_TOKEN"]
-    error: str | None = None
-    conn = db.connect()
-    try:
-        try:
-            ai.apply_verdict(thread_id, conn, token)
-        except ai.AIError as e:
-            log.warning("AI approve failed for %s: %s", thread_id, e)
-            error = f"AI approve failed: {e}"
-        except Exception as e:  # noqa: BLE001
-            log.exception("AI approve crashed for %s", thread_id)
-            error = f"AI approve crashed: {e}"
-    finally:
-        conn.close()
-    return _ai_response(thread_id, error)
-
-
-@app.post("/ai/<thread_id>/dismiss")
-def ai_dismiss(thread_id: str):
-    """Discard the cached verdict without applying any mutations."""
-    conn = db.connect()
-    try:
-        ai.dismiss_verdict(thread_id, conn)
-    finally:
-        conn.close()
-    return _ai_response(thread_id, None)
 
 
 @app.post("/ai/<thread_id>/chat")

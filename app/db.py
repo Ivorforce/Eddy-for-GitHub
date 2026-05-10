@@ -143,10 +143,9 @@ ALTER TABLE notifications ADD COLUMN link_url TEXT;
 # AI verdict cache columns. ai_verdict_json holds the structured tool-call
 # output from judge_thread; ai_verdict_at is when it was produced; model is
 # the model ID that produced it (so the UI can flag stale/legacy verdicts
-# and the user can audit which model said what). The verdict is "pending"
-# until applied — once applied, the cache columns are cleared (and the
-# resulting state lives on action / unread / ignored / note_ai / is_tracked
-# like any user action would).
+# and the user can audit which model said what). The verdict is advisory:
+# it drives the pill / signals / priority color, but no row state is
+# auto-applied. Re-ask overwrites it; nothing else clears it.
 SCHEMA_V18 = """
 ALTER TABLE notifications ADD COLUMN ai_verdict_json TEXT;
 ALTER TABLE notifications ADD COLUMN ai_verdict_at INTEGER;
@@ -214,6 +213,19 @@ CREATE INDEX IF NOT EXISTS idx_thread_events_thread_ts
 CREATE UNIQUE INDEX IF NOT EXISTS idx_thread_events_external
     ON thread_events(thread_id, kind, external_id)
     WHERE external_id IS NOT NULL;
+"""
+
+# AI verdicts are advisory-only — they shape display, but no row state is
+# auto-applied on the user's behalf. The note_ai column existed to persist
+# the verdict description after an "approve" click; with approve/dismiss
+# gone, the description lives on the cached verdict + ai_verdict timeline
+# events and there's nothing to write to note_ai. Drop it on all four
+# entity tables.
+SCHEMA_V21 = """
+ALTER TABLE notifications DROP COLUMN note_ai;
+ALTER TABLE people        DROP COLUMN note_ai;
+ALTER TABLE repos         DROP COLUMN note_ai;
+ALTER TABLE orgs          DROP COLUMN note_ai;
 """
 
 
@@ -310,6 +322,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V20)
             _set_version(conn, 20)
             version = 20
+        if version < 21:
+            conn.executescript(SCHEMA_V21)
+            _set_version(conn, 21)
+            version = 21
     finally:
         conn.close()
 

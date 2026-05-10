@@ -1,13 +1,16 @@
-"""AI v0: manually-triggered, approve-based per-thread judgment.
+"""AI v1: manually-triggered, advisory per-thread judgment.
 
 User clicks "Ask AI" on a row → judge() generates a structured verdict and
-caches it on the row. User clicks Approve → apply_verdict() executes the
-proposed mutations using the same GitHub + DB calls the manual buttons use.
-User clicks Dismiss → dismiss_verdict() clears the cache without mutating.
+caches it on the row + appends it to the per-thread timeline. The verdict
+is advisory only: the pill, signals, and priority color shape display, but
+no row state changes automatically. The user takes their own row actions
+(visit, mark read, mute, archive, track); those land as `user_action`
+events in the timeline, so the next judgment sees what the user actually
+did after the last verdict and can recalibrate.
 
-No autonomous re-judgment in v0; the per-thread `policy` field from the
-original design is intentionally absent. Add it back when auto re-judging
-ships.
+Re-ask re-runs judge() with the prior verdict still visible in the
+timeline (mode=`re_evaluate`); chat re-runs it with the user's latest
+`user_chat` event appended (mode=`chat`). The cache is never auto-cleared.
 
 Caching note: the system block is split into [system_prompt, prefs] with
 ephemeral cache_control on both. Haiku 4.5's minimum cacheable prefix is
@@ -28,7 +31,7 @@ from pathlib import Path
 
 import anthropic
 
-from . import db, github
+from . import db
 
 log = logging.getLogger(__name__)
 
@@ -94,10 +97,13 @@ TOOL_DEF: dict = {
         "properties": {
             "action_now": {
                 "type": "string",
-                "enum": ["none", "mark_read", "mute", "archive"],
+                "enum": ["look", "ignore", "mute", "archive"],
                 "description": (
-                    "What state change to propose (executed only on user approval). "
-                    "Prefer 'none' over 'mark_read' over 'archive' when uncertain."
+                    "What you suggest the user do with this thread. "
+                    "'look' (open the link), 'ignore' (mark read without engaging), "
+                    "'mute' (silence further updates), 'archive' (nothing left to do). "
+                    "Advisory only — the user takes their own row actions; nothing auto-applies. "
+                    "Prefer 'look' over 'ignore' over 'archive' when uncertain."
                 ),
             },
             "set_tracked": {
@@ -116,7 +122,7 @@ TOOL_DEF: dict = {
                     "How important is this thread to the user, on a 0.0-1.0 scale. "
                     "See system prompt §Priority for anchored value examples. "
                     "Distribute meaningfully — don't cluster around 0.5. "
-                    "Independent of action_now: 0.9 + 'none' means 'leave it but flag it as urgent'."
+                    "Independent of action_now: 0.9 + 'look' means 'leave it visible and flag it as urgent'."
                 ),
             },
             "relevant_signals": {
@@ -532,21 +538,10 @@ def _save_verdict(
     )
 
 
-def _clear_verdict(conn: sqlite3.Connection, thread_id: str) -> None:
-    conn.execute(
-        """
-        UPDATE notifications
-           SET ai_verdict_json = NULL, ai_verdict_at = NULL, ai_verdict_model = NULL
-         WHERE id = ?
-        """,
-        (thread_id,),
-    )
-
-
 # ---- Public API ---------------------------------------------------------
 
 class AIError(RuntimeError):
-    """Raised when judge() or apply_verdict() can't proceed.
+    """Raised when judge() can't proceed.
     Routes catch this and surface via the existing showError HX-Trigger."""
 
 
@@ -702,144 +697,3 @@ def judge(
         payload={**verdict, "model": model},
     )
     return verdict
-
-
-def _set_state(
-    conn: sqlite3.Connection,
-    thread_id: str,
-    *,
-    action: str,
-    source: str = "ai",
-    **state,
-) -> None:
-    """Mirrors web._apply_action without importing web (which would import
-    Flask). Records action + actioned_at + action_source plus any state cols.
-    Also mirrors the action into thread_events so the AI sees the resulting
-    state change in the per-thread timeline."""
-    now = int(time.time())
-    cols = {
-        "action": action,
-        "actioned_at": now,
-        "action_source": source,
-        **state,
-    }
-    setters = ", ".join(f"{k} = ?" for k in cols)
-    values = (*cols.values(), thread_id)
-    conn.execute(f"UPDATE notifications SET {setters} WHERE id = ?", values)
-    db.write_thread_event(
-        conn,
-        thread_id=thread_id,
-        ts=now,
-        kind="user_action",
-        source=source,
-        payload={"action": action},
-    )
-
-
-def apply_verdict(thread_id: str, conn: sqlite3.Connection, token: str) -> None:
-    """Execute the cached verdict's proposed mutations, then clear the
-    verdict cache. Idempotent: a no-op if there's no pending verdict.
-    Raises AIError if the verdict is malformed."""
-    row = conn.execute(
-        """
-        SELECT ai_verdict_json, unread, ignored, is_tracked
-          FROM notifications WHERE id = ?
-        """,
-        (thread_id,),
-    ).fetchone()
-    if row is None or not row["ai_verdict_json"]:
-        return  # nothing to apply
-
-    try:
-        verdict = json.loads(row["ai_verdict_json"])
-    except (ValueError, TypeError) as e:
-        raise AIError(f"Stored verdict isn't valid JSON: {e}") from e
-
-    action_now = verdict.get("action_now")
-    set_tracked = verdict.get("set_tracked")
-    # description is the new single-field replacement for summary+rationale.
-    # Legacy verdicts (cached before the schema change) still have the old
-    # split — fall back to joining them so a pending verdict from an older
-    # judgment still applies cleanly.
-    description = (verdict.get("description") or "").strip()
-    if not description and (verdict.get("summary") or verdict.get("rationale")):
-        s = (verdict.get("summary") or "").strip()
-        r = (verdict.get("rationale") or "").strip()
-        description = " — ".join(p for p in (s, r) if p)
-    description = description or None
-
-    state_updates: dict = {}
-
-    if action_now == "mark_read":
-        if row["unread"]:
-            github.mark_read(token, thread_id)
-        if row["ignored"]:
-            # Reading a muted thread also unmutes — matches the manual flow.
-            github.set_subscribed(token, thread_id)
-        state_updates.update(unread=0, ignored=0)
-        action_label = "read"
-    elif action_now == "mute":
-        if row["unread"]:
-            github.mark_read(token, thread_id)
-        github.set_ignored(token, thread_id)
-        state_updates.update(unread=0, ignored=1)
-        action_label = "muted"
-    elif action_now == "archive":
-        github.mark_done(token, thread_id)
-        state_updates.update(unread=0)
-        action_label = "done"
-    elif action_now == "none":
-        action_label = None
-    else:
-        raise AIError(f"Unknown action_now: {action_now!r}")
-
-    # Item-level tracked toggle. People/repo/org tracking is out of scope
-    # for v0 (per the "changes to the notification and/or item at hand"
-    # constraint).
-    if set_tracked == "track":
-        state_updates["is_tracked"] = 1
-    elif set_tracked == "untrack":
-        state_updates["is_tracked"] = 0
-    elif set_tracked not in (None, "leave"):
-        raise AIError(f"Unknown set_tracked: {set_tracked!r}")
-
-    # The AI description lands in note_ai (separate from the user's note_user).
-    if description:
-        state_updates["note_ai"] = description
-
-    if action_label is not None:
-        _set_state(conn, thread_id, action=action_label, source="ai", **state_updates)
-    elif state_updates:
-        # No action_now change but tracked / note_ai may still need updating.
-        # Don't touch action / actioned_at / action_source in this branch —
-        # the user's prior action remains the most recent action of record.
-        setters = ", ".join(f"{k} = ?" for k in state_updates)
-        values = (*state_updates.values(), thread_id)
-        conn.execute(f"UPDATE notifications SET {setters} WHERE id = ?", values)
-
-    # Log the meta-action separately from any row-state change. Future AI
-    # judgments use this to calibrate ("user agreed with my last verdict").
-    db.write_thread_event(
-        conn,
-        thread_id=thread_id,
-        ts=int(time.time()),
-        kind="user_action",
-        source="user",
-        payload={"action": "approve_verdict"},
-    )
-    _clear_verdict(conn, thread_id)
-
-
-def dismiss_verdict(thread_id: str, conn: sqlite3.Connection) -> None:
-    """Clear the cached verdict without applying any mutations.
-    The dismissal itself is logged as a user_action so future judgments
-    see that the user disagreed with the prior verdict."""
-    db.write_thread_event(
-        conn,
-        thread_id=thread_id,
-        ts=int(time.time()),
-        kind="user_action",
-        source="user",
-        payload={"action": "dismiss_verdict"},
-    )
-    _clear_verdict(conn, thread_id)

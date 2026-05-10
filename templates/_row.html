@@ -184,9 +184,10 @@
     {% if triage_mode == 'ai' %}
       {# AI mode — column shows the AI's verdict + selected signals,
          instead of the rule-based pill+prose. Per-row "Ask AI" button
-         when no verdict exists yet; split-pill (popover left + approve
-         right) once it does. The signal pills below replace the manual-
-         mode prose, and only show signals the AI deemed relevant. #}
+         when no verdict exists yet; informational pill (opens popover)
+         once it does. The pill is advisory only — no auto-apply; the
+         user takes their own row actions (read / mute / archive / link).
+         The signal pills below replace the manual-mode prose. #}
       {% if n.ai_verdict %}
       <span class="ai-verdict-pill-group{% if n.ai_verdict.stale %} stale{% endif %}" style="--imp: {{ '%.3f' % n.ai_verdict.priority_score }}">
         {# popovertarget (native) instead of data-popover-target (JS) so the
@@ -196,21 +197,7 @@
         <button type="button" class="ai-verdict-main"
                 popovertarget="pop-ai-{{ n.id }}"
                 style="anchor-name: --pop-ai-{{ n.id }}"
-                title="{{ n.ai_verdict.description }}{% if n.ai_verdict.stale %} · stale verdict — re-poll happened after judgment{% endif %}"><svg class="ai-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>{{ n.ai_verdict.pill_text }}</button><button type="button" class="ai-verdict-approve"
-                {% if n.ai_verdict.approve_label %}
-                hx-post="/ai/{{ n.id }}/approve"
-                hx-target="closest tr"
-                hx-swap="outerHTML"
-                hx-include="#filters"
-                hx-indicator="closest tr"
-                aria-label="{{ n.ai_verdict.approve_label }}"
-                title="{{ n.ai_verdict.approve_label }}"
-                {% else %}
-                disabled
-                aria-disabled="true"
-                aria-label="Nothing to apply"
-                title="Nothing to apply — verdict proposes no state change. Use Dismiss to clear."
-                {% endif %}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+                title="{{ n.ai_verdict.description }}{% if n.ai_verdict.stale %} · stale verdict — re-poll happened after judgment{% endif %}"><svg class="ai-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>{{ n.ai_verdict.pill_text }}</button>
       </span>
       <div class="action-popover ai-verdict-popover" popover id="pop-ai-{{ n.id }}"
            data-kind="ai" data-thread-id="{{ n.id }}"
@@ -224,10 +211,7 @@
 
         {# Chronological timeline. The partial renders one <li> per event;
            ai_verdict + user_chat as full chat bubbles, others as muted
-           one-liners. The latest ai_verdict event has is_pending=True
-           and embeds the in-bubble Approve / Dismiss buttons (the row-
-           level split-pill ✓ stays for quick action without opening
-           the popover). #}
+           one-liners. #}
         {% set thread_id = n.id %}
         <ol class="timeline-list" id="timeline-{{ n.id }}">
           {% for ev in n.timeline %}
@@ -323,11 +307,6 @@
             hx-swap="none">
         <textarea name="note_user" rows="3" placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
       </form>
-      {% if n.note_ai %}
-      <div class="popover-note-ai" title="AI summary saved when this row's verdict was approved">
-        <span class="popover-note-ai-label">AI</span>{{ n.note_ai }}
-      </div>
-      {% endif %}
       {# Done section is intentionally bottom + separated: GitHub's mark-
          done has no API undo, so it's the destructive category. The
          popover-then-click is the friction; no extra confirm dialog. #}

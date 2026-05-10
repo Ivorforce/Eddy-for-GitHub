@@ -18,20 +18,22 @@ Flask + Jinja + HTMX + Pico CSS + SQLite. Static assets vendored under `static/v
 
 ## AI v1 (event-sourced)
 
-User-triggered, approve-gated per-thread judgment with **episodic memory**. Each thread carries a chronological event log (`thread_events` table) — every comment, review, AI verdict, user action on a verdict, and free-text user message. The AI sees the full timeline on every judgment, so it reasons about *what's changed since last time* rather than re-classifying a thread from scratch.
+User-triggered, **advisory** per-thread judgment with **episodic memory**. Each thread carries a chronological event log (`thread_events` table) — every comment, review, AI verdict, row-state user action, and free-text user message. The AI sees the full timeline on every judgment, so it reasons about *what's changed since last time* rather than re-classifying a thread from scratch.
 
-Lives in the Relevance column, behind a brain-icon mode toggle in the column header. Manual mode shows the rule-based status pill + prose subhead; AI mode replaces both — per-row **Ask AI** button when no verdict cached, split-pill (popover left + ✓ approve right) when one exists, plus AI-selected signal pills below.
+Lives in the Relevance column, behind a brain-icon mode toggle in the column header. Manual mode shows the rule-based status pill + prose subhead; AI mode replaces both — per-row **Ask AI** button when no verdict cached, an informational pill once one exists (click to open the popover), plus AI-selected signal pills below.
+
+Verdicts are advisory only: the pill / signal pills / priority color shape *display*, but no row state is auto-applied. The user takes their own row actions (visit, mark read, mute, archive, track). Those land as `user_action` events in the timeline; the next judgment compares them against the prior verdict and recalibrates ("I suggested ignore, they visited → I underestimated interest").
 
 **Inputs:**
 
 - `config/preferences.md` — free-text user prefs (interests, important repos / people, noise patterns). Loaded into the cached system block. `config/preferences.example.md` ships as a template.
-- `app/ai_system_prompt.md` — shipped instructions (cost asymmetry, brevity rules, output-field semantics, signal vocabulary, **timeline interpretation**). The "do not restate row-visible facts" rule is load-bearing; the "user_chat is authoritative for this thread" rule is the v1 addition.
+- `app/ai_system_prompt.md` — shipped instructions (cost asymmetry, brevity rules, output-field semantics, signal vocabulary, **timeline interpretation**). The "do not restate row-visible facts" rule is load-bearing; "user_chat is authoritative for this thread" and "user_action after a verdict is calibration feedback" are the v1 reading-rules.
 
 **Verdict shape (single tool call, forced via the prompt):**
 
 ```python
 judge_thread({
-    action_now:       "none" | "mark_read" | "mute" | "archive",
+    action_now:       "look" | "ignore" | "mute" | "archive",
     set_tracked:      "track" | "untrack" | "leave",
     priority_score:   float ∈ [0, 1],   # bucketed to low/normal/high for color
     relevant_signals: list[str],         # 0–3 keys from a controlled vocabulary
@@ -39,24 +41,22 @@ judge_thread({
 })
 ```
 
-`relevant_signals` vocabulary lives in `app/ai.py:SIGNAL_VOCAB`; the display label / CSS class for each key is in `app/web.py:_SIGNAL_LABELS`. Adding a key requires touching both. `description` lands in `notifications.note_ai` on approve; the verdict cache (`notifications.ai_verdict_*`) is cleared on approve / dismiss.
+`action_now` is a suggestion for what the user should do — `look` (open the link), `ignore` (mark read without engaging), `mute` (silence further updates), `archive` (nothing left to do). Nothing auto-applies. `relevant_signals` vocabulary lives in `app/ai.py:SIGNAL_VOCAB`; the display label / CSS class for each key is in `app/web.py:_SIGNAL_LABELS`. Adding a key requires touching both. The verdict cache (`notifications.ai_verdict_*`) is never auto-cleared — Re-ask overwrites it (and `_save_verdict` keeps the prior verdict in `thread_events` for the next judgment to see).
 
 **`thread_events` table (SCHEMA_V20):** chronological per-thread log keyed by `(thread_id, kind, external_id)` where present. The unique partial index makes re-fetched comments / reviews idempotent — same GitHub `databaseId` UPDATEs the payload (catches body edits) instead of appending. Event kinds:
 
-- `comment` / `review` — GitHub-side activity, source `github`. Written by `_enrich` in `app/github.py`.
-- `ai_verdict` — the AI's proposal, source `ai`. external_id joins back to `ai_calls.id` so the full request / response is one query away. Written by `ai.judge` on success.
-- `user_action` — read / mute / done / kept_unread / unmuted / approve_verdict / dismiss_verdict. source is `user` or `ai` (AI-applied actions get source=ai). Written by `_apply_action` (manual) and `_set_state` / `apply_verdict` / `dismiss_verdict` (AI flow).
+- `comment` / `review` / `lifecycle` — GitHub-side activity, source `github`. Written by `_enrich` in `app/github.py`.
+- `ai_verdict` — the AI's verdict, source `ai`. external_id joins back to `ai_calls.id` so the full request / response is one query away. Written by `ai.judge` on success.
+- `user_action` — `visited` / `read` / `read_on_github` / `muted` / `done` / `kept_unread` / `unmuted`. source is `user` (clicked in our app) or `github` (observed remotely, e.g. mark-read on github.com). Written by `_apply_action`.
 - `user_chat` — free-text per-thread message, source `user`. Written by `POST /ai/<id>/chat`. NULL external_id; each save is its own event (no dedup).
 
-**Popover (`templates/_row.html`):** chat-style conversation log. AI verdicts and user chat messages render as full chat bubbles (purple-tinted on the right for AI, blue-tinted on the left for the user); comment / review / user_action events collapse to one-line muted entries. A "⚠ N new since judgment" badge surfaces whenever GitHub events or user chats have landed after the cached verdict — Approve still works (warn, don't block; Re-ask is the user's call). Composer at the bottom posts to `/ai/<id>/chat`; `hx-on::after-request` clears the textarea on success so chat is appended, not overwritten.
+**Popover (`templates/_row.html`):** chat-style conversation log. AI verdicts and user chat messages render as full chat bubbles (purple-tinted on the right for AI, blue-tinted on the left for the user); comment / review / user_action events collapse to one-line muted entries. A "⚠ N new since judgment" badge surfaces whenever GitHub events or user chats have landed after the cached verdict (row-state user actions don't count — they *are* the user's response). Composer at the bottom posts to `/ai/<id>/chat`; `hx-on::after-request` clears the textarea on success so chat is appended, not overwritten.
 
 **No autonomous re-judgment in v1** — explicit Ask AI / Re-ask only. Per-thread `policy` field intentionally absent. Add when auto re-judging ships; the natural trigger is "N new events since latest ai_verdict" exceeding a threshold.
 
 **Storage:** every API call writes a row to `ai_calls` (full request + response, token breakdown, estimated cost, status). Useful for prompt tuning and the soft daily cap (`AI_DAILY_CAP_USD`, default $2). Past verdicts also live as `ai_verdict` events on `thread_events` — joined via `external_id`.
 
 **Default model:** Haiku 4.5. Configurable via `AI_MODEL`. The system prompt + preferences sit at ~3k tokens after the timeline-interpretation section — still below Haiku's 4096-token cache minimum, so `cache_control` markers don't fire today; they're forward-compatible once preferences grow.
-
-**Approve-button no-op detection:** `_approve_label` in `app/web.py` drops parts of the verdict that are already true on the row (mark_read on a read row, track on a tracked row, …). When everything's a no-op, the button is `disabled` and tells the user to use Dismiss. Both the row-level approve (✓ on the split-pill) and the popover Approve button respect this.
 
 **Mode toggle plumbing:** `triage_mode` is a persisted user setting, not a filter — stored in the `meta` table (`_get_triage_mode` / `_set_triage_mode` in `app/web.py`). The brain button in the column header posts to `/settings/triage_mode`, which flips the value and returns the re-rendered table. Per-row HTMX swaps read the mode server-side, so it doesn't need to ride the request.
 
