@@ -390,41 +390,6 @@
       min-height: 2.6rem;
       padding: 0.3rem 0.45rem;
     }
-    /* Done row sits at the popover bottom with a separator above to
-       signal "destructive category" — irreversible from GitHub's API,
-       so the placement + visual divider is the affordance, not a modal. */
-    .action-popover .popover-done-row {
-      display: flex;
-      gap: 0.35rem;
-      margin-top: 0.35rem;
-      padding-top: 0.4rem;
-      border-top: 1px solid var(--pico-muted-border-color);
-    }
-    .action-popover .popover-done-btn {
-      flex: 1;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.35rem;
-      background: none;
-      border: 1px solid var(--pico-muted-border-color);
-      border-radius: 0.3rem;
-      padding: 0.2rem 0.45rem;
-      margin: 0;
-      font-size: 0.74rem;
-      line-height: 1.4;
-      cursor: pointer;
-      color: var(--pico-color);
-    }
-    .action-popover .popover-done-btn svg {
-      width: 0.95em;
-      height: 0.95em;
-      flex-shrink: 0;
-    }
-    .action-popover .popover-done-btn:hover {
-      background: rgba(140, 149, 159, 0.12);
-    }
-
     /* title meta-row — type pill, PR diff (if any), and labels share one
        wrapping line so they fit when narrow but stay grouped when wide. */
     td.title .meta-row {
@@ -474,11 +439,13 @@
       padding: 0 0.2rem;
     }
 
-    /* actions — single-line segmented control (Read | Muted, mutually
-       exclusive) + the ••• item-popover trigger. The "active" segment is a
-       filled tint, not an icon: the fill itself signals "you're here".
-       Read uses a muted green, Muted uses a neutral gray, so the two states
-       are distinguishable by hue, not just by which side is filled. */
+    /* actions — segmented control of three mutually-exclusive states
+       (Ignore | Done | Mute) + the ••• item-popover trigger. The "active"
+       segment is a filled tint, not an icon: the fill itself signals
+       "you're here". Each state gets a distinct hue along the severity
+       ramp — green for the soft "read but visible", amber for "archived",
+       red for "archived and never come back" — so the three are
+       distinguishable by hue even before the icon registers. */
     td.actions { white-space: nowrap; width: 1%; vertical-align: middle; }
     td.actions .action-group {
       display: flex;
@@ -516,11 +483,14 @@
       font-weight: 600;
       color: var(--pico-color);
     }
-    td.actions .action-segment.seg-read.active {
-      background: rgba(26, 127, 55, 0.22);
+    td.actions .action-segment.seg-ignore.active {
+      background: rgba(26, 127, 55, 0.22);   /* muted green */
+    }
+    td.actions .action-segment.seg-done.active {
+      background: rgba(191, 135, 0, 0.26);   /* amber — archived */
     }
     td.actions .action-segment.seg-mute.active {
-      background: rgba(140, 149, 159, 0.32);
+      background: rgba(207, 34, 46, 0.22);   /* red — silenced */
     }
 
     /* AI verdict pill. Lives in the Relevance column when triage mode =
@@ -1212,6 +1182,13 @@
        out, read stays at full readability. */
     tr:not(.read):not(.bucket-separator) > td {
       background-color: rgba(73, 147, 248, 0.08);
+    }
+    /* Done rows (locally archived; visible only with Show archived on)
+       get a parallel red-ish tint so they read as a distinct class from
+       the active inbox without disappearing. Overrides the unread blue
+       in the rare case both apply (manual mark-done on an unread row). */
+    tr.done:not(.bucket-separator) > td {
+      background-color: rgba(207, 34, 46, 0.06);
     }
     tr.action-error { outline: 1px solid var(--pico-color-red-500); }
 

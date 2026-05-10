@@ -685,6 +685,7 @@ _USER_ACTION_LABELS = {
     "read_on_github":   "Marked read remotely",
     "muted":            "Muted",
     "done":             "Archived",
+    "undone":           "Restored from archive",
     "kept_unread":      "Kept unread",
     "unmuted":          "Unmuted",
 }
@@ -1422,9 +1423,16 @@ def _apply_action(
     thread_id: str,
     action: str,
     source: str = "user",
+    log_action: str | None = None,
     **state,
 ) -> None:
     """Record action + actioned_at + action_source, plus arbitrary state columns.
+
+    `action` is what lands in `notifications.action` — the filter-relevant
+    label (e.g. 'done' hides the row by default). `log_action` overrides the
+    value written into `thread_events.payload.action`, so the AI timeline can
+    record a more specific label ('muted') while the row column stays 'done'
+    for filter purposes. Defaults to `action` when unset.
 
     NOTE: baselines (baseline_comments, baseline_review_state) and seen_reasons
     are intentionally NOT touched here. 'Since last looked' indicators persist
@@ -1456,7 +1464,7 @@ def _apply_action(
             ts=now,
             kind="user_action",
             source=source,
-            payload={"action": action},
+            payload={"action": log_action or action},
         )
     finally:
         conn.close()
@@ -1468,7 +1476,7 @@ def visit(thread_id: str):
     Always log a `visited` user_action event so the AI sees the engagement
     distinct from a plain mark-read click (which means "dismissed without
     opening"). State side effects mirror the prior link-click behavior
-    that used /set/<id>/read: mark read on GitHub if unread; unsubscribe
+    that used /set/<id>/ignored: mark read on GitHub if unread; unsubscribe
     if ignored (visiting a muted thread unmutes it). Returns the
     re-rendered row so the read pill updates in place."""
     token = app.config["GITHUB_TOKEN"]
@@ -1503,19 +1511,48 @@ def visit(thread_id: str):
     return _render_row(_load_one(thread_id))
 
 
-@app.post("/set/<thread_id>/read")
-def set_read(thread_id: str):
-    """Radio-style: set the row to 'read' state, OR deselect (back to unread)
-    if it's already read. Handles transitions from any of unread / read / muted."""
+# The three action buttons in the Actions column are radio-style:
+#   Ignore  = marked read but kept visible (unread=0, ignored=0, action!='done')
+#   Done    = archived on GitHub but stays subscribed (action='done', ignored=0)
+#   Mute    = archived AND unsubscribed (action='done', ignored=1)
+#
+# Each toggles: click the active button to revert. Revert is local-only when
+# the underlying GitHub state is one-way (mark-read, mark-done) — the column
+# values flip back but GitHub stays where it was. Subscription is reversible
+# via set_subscribed.
+#
+# Done/Mute hide the row by default (the show_archived filter is what surfaces
+# action='done' rows). When the form's `show_archived` is on, the row stays in
+# the DOM and re-renders with the new active button; otherwise the response is
+# empty so HTMX swaps the <tr> away.
+
+def _archive_response(thread_id: str):
+    """Return an updated row when the user has Show archived on, otherwise an
+    empty body so hx-swap=outerHTML removes the <tr>. Used by Done / Mute,
+    where the new state (action='done') is filter-hidden in the default view."""
+    if request.values.get("show_archived"):
+        return _render_row(_load_one(thread_id))
+    return ("", 200)
+
+
+@app.post("/set/<thread_id>/ignored")
+def set_ignored(thread_id: str):
+    """Toggle Ignore: marked read + visible (the default 'I've seen this'
+    state). Click again to deselect back to unread. Also clears any
+    pre-existing done / muted state — Ignore brings a row back into the
+    default view."""
     token = app.config["GITHUB_TOKEN"]
     n = _load_one(thread_id)
     if not n:
         return ("", 404)
-    is_read_now = n["unread"] == 0 and n["ignored"] == 0
-    if is_read_now:
-        # Click already-active Read → deselect → mark unread locally.
-        # GitHub REST API has no 'mark unread' (only the web UI can, via
-        # /notifications/beta/unmark with session+CSRF auth — not worth it).
+    is_active = (
+        n["unread"] == 0
+        and n["ignored"] == 0
+        and n["action"] != "done"
+    )
+    if is_active:
+        # Click already-active Ignore → deselect → mark unread locally.
+        # GitHub REST has no 'mark unread' so this stays a local marker;
         # action='kept_unread' tells the reconciler not to flip it back.
         _apply_action(thread_id, "kept_unread", unread=1, ignored=0)
     else:
@@ -1523,44 +1560,57 @@ def set_read(thread_id: str):
             github.mark_read(token, thread_id)
         if n["ignored"]:
             github.set_subscribed(token, thread_id)
+        # 'read' clears the action column from any prior 'done', so the row
+        # rejoins the default view. GitHub keeps its archive flag — new
+        # activity on the thread will resurface it naturally.
         _apply_action(thread_id, "read", unread=0, ignored=0)
     return _render_row(_load_one(thread_id))
 
 
-@app.post("/set/<thread_id>/muted")
-def set_muted(thread_id: str):
-    """Radio-style: set the row to 'muted' state (read + ignored), OR deselect
-    (back to plain 'read') if it's already muted."""
+@app.post("/set/<thread_id>/done")
+def set_done(thread_id: str):
+    """Toggle Done: archive on GitHub (one-way). Click again to revert
+    locally — GitHub stays archived, but the row resurfaces in the default
+    view. From a muted state, Done resubscribes but keeps the archive."""
     token = app.config["GITHUB_TOKEN"]
     n = _load_one(thread_id)
     if not n:
         return ("", 404)
+    is_active = (n["action"] == "done" and not n["ignored"])
+    if is_active:
+        _apply_action(thread_id, "undone")
+        return _render_row(_load_one(thread_id))
     if n["ignored"]:
-        # Click already-active Muted → deselect → become 'read' (unmute, stay read).
+        github.set_subscribed(token, thread_id)
+    if n["action"] != "done":
+        github.mark_done(token, thread_id)
+    _apply_action(thread_id, "done", unread=0, ignored=0)
+    return _archive_response(thread_id)
+
+
+@app.post("/set/<thread_id>/muted")
+def set_muted(thread_id: str):
+    """Toggle Mute: archive on GitHub AND unsubscribe so future activity on
+    the thread won't resurface it. Click again to revert — set_subscribed
+    is reversible, mark_done isn't (GitHub stays archived but the row
+    resurfaces locally)."""
+    token = app.config["GITHUB_TOKEN"]
+    n = _load_one(thread_id)
+    if not n:
+        return ("", 404)
+    is_active = (n["action"] == "done" and n["ignored"])
+    if is_active:
         github.set_subscribed(token, thread_id)
         _apply_action(thread_id, "unmuted", ignored=0)
-    else:
-        if n["unread"]:
-            github.mark_read(token, thread_id)
+        return _render_row(_load_one(thread_id))
+    if n["action"] != "done":
+        github.mark_done(token, thread_id)
+    if not n["ignored"]:
         github.set_ignored(token, thread_id)
-        _apply_action(thread_id, "muted", unread=0, ignored=1)
-    return _render_row(_load_one(thread_id))
-
-
-@app.post("/action/<thread_id>/done")
-def action_done(thread_id: str):
-    """Archive a thread on GitHub. With ?unsubscribe=1, also stop future
-    notifications from it (set_ignored) — the common workflow when you
-    don't care about a watch-driven thread, separate from plain Done
-    where future activity may legitimately resurface the thread."""
-    token = app.config["GITHUB_TOKEN"]
-    github.mark_done(token, thread_id)
-    state: dict = {"unread": 0}
-    if request.values.get("unsubscribe"):
-        github.set_ignored(token, thread_id)
-        state["ignored"] = 1
-    _apply_action(thread_id, "done", **state)
-    return ("", 200)
+    # action column stays 'done' (so the show_archived filter handles it);
+    # the AI timeline gets 'muted' to preserve the stronger-than-Done signal.
+    _apply_action(thread_id, "done", log_action="muted", unread=0, ignored=1)
+    return _archive_response(thread_id)
 
 
 @app.post("/toggle/<thread_id>/track")

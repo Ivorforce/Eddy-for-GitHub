@@ -1,4 +1,4 @@
-<tr class="{% if not n.unread %}read{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_tracked %} is-tracked-row{% endif %}"
+<tr class="{% if not n.unread %}read{% endif %}{% if n.action == 'done' %} done{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_tracked %} is-tracked-row{% endif %}"
     data-author="{{ n.author_login or '' }}"
     data-repo="{{ n.repo }}"
     data-org="{{ n.repo_owner or '' }}"
@@ -273,22 +273,41 @@
     {% endif %}
   </td>
   <td class="actions">
-    {% set is_read_now = (not n.unread) and (not n.ignored) %}
+    {# Three radio-style action buttons. Mutually exclusive active states:
+       Ignore  — read but visible (unread=0, ignored=0, action!='done')
+       Done    — archived on GitHub (action='done', ignored=0)
+       Mute    — archived + unsubscribed (action='done', ignored=1)
+       Each click toggles: re-clicking the active button reverts. Done/Mute
+       result in action='done', which the default view hides — the response
+       handler returns an empty body unless Show archived is on. #}
+    {% set is_ignored_active = (not n.unread) and (not n.ignored) and (n.action != 'done') %}
+    {% set is_done_active    = (n.action == 'done') and (not n.ignored) %}
+    {% set is_muted_active   = (n.action == 'done') and n.ignored %}
     <div class="action-group">
       <button type="button"
-              class="action-segment seg-read{% if is_read_now %} active{% endif %}"
-              hx-post="/set/{{ n.id }}/read"
+              class="action-segment seg-ignore{% if is_ignored_active %} active{% endif %}"
+              hx-post="/set/{{ n.id }}/ignored"
               hx-target="closest tr"
               hx-swap="outerHTML"
-              aria-label="Mark read"
-              title="Mark read. Click again to mark unread (local only — GitHub API has no unread)."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+              hx-include="#filters"
+              aria-label="Ignore"
+              title="Ignore — mark read, keep visible. Click again to mark unread (local only — GitHub API has no unread)."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
       <button type="button"
-              class="action-segment seg-mute{% if n.ignored %} active{% endif %}"
+              class="action-segment seg-done{% if is_done_active %} active{% endif %}"
+              hx-post="/set/{{ n.id }}/done"
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              hx-include="#filters"
+              aria-label="Done"
+              title="Done — archive on GitHub. Hides from view; future activity can resurface it. Click again (with Show archived on) to revert locally."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg></button>
+      <button type="button"
+              class="action-segment seg-mute{% if is_muted_active %} active{% endif %}"
               hx-post="/set/{{ n.id }}/muted"
               hx-target="closest tr"
               hx-swap="outerHTML"
-              aria-label="Mute thread"
-              title="Mute thread (also marks read). Click again to unmute and stay read."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
+              hx-include="#filters"
+              aria-label="Mute"
+              title="Mute — archive AND unsubscribe. Won't resurface from new activity. Click again (with Show archived on) to resubscribe and revert."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
     </div>
     <button type="button" class="item-trigger-btn"
             data-popover-target="pop-item-{{ n.id }}"
@@ -307,21 +326,6 @@
             hx-swap="none">
         <textarea name="note_user" rows="3" placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
       </form>
-      {# Done section is intentionally bottom + separated: GitHub's mark-
-         done has no API undo, so it's the destructive category. The
-         popover-then-click is the friction; no extra confirm dialog. #}
-      <div class="popover-done-row">
-        <button type="button" class="popover-done-btn"
-                hx-post="/action/{{ n.id }}/done"
-                hx-target="closest tr"
-                hx-swap="outerHTML"
-                title="Archive this thread on GitHub. Future activity may resurface it."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg>Done</button>
-        <button type="button" class="popover-done-btn"
-                hx-post="/action/{{ n.id }}/done?unsubscribe=1"
-                hx-target="closest tr"
-                hx-swap="outerHTML"
-                title="Archive and unsubscribe — won't notify you again unless you re-subscribe."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg>Done &amp; unsubscribe</button>
-      </div>
     </div>
   </td>
 </tr>
