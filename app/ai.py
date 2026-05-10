@@ -502,8 +502,12 @@ def _log_call(
     cost_usd: float,
     error: str | None,
     status: str,
-) -> None:
-    conn.execute(
+) -> int:
+    """Insert an ai_calls row and return its id. Callers on the success
+    path use the id as the external_id of the resulting ai_verdict
+    thread_event so the timeline can join back to the full request /
+    response pair for audit + prompt tuning."""
+    cursor = conn.execute(
         """
         INSERT INTO ai_calls (
             thread_id, created_at, model, request_json, response_json,
@@ -526,6 +530,7 @@ def _log_call(
             status,
         ),
     )
+    return int(cursor.lastrowid)
 
 
 def _save_verdict(
@@ -685,10 +690,21 @@ def judge(
         raise AIError(msg)
 
     _save_verdict(conn, thread_id, verdict, model)
-    _log_call(
+    ai_call_id = _log_call(
         conn, thread_id=thread_id, model=model,
         request=request_log, response=response_dict, usage=usage,
         cost_usd=cost, error=None, status="ok",
+    )
+    # Append the verdict to the per-thread timeline. external_id joins
+    # back to ai_calls so the full request / response is one query away.
+    db.write_thread_event(
+        conn,
+        thread_id=thread_id,
+        ts=int(time.time()),
+        kind="ai_verdict",
+        source="ai",
+        external_id=str(ai_call_id),
+        payload=verdict,
     )
     return verdict
 
@@ -702,16 +718,27 @@ def _set_state(
     **state,
 ) -> None:
     """Mirrors web._apply_action without importing web (which would import
-    Flask). Records action + actioned_at + action_source plus any state cols."""
+    Flask). Records action + actioned_at + action_source plus any state cols.
+    Also mirrors the action into thread_events so the AI sees the resulting
+    state change in the per-thread timeline."""
+    now = int(time.time())
     cols = {
         "action": action,
-        "actioned_at": int(time.time()),
+        "actioned_at": now,
         "action_source": source,
         **state,
     }
     setters = ", ".join(f"{k} = ?" for k in cols)
     values = (*cols.values(), thread_id)
     conn.execute(f"UPDATE notifications SET {setters} WHERE id = ?", values)
+    db.write_thread_event(
+        conn,
+        thread_id=thread_id,
+        ts=now,
+        kind="user_action",
+        source=source,
+        payload={"action": action},
+    )
 
 
 def apply_verdict(thread_id: str, conn: sqlite3.Connection, token: str) -> None:
@@ -795,9 +822,29 @@ def apply_verdict(thread_id: str, conn: sqlite3.Connection, token: str) -> None:
         values = (*state_updates.values(), thread_id)
         conn.execute(f"UPDATE notifications SET {setters} WHERE id = ?", values)
 
+    # Log the meta-action separately from any row-state change. Future AI
+    # judgments use this to calibrate ("user agreed with my last verdict").
+    db.write_thread_event(
+        conn,
+        thread_id=thread_id,
+        ts=int(time.time()),
+        kind="user_action",
+        source="user",
+        payload={"action": "approve_verdict"},
+    )
     _clear_verdict(conn, thread_id)
 
 
 def dismiss_verdict(thread_id: str, conn: sqlite3.Connection) -> None:
-    """Clear the cached verdict without applying any mutations."""
+    """Clear the cached verdict without applying any mutations.
+    The dismissal itself is logged as a user_action so future judgments
+    see that the user disagreed with the prior verdict."""
+    db.write_thread_event(
+        conn,
+        thread_id=thread_id,
+        ts=int(time.time()),
+        kind="user_action",
+        source="user",
+        payload={"action": "dismiss_verdict"},
+    )
     _clear_verdict(conn, thread_id)

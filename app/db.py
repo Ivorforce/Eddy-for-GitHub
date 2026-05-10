@@ -1,7 +1,10 @@
 """SQLite connection + schema migrations."""
 from __future__ import annotations
 
+import json
 import sqlite3
+import time
+from datetime import datetime
 from pathlib import Path
 
 DB_PATH = Path("data") / "notifications.db"
@@ -309,6 +312,59 @@ def init() -> None:
             version = 20
     finally:
         conn.close()
+
+
+# ---- thread_events helpers ----------------------------------------------
+
+def iso_to_unix(s: str | None) -> int | None:
+    """GraphQL ISO timestamp → unix int. Used to map createdAt/submittedAt
+    to the `ts` column on thread_events so the timeline orders by actual
+    GitHub event time, not local fetch time."""
+    if not s:
+        return None
+    try:
+        return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
+    except (ValueError, TypeError):
+        return None
+
+
+def write_thread_event(
+    conn: sqlite3.Connection,
+    *,
+    thread_id: str,
+    ts: int,
+    kind: str,
+    source: str,
+    payload: dict,
+    external_id: str | None = None,
+) -> None:
+    """Write one row to thread_events. Idempotent for events with an
+    external_id (re-fetched comments / reviews update their payload in
+    place rather than appending duplicates). Always-insert for events
+    without one — every user_action / user_chat is its own event.
+
+    The partial unique index on (thread_id, kind, external_id) WHERE
+    external_id IS NOT NULL is what makes the upsert work: rows with
+    NULL external_id are not indexed, so the conflict clause never fires
+    on them and the insert proceeds cleanly."""
+    conn.execute(
+        """
+        INSERT INTO thread_events
+            (thread_id, ts, inserted_at, kind, source, external_id, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (thread_id, kind, external_id) WHERE external_id IS NOT NULL
+        DO UPDATE SET payload_json = excluded.payload_json, ts = excluded.ts
+        """,
+        (
+            thread_id,
+            ts,
+            int(time.time()),
+            kind,
+            source,
+            external_id,
+            json.dumps(payload, ensure_ascii=False),
+        ),
+    )
 
 
 def _get_version(conn: sqlite3.Connection) -> int:

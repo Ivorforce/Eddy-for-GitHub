@@ -1173,9 +1173,10 @@ def _apply_action(
     shifts them. Done/Unsub remove the row from view, so any staleness there
     is invisible.
     """
+    now = int(time.time())
     cols = {
         "action": action,
-        "actioned_at": int(time.time()),
+        "actioned_at": now,
         "action_source": source,
         **state,
     }
@@ -1185,6 +1186,17 @@ def _apply_action(
     try:
         conn.execute(
             f"UPDATE notifications SET {setters} WHERE id = ?", values
+        )
+        # Mirror to thread_events so the AI sees user-side activity in the
+        # per-thread timeline. external_id is NULL — every click is a real
+        # event and shouldn't dedup with prior identical actions.
+        db.write_thread_event(
+            conn,
+            thread_id=thread_id,
+            ts=now,
+            kind="user_action",
+            source=source,
+            payload={"action": action},
         )
     finally:
         conn.close()

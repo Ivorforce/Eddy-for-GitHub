@@ -244,9 +244,11 @@ query($owner: String!, $name: String!, $number: Int!) {
       comments(last: 100) {
         totalCount
         nodes {
+          databaseId
           author { login }
           bodyText
           createdAt
+          lastEditedAt
           replies(first: 100) { nodes { author { login } } }
         }
       }
@@ -341,8 +343,10 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
         # Top-level comments only — replies still flow through commenter
         # counting above, but their bodies aren't in the AI context yet.
         comment_history.append({
+            "database_id": c.get("databaseId"),
             "user": {"login": login},
             "created_at": c.get("createdAt"),
+            "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
         })
 
@@ -420,17 +424,21 @@ query($owner: String!, $name: String!, $number: Int!) {
       comments(last: 100) {
         totalCount
         nodes {
+          databaseId
           author { login }
           bodyText
           createdAt
+          lastEditedAt
         }
       }
       reviews(last: 100) {
         nodes {
+          databaseId
           state
           author { login }
           bodyText
           submittedAt
+          lastEditedAt
         }
       }
     }
@@ -504,8 +512,10 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         if login:
             commenter_logins.add(login)
         comment_history.append({
+            "database_id": c.get("databaseId"),
             "user": {"login": login},
             "created_at": c.get("createdAt"),
+            "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
         })
 
@@ -518,9 +528,11 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         state = rev.get("state")
         author_login = (rev.get("author") or {}).get("login")
         rest_reviews.append({
+            "database_id": rev.get("databaseId"),
             "state": state,
             "user": {"login": author_login},
             "submitted_at": rev.get("submittedAt"),
+            "edited_at": rev.get("lastEditedAt"),
             "body": rev.get("bodyText") or "",
         })
         if state != "PENDING" and author_login:
@@ -630,9 +642,11 @@ query($owner: String!, $name: String!, $number: Int!) {
       comments(last: 100) {
         totalCount
         nodes {
+          databaseId
           author { login }
           bodyText
           createdAt
+          lastEditedAt
         }
       }
     }
@@ -697,8 +711,10 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         if login:
             commenter_logins.add(login)
         comment_history.append({
+            "database_id": c.get("databaseId"),
             "user": {"login": login},
             "created_at": c.get("createdAt"),
+            "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
         })
 
@@ -845,6 +861,51 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 "  avatar_url = excluded.avatar_url, "
                 "  last_seen_at = excluded.last_seen_at",
                 (author["login"], author.get("avatar_url"), now),
+            )
+
+        # Mirror comments and reviews into thread_events for the stateful
+        # AI integration. Idempotent on databaseId — re-fetch updates the
+        # payload (catches body edits) instead of appending duplicates.
+        # Comments without a databaseId (rare; only happens when the
+        # author's account is deleted) get skipped — no stable dedup key.
+        for c in details.get("comment_history") or []:
+            db_id = c.get("database_id")
+            if db_id is None:
+                continue
+            ts = db.iso_to_unix(c.get("created_at")) or now
+            db.write_thread_event(
+                conn,
+                thread_id=row["id"],
+                ts=ts,
+                kind="comment",
+                source="github",
+                external_id=str(db_id),
+                payload={
+                    "author": (c.get("user") or {}).get("login"),
+                    "body": c.get("body") or "",
+                    "created_at": c.get("created_at"),
+                    "edited_at": c.get("edited_at"),
+                },
+            )
+        for rev in details.get("reviews") or []:
+            db_id = rev.get("database_id")
+            if db_id is None:
+                continue
+            ts = db.iso_to_unix(rev.get("submitted_at")) or now
+            db.write_thread_event(
+                conn,
+                thread_id=row["id"],
+                ts=ts,
+                kind="review",
+                source="github",
+                external_id=str(db_id),
+                payload={
+                    "author": (rev.get("user") or {}).get("login"),
+                    "body": rev.get("body") or "",
+                    "state": rev.get("state"),
+                    "submitted_at": rev.get("submitted_at"),
+                    "edited_at": rev.get("edited_at"),
+                },
             )
 
         if row["type"] == "PullRequest":
