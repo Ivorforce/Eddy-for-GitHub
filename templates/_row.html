@@ -138,8 +138,10 @@
     <div class="activity-stats">
       {# data-tip (not title) so the tooltip handler doesn't have to swap
          the attribute on hover — title swap caused a cursor-help flicker
-         on entry, see the [data-tip] cursor rule in base.html. #}
-      {% if n.age %}<span class="stat age-pill" style="color: {{ n.age.color }}" data-tip="{{ n.age.title }}&#10;Updated {{ n.updated_at }}">{{ n.age.text }}</span>{% endif %}
+         on entry, see the [data-tip] cursor rule in base.html. The inner
+         .stat-content wrapper keeps the tooltip + help cursor scoped to
+         the visible text rather than the full grid-column-span row. #}
+      {% if n.age %}<span class="stat age-pill" style="color: {{ n.age.color }}"><span class="stat-content" data-tip="{{ n.age.title }}&#10;Updated {{ n.updated_at }}">{{ n.age.text }}</span></span>{% endif %}
       {# Popularity: net reactions as magnitude + ▲/▼, with magnitude-driven
          color saturation. Hover for the pos/neg breakdown. #}
       {# Popularity + engaged always render — empty placeholders keep the
@@ -147,7 +149,7 @@
          and engaged in slot 2 across rows, regardless of which row has
          signal. #}
       {% if n.popularity %}
-      <span class="stat popularity" style="color: {{ n.popularity.color }}; font-weight: 600" data-tip="{{ n.popularity.title }}"><span class="stat-num">{{ n.popularity.mag }}</span>{% if n.popularity.arrow %}<span class="stat-icon">{{ n.popularity.arrow }}</span>{% endif %}</span>
+      <span class="stat popularity" style="color: {{ n.popularity.color }}; font-weight: 600"><span class="stat-content" data-tip="{{ n.popularity.title }}"><span class="stat-num">{{ n.popularity.mag }}</span>{% if n.popularity.arrow %}<span class="stat-icon">{{ n.popularity.arrow }}</span>{% endif %}</span></span>
       {% else %}
       <span class="stat" aria-hidden="true"></span>
       {% endif %}
@@ -155,9 +157,11 @@
          max-reacters, summed — overlap is folded in as part of the
          approximation). Tooltip splits the breakdown. #}
       {% if int_engaged %}
-      <span class="stat" data-tip="{{ int_engaged }} engaged · {{ int_commenters or 0 }} unique commenter{{ '' if int_commenters == 1 else 's' }} · {{ int_reviewers or 0 }} unique reviewer{{ '' if int_reviewers == 1 else 's' }} · {{ int_comments }} comment{{ '' if int_comments == 1 else 's' }}">
-        <span class="stat-num">{{ int_engaged }}</span>
-        <svg class="icon stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span class="stat">
+        <span class="stat-content" data-tip="{{ int_engaged }} engaged · {{ int_commenters or 0 }} unique commenter{{ '' if int_commenters == 1 else 's' }} · {{ int_reviewers or 0 }} unique reviewer{{ '' if int_reviewers == 1 else 's' }} · {{ int_comments }} comment{{ '' if int_comments == 1 else 's' }}">
+          <span class="stat-num">{{ int_engaged }}</span>
+          <svg class="icon stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </span>
       </span>
       {% else %}
       <span class="stat" aria-hidden="true"></span>

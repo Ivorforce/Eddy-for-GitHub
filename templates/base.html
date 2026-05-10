@@ -108,10 +108,19 @@
        to swap [title]↔[data-stashed-title] on hover to suppress the
        browser's native tooltip, and any [title]-keyed selector loses its
        match for one frame across that swap. [data-tip] stays put. */
-    td.activity .activity-stats .stat[data-tip],
-    td.activity .activity-stats .stat[data-tip] * { cursor: help; }
-    /* Stat atom in the activity column — number + icon side by side. */
+    td.activity .activity-stats [data-tip],
+    td.activity .activity-stats [data-tip] * { cursor: help; }
+    /* Stat slot in the activity column. The slot keeps a min-width so
+       icons line up across rows; the actual content lives inside an inner
+       .stat-content wrapper that's content-sized and carries the tooltip,
+       so hover targets only the visible glyphs (number + icon), not the
+       padding the slot adds. */
     .stat {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .stat-content {
       display: inline-flex;
       align-items: center;
       gap: 0.2rem;
@@ -128,10 +137,7 @@
        distinct from the saturated reaction sentiment colors below. */
     .stat-add { color: #5b8c64; }
     .stat-del { color: #a8676b; }
-    /* Activity column only: each .stat fills its grid slot (min-width +
-       right-aligned number) so icons line up vertically across rows. */
     td.activity .activity-stats .stat { min-width: 2.5rem; }
-    td.activity .activity-stats .stat-num { flex: 1; text-align: right; }
     /* Item creation age — spans both grid columns as a header so the 2x2
        reactions/comments grid below stays clean. Color comes inline from a
        log-mapped HSL gradient (see _age_pill in app/web.py). */
