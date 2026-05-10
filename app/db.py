@@ -174,6 +174,45 @@ CREATE INDEX IF NOT EXISTS idx_ai_calls_created_at ON ai_calls(created_at);
 CREATE INDEX IF NOT EXISTS idx_ai_calls_thread     ON ai_calls(thread_id);
 """
 
+# Per-thread chronological event log — the substrate for the stateful AI
+# integration. Captures GitHub events (comments, reviews), AI verdicts,
+# user actions on those verdicts, and free-text user chat directed at the
+# AI on a specific thread.
+#
+# Columns:
+#   ts          — event time (GitHub createdAt / submittedAt for fetched
+#                 items, or local clock for user/AI events). Drives the
+#                 timeline ordering shown to both AI and user.
+#   inserted_at — when WE wrote the row. Distinct from ts because GitHub
+#                 events get backdated to their createdAt.
+#   kind        — 'comment' | 'review' | 'ai_verdict' | 'user_action' |
+#                 'user_chat' (room to grow: 'ai_recap', 'static_changed').
+#   source      — 'github' | 'user' | 'ai'.
+#   external_id — stable dedup key when meaningful: GitHub comment / review
+#                 databaseId, ai_calls.id. NULL for user_action / user_chat
+#                 (each click/message is its own event).
+#   payload_json — kind-specific JSON body (author, body, state, etc.).
+#
+# The unique partial index makes re-fetch idempotent: same external_id =
+# UPDATE the payload (in case the comment body was edited), don't append.
+SCHEMA_V20 = """
+CREATE TABLE IF NOT EXISTS thread_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id    TEXT NOT NULL,
+    ts           INTEGER NOT NULL,
+    inserted_at  INTEGER NOT NULL,
+    kind         TEXT NOT NULL,
+    source       TEXT NOT NULL,
+    external_id  TEXT,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_thread_events_thread_ts
+    ON thread_events(thread_id, ts);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_thread_events_external
+    ON thread_events(thread_id, kind, external_id)
+    WHERE external_id IS NOT NULL;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -264,6 +303,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V19)
             _set_version(conn, 19)
             version = 19
+        if version < 20:
+            conn.executescript(SCHEMA_V20)
+            _set_version(conn, 20)
+            version = 20
     finally:
         conn.close()
 
