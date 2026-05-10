@@ -710,6 +710,136 @@ def _entity_notes(table: str, key_col: str) -> dict[str, str]:
         conn.close()
 
 
+def _humanize_age(secs: int) -> str:
+    """Compact relative-time label for the popover timeline + verdict
+    metadata. Truncating to one unit keeps it inside the meta-row."""
+    secs = max(0, secs)
+    if secs < 60:
+        return f"{secs}s ago"
+    if secs < 3600:
+        return f"{secs // 60}m ago"
+    if secs < 86400:
+        return f"{secs // 3600}h ago"
+    return f"{secs // 86400}d ago"
+
+
+# Display labels for user_action events in the popover timeline. Source
+# of truth for action strings is web._apply_action and ai._set_state /
+# apply_verdict / dismiss_verdict; keep this in sync if either grows new
+# action labels. Unknown actions render as the raw key (forward-compat).
+_USER_ACTION_LABELS = {
+    "read":             "Marked read",
+    "muted":            "Muted",
+    "done":             "Archived",
+    "kept_unread":      "Kept unread",
+    "unmuted":          "Unmuted",
+    "approve_verdict":  "Approved verdict",
+    "dismiss_verdict":  "Dismissed verdict",
+}
+
+
+def _verdict_render_dict(payload: dict) -> dict:
+    """Display-ready bits of a past ai_verdict event's payload, for
+    rendering inside the timeline list. Distinct from _ai_verdict_dict,
+    which shapes the *cached pending* verdict (and includes approve_label
+    / stale logic that don't apply to historical entries)."""
+    score_raw = payload.get("priority_score")
+    if isinstance(score_raw, (int, float)):
+        priority_score = max(0.0, min(1.0, float(score_raw)))
+    else:
+        priority_score = 0.5
+    priority_bucket = _priority_bucket(priority_score)
+
+    raw_signals = payload.get("relevant_signals") or []
+    signals: list[dict] = []
+    if isinstance(raw_signals, list):
+        for key in raw_signals[:3]:
+            if isinstance(key, str) and key in _SIGNAL_LABELS:
+                label, cls = _SIGNAL_LABELS[key]
+                signals.append({"key": key, "label": label, "cls": cls})
+
+    return {
+        "description":    (payload.get("description") or "").strip(),
+        "priority":       priority_bucket,
+        "priority_score": priority_score,
+        "signals":        signals,
+        "model":          payload.get("model") or "",
+    }
+
+
+def _format_event_for_render(row, now: int) -> dict:
+    """Convert one thread_events row into a display-ready dict for the
+    popover timeline. Each kind gets an `actor` (display name shown in
+    the row gutter) and either a `summary` string (one-liner kinds) or
+    full payload fields (ai_verdict / user_chat) for the chat-bubble
+    rendering."""
+    try:
+        payload = json.loads(row["payload_json"])
+    except (ValueError, TypeError):
+        payload = {}
+    age_text = _humanize_age(now - row["ts"])
+    kind = row["kind"]
+    source = row["source"]
+
+    out: dict = {
+        "kind":     kind,
+        "source":   source,
+        "at_ts":    row["ts"],
+        "age_text": age_text,
+        "payload":  payload,
+    }
+
+    if kind == "comment":
+        out["actor"] = payload.get("author") or "?"
+        out["summary"] = f"@{out['actor']} commented"
+    elif kind == "review":
+        out["actor"] = payload.get("author") or "?"
+        state = (payload.get("state") or "").lower().replace("_", " ") or "reviewed"
+        out["summary"] = f"@{out['actor']} review: {state}"
+    elif kind == "user_action":
+        out["actor"] = "AI" if source == "ai" else "You"
+        action = payload.get("action") or "?"
+        out["summary"] = _USER_ACTION_LABELS.get(action, action)
+    elif kind == "ai_verdict":
+        out["actor"] = "AI"
+        out["verdict"] = _verdict_render_dict(payload)
+    elif kind == "user_chat":
+        out["actor"] = "You"
+        # body rendered as-is by the template
+    return out
+
+
+def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
+    """Mutate `d` in place: attach `timeline` + `events_since_verdict`
+    fields when the row has a cached verdict (i.e., the popover will
+    render). Skipped otherwise so bulk list rendering doesn't pay the
+    cost on rows that aren't going to display a popover."""
+    verdict = d.get("ai_verdict")
+    if not verdict:
+        return
+    rows = conn.execute(
+        """
+        SELECT ts, kind, source, payload_json
+          FROM thread_events
+         WHERE thread_id = ?
+         ORDER BY ts ASC, id ASC
+        """,
+        (d["id"],),
+    ).fetchall()
+    now = int(time.time())
+    d["timeline"] = [_format_event_for_render(r, now) for r in rows]
+    # "Stale" count: GitHub events + the user's own typed messages that
+    # postdate the cached verdict. user_action events on the verdict
+    # itself (approve/dismiss) clear the cache, so they never appear
+    # here; other user_actions (mark-read on the row directly) don't
+    # really "invalidate" a verdict, so they're excluded.
+    after = verdict.get("at") or 0
+    d["events_since_verdict"] = sum(
+        1 for r in rows
+        if r["ts"] > after and r["kind"] in ("comment", "review", "user_chat")
+    )
+
+
 def _ai_verdict_dict(
     verdict_json: str | None, at: int | None, model: str | None,
     details_fetched_at: int | None,
@@ -754,15 +884,7 @@ def _ai_verdict_dict(
         parts.append(_AI_TRACK_LABELS[set_tracked])
     pill_text = " · ".join(parts)
 
-    age_secs = max(0, int(time.time()) - at)
-    if age_secs < 60:
-        age_text = f"{age_secs}s ago"
-    elif age_secs < 3600:
-        age_text = f"{age_secs // 60}m ago"
-    elif age_secs < 86400:
-        age_text = f"{age_secs // 3600}h ago"
-    else:
-        age_text = f"{age_secs // 86400}d ago"
+    age_text = _humanize_age(int(time.time()) - at)
 
     # description is the single-field replacement for summary+rationale.
     # Legacy verdicts (cached before the schema change) still have the old
@@ -919,7 +1041,13 @@ def _load_notifications():
             "WHERE COALESCE(action, '') != 'done' "
             "ORDER BY updated_at DESC"
         ).fetchall()
-        return [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
+        out = [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
+        # Timeline attached only on rows that will actually render the
+        # popover (i.e., have a cached verdict). Single point query each;
+        # bulk-list cost stays bounded because the verdict cache is rare.
+        for d in out:
+            _attach_timeline(d, conn)
+        return out
     finally:
         conn.close()
 
@@ -1067,7 +1195,11 @@ def _load_one(thread_id: str) -> dict | None:
             f"SELECT {_ROW_COLS} FROM notifications WHERE id = ?",
             (thread_id,),
         ).fetchone()
-        return _row_to_dict(row, t_p, t_r, t_o, n_p, n_r, n_o) if row else None
+        if not row:
+            return None
+        d = _row_to_dict(row, t_p, t_r, t_o, n_p, n_r, n_o)
+        _attach_timeline(d, conn)
+        return d
     finally:
         conn.close()
 
@@ -1483,3 +1615,28 @@ def ai_dismiss(thread_id: str):
     finally:
         conn.close()
     return _ai_response(thread_id, None)
+
+
+@app.post("/ai/<thread_id>/chat")
+def ai_chat(thread_id: str):
+    """Persist a free-text user message as a user_chat thread_event.
+    The composer in the popover POSTs this on debounced keyup / blur.
+    Returns 204 (no row swap) so the popover stays open and the user can
+    keep typing — the message becomes visible in the timeline next time
+    the popover renders."""
+    body = (request.form.get("body") or "").strip()
+    if not body:
+        return ("", 204)
+    conn = db.connect()
+    try:
+        db.write_thread_event(
+            conn,
+            thread_id=thread_id,
+            ts=int(time.time()),
+            kind="user_chat",
+            source="user",
+            payload={"body": body},
+        )
+    finally:
+        conn.close()
+    return ("", 204)

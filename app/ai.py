@@ -683,6 +683,8 @@ def judge(
     )
     # Append the verdict to the per-thread timeline. external_id joins
     # back to ai_calls so the full request / response is one query away.
+    # `model` is folded into the payload so timeline-render of past
+    # verdicts can show which model produced each one.
     db.write_thread_event(
         conn,
         thread_id=thread_id,
@@ -690,7 +692,7 @@ def judge(
         kind="ai_verdict",
         source="ai",
         external_id=str(ai_call_id),
-        payload=verdict,
+        payload={**verdict, "model": model},
     )
     return verdict
 

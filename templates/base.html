@@ -716,6 +716,15 @@
       white-space: normal;
       overflow-wrap: anywhere;
     }
+    /* Wider than the default action-popover (24rem) so chat bubbles have
+       room to breathe; max-height + overflow-y so long timelines scroll
+       inside the popover instead of overflowing the viewport. */
+    .ai-verdict-popover {
+      min-width: 22rem;
+      max-width: 30rem;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
     .ai-verdict-popover .ai-verdict-priority-tag {
       display: inline-block;
       padding: 0 0.35rem;
@@ -739,25 +748,134 @@
       background: rgba(207, 100, 31, 0.25);
       color: #cf641f;
     }
-    .ai-verdict-popover .ai-verdict-stale {
-      margin: 0.3rem 0;
-      padding: 0.3rem 0.45rem;
+    /* Inline "N new since judgment" badge in the popover title. Right-
+       aligned via float:right so it doesn't push the kind label around
+       on rows with no badge. */
+    .ai-verdict-popover .ai-verdict-stale-badge {
+      float: right;
+      padding: 0 0.35rem;
       border-radius: 0.3rem;
       background: rgba(207, 100, 31, 0.12);
       color: #cf641f;
-      font-size: 0.72rem;
+      font-size: 0.66rem;
+      line-height: 1.5;
+    }
+
+    /* ── Timeline list ───────────────────────────────────────────── */
+    /* Chronological event log inside the popover. ai_verdict and
+       user_chat events render as full chat bubbles (visually emphasized
+       so the user can read them); comment / review / user_action events
+       collapse to a single muted line so a thread with 30 comments
+       doesn't push the composer off-screen. */
+    .ai-verdict-popover .timeline-list {
+      list-style: none;
+      padding: 0;
+      margin: 0.3rem 0 0.45rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .ai-verdict-popover .timeline-event {
+      font-size: 0.74rem;
       line-height: 1.35;
     }
-    .ai-verdict-popover .ai-verdict-description {
-      margin: 0.3rem 0 0.45rem;
+    .ai-verdict-popover .timeline-line {
+      display: flex;
+      gap: 0.4rem;
+      align-items: baseline;
+      color: var(--pico-muted-color);
+    }
+    .ai-verdict-popover .timeline-actor-mini {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      flex-shrink: 0;
+      min-width: 3rem;
+      opacity: 0.85;
+    }
+    .ai-verdict-popover .timeline-summary {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ai-verdict-popover .timeline-age {
+      font-size: 0.65rem;
+      color: var(--pico-muted-color);
+      flex-shrink: 0;
+    }
+    /* Chat bubbles for ai_verdict + user_chat. The two share a
+       container shape; the side / tint distinguishes who spoke. */
+    .ai-verdict-popover .timeline-bubble {
+      padding: 0.4rem 0.55rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--pico-muted-border-color);
+      background: rgba(140, 149, 159, 0.06);
+    }
+    .ai-verdict-popover .timeline-bubble.bubble-user {
+      background: rgba(31, 122, 207, 0.08);
+      border-color: rgba(31, 122, 207, 0.25);
+      margin-left: 1rem;
+    }
+    .ai-verdict-popover .timeline-bubble.bubble-ai {
+      background: rgba(137, 87, 229, 0.05);
+      border-color: rgba(137, 87, 229, 0.22);
+      margin-right: 1rem;
+    }
+    .ai-verdict-popover .timeline-bubble-head {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+      margin-bottom: 0.2rem;
+    }
+    .ai-verdict-popover .timeline-actor {
+      font-size: 0.62rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--pico-muted-color);
+    }
+    .ai-verdict-popover .timeline-bubble-body {
       font-size: 0.78rem;
       line-height: 1.4;
+      white-space: pre-wrap;
     }
-    .ai-verdict-popover .ai-verdict-meta {
-      font-size: 0.66rem;
+    .ai-verdict-popover .timeline-signals {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      margin-top: 0.3rem;
+    }
+    .ai-verdict-popover .timeline-bubble-meta {
+      font-size: 0.6rem;
       color: var(--pico-muted-color);
-      margin: 0.25rem 0 0.45rem;
+      margin-top: 0.25rem;
     }
+
+    /* ── Chat composer ──────────────────────────────────────────── */
+    .ai-verdict-popover .ai-chat-form {
+      margin: 0.4rem 0;
+    }
+    .ai-verdict-popover .ai-chat-form textarea {
+      width: 100%;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0.35rem 0.45rem;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.3rem;
+      background: var(--pico-card-background-color);
+      color: var(--pico-color);
+      font-size: 0.76rem;
+      line-height: 1.4;
+      font-family: inherit;
+      resize: vertical;
+    }
+    .ai-verdict-popover .ai-chat-form textarea::placeholder {
+      color: var(--pico-muted-color);
+      opacity: 0.7;
+    }
+
+    /* ── Action buttons ─────────────────────────────────────────── */
     .ai-verdict-popover .ai-verdict-buttons {
       display: flex;
       gap: 0.3rem;
@@ -776,7 +894,23 @@
       cursor: pointer;
       color: var(--pico-color);
     }
-    .ai-verdict-popover .ai-verdict-buttons button:hover { filter: brightness(1.1); }
+    .ai-verdict-popover .ai-verdict-buttons button:hover:not(:disabled) { filter: brightness(1.1); }
+    .ai-verdict-popover .ai-verdict-buttons button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    /* Approve gets a faint green tint to read as the affirmative action;
+       Dismiss leans red. Re-ask stays neutral — it's not destructive. */
+    .ai-verdict-popover .ai-approve-btn:not(:disabled) {
+      background: rgba(91, 140, 100, 0.12);
+      border-color: rgba(91, 140, 100, 0.4);
+      color: #5b8c64;
+    }
+    .ai-verdict-popover .ai-dismiss-btn {
+      background: rgba(168, 103, 107, 0.08);
+      border-color: rgba(168, 103, 107, 0.32);
+      color: #a8676b;
+    }
 
     /* Existing AI summary surfaced in the item popover when present —
        quiet block above the Done section. The 'AI' tag mirrors the

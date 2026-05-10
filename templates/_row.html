@@ -211,19 +211,91 @@
            data-kind="ai" data-thread-id="{{ n.id }}"
            style="position-anchor: --pop-ai-{{ n.id }}">
         <div class="popover-title">
-          <span class="popover-kind">AI verdict</span>
-          <span class="ai-verdict-priority-tag priority-{{ n.ai_verdict.priority }}">{{ n.ai_verdict.priority }} · {{ '%.2f' % n.ai_verdict.priority_score }}</span>
+          <span class="popover-kind">Thread × AI</span>
+          {% if n.events_since_verdict and n.events_since_verdict > 0 %}
+          <span class="ai-verdict-stale-badge" title="GitHub or chat events landed after the latest verdict. Approve still works; re-ask to incorporate them.">⚠ {{ n.events_since_verdict }} new since judgment</span>
+          {% endif %}
         </div>
-        {% if n.ai_verdict.stale %}
-        <div class="ai-verdict-stale">⚠ This verdict predates the latest re-poll. The thread may have changed since — consider re-asking before approving.</div>
+
+        {# Chronological timeline. ai_verdict + user_chat render in full;
+           comment / review / user_action collapse to one-liners so a busy
+           thread doesn't push the composer off-screen. #}
+        {% if n.timeline %}
+        <ol class="timeline-list">
+          {% for ev in n.timeline %}
+          <li class="timeline-event kind-{{ ev.kind }} src-{{ ev.source }}">
+            {% if ev.kind == 'ai_verdict' %}
+              <div class="timeline-bubble bubble-ai">
+                <div class="timeline-bubble-head">
+                  <span class="timeline-actor">AI</span>
+                  <span class="ai-verdict-priority-tag priority-{{ ev.verdict.priority }}">{{ ev.verdict.priority }} · {{ '%.2f' % ev.verdict.priority_score }}</span>
+                  <span class="timeline-age">{{ ev.age_text }}</span>
+                </div>
+                {% if ev.verdict.description %}<div class="timeline-bubble-body">{{ ev.verdict.description }}</div>{% endif %}
+                {% if ev.verdict.signals %}
+                <div class="timeline-signals">
+                  {% for s in ev.verdict.signals %}
+                  <span class="signal-pill {{ s.cls }}">{{ s.label }}</span>
+                  {% endfor %}
+                </div>
+                {% endif %}
+                {% if ev.verdict.model %}<div class="timeline-bubble-meta">{{ ev.verdict.model }}</div>{% endif %}
+              </div>
+            {% elif ev.kind == 'user_chat' %}
+              <div class="timeline-bubble bubble-user">
+                <div class="timeline-bubble-head">
+                  <span class="timeline-actor">You</span>
+                  <span class="timeline-age">{{ ev.age_text }}</span>
+                </div>
+                <div class="timeline-bubble-body">{{ ev.payload.body }}</div>
+              </div>
+            {% else %}
+              <div class="timeline-line">
+                <span class="timeline-actor-mini">{{ ev.actor }}</span>
+                <span class="timeline-summary">{{ ev.summary }}</span>
+                <span class="timeline-age">{{ ev.age_text }}</span>
+              </div>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ol>
         {% endif %}
-        {% if n.ai_verdict.description %}<div class="ai-verdict-description">{{ n.ai_verdict.description }}</div>{% endif %}
-        <div class="ai-verdict-meta">{{ n.ai_verdict.model }} · {{ n.ai_verdict.age_text }}</div>
+
+        {# Composer. Debounced auto-save mirrors the org/repo/person note
+           pattern (hx-trigger keyup-changed delay 600ms or blur,
+           hx-swap="none"), but unlike notes — which overwrite a single
+           field — chat is APPENDED: each save becomes a new user_chat
+           event. To prevent the same draft from being saved twice in a
+           row, the textarea is cleared after a successful POST. #}
+        <form class="ai-chat-form"
+              hx-post="/ai/{{ n.id }}/chat"
+              hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
+              hx-swap="none"
+              hx-on::after-request="if (event.detail.successful) this.querySelector('textarea').value = ''"
+              onsubmit="return false">
+          <textarea name="body" rows="2" placeholder="Message the AI about this thread… (saved on blur)"></textarea>
+        </form>
+
         <div class="ai-verdict-buttons">
-          {# Hide the popover on click so the user sees the row's pill go
-             into its loading state rather than a stale popover sitting on
-             top of an in-flight request. The HTMX request still fires
-             (hx-* take precedence over native popover dismissal). #}
+          {# Approve fires the cached verdict's mutations. Disabled-when-no-op
+             logic mirrors the previous popover. #}
+          {% if n.ai_verdict.approve_label %}
+          <button type="button" class="ai-approve-btn"
+                  hx-post="/ai/{{ n.id }}/approve"
+                  hx-target="closest tr"
+                  hx-swap="outerHTML"
+                  hx-include="#filters"
+                  hx-indicator="closest tr"
+                  onclick="this.closest('[popover]').hidePopover()"
+                  title="{{ n.ai_verdict.approve_label }}">✓ Approve</button>
+          {% else %}
+          <button type="button" class="ai-approve-btn" disabled aria-disabled="true"
+                  title="Nothing to apply — verdict proposes no state change. Use Dismiss to clear.">✓ Approve</button>
+          {% endif %}
+          {# Hide the popover on click so the row's pill goes into its
+             loading state rather than a stale popover sitting on top of
+             an in-flight request. The HTMX request still fires (hx-*
+             take precedence over native popover dismissal). #}
           <button type="button" class="ai-rejudge-btn"
                   hx-post="/ai/{{ n.id }}/judge"
                   hx-target="closest tr"
@@ -231,7 +303,7 @@
                   hx-include="#filters"
                   hx-indicator="closest tr"
                   onclick="this.closest('[popover]').hidePopover()"
-                  title="Discard this verdict and ask the AI again">↻ Re-ask</button>
+                  title="Re-judge with the latest timeline (incl. events newer than the cached verdict and any chat you just typed)">↻ Re-ask{% if n.events_since_verdict %} ({{ n.events_since_verdict }}){% endif %}</button>
           <button type="button" class="ai-dismiss-btn"
                   hx-post="/ai/{{ n.id }}/dismiss"
                   hx-target="closest tr"
