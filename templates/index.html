@@ -73,6 +73,12 @@
       hx-get="/list"
       hx-target="#notifications-table"
       hx-trigger="change">
+  {# Triage mode rides with #filters so it's preserved across all filter
+     changes. Toggled by the brain button in the Relevance column header
+     (see _table.html → toggleTriageMode in base.html). The input lives
+     here, not in _table.html, because _table.html re-renders on every
+     swap; we'd lose the value otherwise. #}
+  <input type="hidden" name="triage_mode" value="{{ filters.triage_mode }}">
   <details class="dropdown filter-dropdown">
     <summary role="button" class="secondary outline">Filters</summary>
     <ul>

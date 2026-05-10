@@ -16,24 +16,38 @@ Flask + Jinja + HTMX + Pico CSS + SQLite. Static assets vendored under `static/v
 
 **Two-fetch poll.** Each poll runs an unread fetch (default `/notifications` + reconciliation) and a since-fetch (`?all=true&since=<bookmark>`). They catch disjoint cases — see the docstrings in `app/github.py`. Both bounded; deeper history goes through Backfill.
 
-## Planned: AI v0
+## AI v0 (shipped)
 
-Foundation pieces, write *before* implementing the prompt:
+User-triggered, approve-gated per-thread judgment. Lives in the Relevance column, behind a brain-icon mode toggle in the column header. Manual mode shows the rule-based status pill + prose subhead; AI mode replaces both — per-row **Ask AI** button when no verdict, split-pill (popover left + ✓ approve right) when one exists, plus AI-selected signal pills below.
 
-- `config/preferences.md` — free text: what the user cares about, signals to weight, notable people, repos that matter.
-- `config/subsystems.md` — for Godot, the subsystem map (paths → topic labels). Anchors the AI to project-specific structure.
+**Inputs:**
 
-Per-thread judgment, structured tool-use output, cached on the row:
+- `config/preferences.md` — free-text user prefs (interests, important repos / people, noise patterns). Loaded into the cached system block. `config/preferences.example.md` ships as a template.
+- `app/ai_system_prompt.md` — shipped instructions (cost asymmetry, brevity rules, output-field semantics, signal vocabulary). The "do not restate row-visible facts" rule is the load-bearing one — see git history for why.
 
+**Verdict shape (single tool call, forced via the prompt):**
+
+```python
+judge_thread({
+    action_now:       "none" | "mark_read" | "mute" | "archive",
+    set_tracked:      "track" | "untrack" | "leave",
+    priority_score:   float ∈ [0, 1],   # bucketed to low/normal/high for color
+    relevant_signals: list[str],         # 0–3 keys from a controlled vocabulary
+    description:      str,               # what the row doesn't already show
+})
 ```
-{ action_now, user_priority, summary, policy, rationale }
-```
 
-The per-thread `policy` drives auto-action on subsequent events (`on_new_comment: auto_mark_read`) to keep API cost bounded — re-judge only when policy says `reconsider`.
+`relevant_signals` vocabulary lives in `app/ai.py:SIGNAL_VOCAB`; the display label / CSS class for each key is in `app/web.py:_SIGNAL_LABELS`. Adding a key requires touching both. `description` lands in `notifications.note_ai` on approve; the verdict cache (`notifications.ai_verdict_*`) is cleared on approve / dismiss.
 
-Schema slots already reserved: `notifications.note_ai`, `people.note_ai`. Add an `ai_calls` table for prompt+response logging when wiring up — that's what we'll need to tune the prompt later.
+**No autonomous re-judgment in v0** — the original `policy` field is intentionally absent. Add it back when auto re-judging ships.
 
-Default model: Haiku. Configurable per call. Soft daily cost cap with clear logging when hit.
+**Storage:** every API call writes a row to `ai_calls` (full request + response, token breakdown, estimated cost, status). Useful for prompt tuning and the soft daily cap (`AI_DAILY_CAP_USD`, default $2).
+
+**Default model:** Haiku 4.5. Configurable via `AI_MODEL`. The system prompt + preferences sit at ~2.4k tokens — below Haiku's 4096-token cache minimum, so `cache_control` markers don't fire today; they're forward-compatible once preferences grow.
+
+**Approve-button no-op detection:** `_approve_label` in `app/web.py` drops parts of the verdict that are already true on the row (mark_read on a read row, track on a tracked row, …). When everything's a no-op, the button is `disabled` and tells the user to use Dismiss.
+
+**Mode toggle plumbing:** `triage_mode` is part of `_filters_from_request`. The hidden input lives inside `<form id="filters">` (in `index.html`); the brain button in the column header (in `_table.html`) flips it via `toggleTriageMode()` and dispatches a bubbled `change` so HTMX picks it up. Per-row HTMX buttons inherit `hx-include="#filters"` from `<tbody>` so the mode rides every row swap.
 
 ## How the user works
 

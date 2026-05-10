@@ -137,6 +137,43 @@ SCHEMA_V17 = """
 ALTER TABLE notifications ADD COLUMN link_url TEXT;
 """
 
+# AI verdict cache columns. ai_verdict_json holds the structured tool-call
+# output from judge_thread; ai_verdict_at is when it was produced; model is
+# the model ID that produced it (so the UI can flag stale/legacy verdicts
+# and the user can audit which model said what). The verdict is "pending"
+# until applied — once applied, the cache columns are cleared (and the
+# resulting state lives on action / unread / ignored / note_ai / is_tracked
+# like any user action would).
+SCHEMA_V18 = """
+ALTER TABLE notifications ADD COLUMN ai_verdict_json TEXT;
+ALTER TABLE notifications ADD COLUMN ai_verdict_at INTEGER;
+ALTER TABLE notifications ADD COLUMN ai_verdict_model TEXT;
+"""
+
+# Append-only log of every Anthropic call, including ones blocked by the
+# soft daily cap or aborted by an exception. Enough detail to tune the
+# prompt later without re-asking the model: full request + response,
+# token breakdown (so cache-hit ratio is visible), estimated cost.
+SCHEMA_V19 = """
+CREATE TABLE IF NOT EXISTS ai_calls (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id             TEXT NOT NULL,
+    created_at            INTEGER NOT NULL,
+    model                 TEXT NOT NULL,
+    request_json          TEXT NOT NULL,
+    response_json         TEXT,
+    input_tokens          INTEGER,
+    cache_read_tokens     INTEGER,
+    cache_creation_tokens INTEGER,
+    output_tokens         INTEGER,
+    cost_usd              REAL,
+    error                 TEXT,
+    status                TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_calls_created_at ON ai_calls(created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_calls_thread     ON ai_calls(thread_id);
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -219,6 +256,14 @@ def init() -> None:
             conn.executescript(SCHEMA_V17)
             _set_version(conn, 17)
             version = 17
+        if version < 18:
+            conn.executescript(SCHEMA_V18)
+            _set_version(conn, 18)
+            version = 18
+        if version < 19:
+            conn.executescript(SCHEMA_V19)
+            _set_version(conn, 19)
+            version = 19
     finally:
         conn.close()
 

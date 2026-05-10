@@ -521,6 +521,293 @@
       background: rgba(140, 149, 159, 0.32);
     }
 
+    /* AI verdict pill (split). Lives in the Relevance column when triage
+       mode = AI. Two halves share one rounded container with a vertical
+       divider: left (large) opens the detail popover; right (small ✓)
+       executes apply_verdict directly. Priority drives the container's
+       tint; the brain glyph keeps its purple identity across all tints. */
+    .ai-verdict-pill-group {
+      display: inline-flex;
+      max-width: 100%;
+      margin: 0 0 0.25rem;
+      background: rgba(140, 149, 159, 0.18);
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.4rem;
+      overflow: hidden;
+      vertical-align: top;
+    }
+    .ai-verdict-pill-group.priority-low {
+      background: rgba(140, 149, 159, 0.16);
+      border-color: rgba(140, 149, 159, 0.45);
+    }
+    .ai-verdict-pill-group.priority-low .ai-verdict-main { color: var(--pico-muted-color); }
+    .ai-verdict-pill-group.priority-normal {
+      background: rgba(31, 122, 207, 0.18);
+      border-color: rgba(31, 122, 207, 0.55);
+    }
+    .ai-verdict-pill-group.priority-high {
+      background: rgba(207, 100, 31, 0.22);
+      border-color: rgba(207, 100, 31, 0.6);
+    }
+    .ai-verdict-pill-group.priority-high .ai-verdict-main { font-weight: 700; }
+    /* Stale: judgment predates a re-poll. Dashed border signals
+       "verdict's source data is no longer current". */
+    .ai-verdict-pill-group.stale {
+      border-style: dashed;
+      opacity: 0.85;
+    }
+    .ai-verdict-main,
+    .ai-verdict-approve {
+      background: none;
+      border: none;
+      margin: 0;
+      cursor: pointer;
+      font-size: 0.66rem;
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--pico-color);
+    }
+    .ai-verdict-main {
+      flex: 1;
+      min-width: 0; /* lets ellipsis trigger when label is long */
+      padding: 0.14rem 0.5rem;
+      text-align: center;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-right: 1px solid currentColor;  /* divider matches text color, faintly */
+      border-right-color: rgba(140, 149, 159, 0.45);
+    }
+    .ai-verdict-approve {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.14rem 0.4rem;
+      color: #1a7f37;  /* green ✓ regardless of priority tint */
+    }
+    .ai-verdict-approve svg { width: 0.85rem; height: 0.85rem; }
+    .ai-verdict-approve:disabled {
+      cursor: not-allowed;
+      color: var(--pico-muted-color);
+      opacity: 0.45;
+    }
+    .ai-verdict-approve:disabled:hover { background: none; }
+    .ai-verdict-main:hover,
+    .ai-verdict-approve:hover { background: rgba(255, 255, 255, 0.18); }
+    /* Brain glyph in the pill main area — kept purple even on tinted pills. */
+    .ai-verdict-pill-group .ai-pill-icon {
+      width: 0.85em;
+      height: 0.85em;
+      margin-right: 0.3rem;
+      vertical-align: -0.12em;
+      color: #8957e5;
+      flex-shrink: 0;
+    }
+
+    /* Per-row "Ask AI" button (no-verdict state in AI mode). Dashed border
+       signals "no verdict yet — click to ask". Spinner is just opacity +
+       pointer-events while htmx-request is on the row. */
+    .ai-ask-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.15rem 0.55rem;
+      margin: 0;
+      background: rgba(137, 87, 229, 0.08);
+      border: 1px dashed rgba(137, 87, 229, 0.5);
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: 0.72rem;
+      color: var(--pico-color);
+    }
+    .ai-ask-btn:hover { background: rgba(137, 87, 229, 0.18); }
+    .ai-ask-btn .ai-pill-icon {
+      width: 0.85em;
+      height: 0.85em;
+      color: #8957e5;
+      flex-shrink: 0;
+    }
+    /* Pulse the relevant control while any AI request is in flight on
+       this row. Covers all four request paths: Ask AI (no verdict),
+       Re-ask, Dismiss, and Approve — all set hx-indicator="closest tr",
+       so the row gets .htmx-request and the pill / button animates. */
+    tr.htmx-request .ai-ask-btn,
+    tr.htmx-request .ai-verdict-pill-group {
+      pointer-events: none;
+      animation: ai-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes ai-pulse {
+      0%, 100% { opacity: 0.45; }
+      50%      { opacity: 0.85; }
+    }
+
+    /* Signal row — small pills below the verdict explaining what the AI
+       decided is making this thread relevant. Replaces the manual-mode
+       prose subhead in AI mode. Color classes reuse status-pill variants
+       where they exist (so colors match across modes); the four signal-*
+       categories cover everything else. */
+    .signal-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      margin-top: 0.3rem;
+    }
+    .signal-pill {
+      display: inline-block;
+      padding: 0.04rem 0.4rem;
+      border-radius: 0.4rem;
+      font-size: 0.62rem;
+      font-weight: 500;
+      line-height: 1.45;
+      white-space: nowrap;
+    }
+    .signal-pill.action-review-you,
+    .signal-pill.action-assigned    { background: rgba(207, 34, 46, 0.16); color: #cf222e; }
+    .signal-pill.action-review-team { background: rgba(210, 153, 34, 0.18); color: #966c00; }
+    .signal-pill.flag-mention       { background: rgba(188, 76, 0, 0.16); color: #bc4c00; }
+    .signal-pill.review-approved    { background: rgba(26, 127, 55, 0.16); color: #1a7f37; }
+    .signal-pill.review-changes     { background: rgba(207, 34, 46, 0.18); color: #cf222e; }
+    .signal-pill.sev-danger         { background: rgba(207, 34, 46, 0.18); color: #cf222e; }
+    .signal-pill.sev-warning        { background: rgba(191, 135, 0, 0.18); color: #966c00; }
+    .signal-pill.new-comments       { background: rgba(191, 135, 0, 0.16); color: #966c00; }
+    .signal-pill.signal-positive    { background: rgba(26, 127, 55, 0.14); color: #1a7f37; }
+    .signal-pill.signal-warning     { background: rgba(191, 135, 0, 0.14); color: #966c00; }
+    .signal-pill.signal-tracked     { background: rgba(234, 165, 74, 0.18); color: #b46c1f; }
+    .signal-pill.signal-neutral {
+      background: rgba(140, 149, 159, 0.14);
+      color: var(--pico-muted-color);
+    }
+
+    /* Mode toggle in the Relevance column header. Single brain-icon
+       button: muted in manual mode, purple-tinted in AI mode. Click
+       flips the hidden triage_mode input in #filters and dispatches a
+       'change' so HTMX picks it up — see toggleTriageMode() below. */
+    .col-header-with-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .mode-toggle-btn {
+      background: none;
+      border: none;
+      padding: 0.15rem 0.2rem;
+      margin: 0;
+      cursor: pointer;
+      color: var(--pico-muted-color);
+      line-height: 1;
+      border-radius: 0.25rem;
+      width: auto;
+    }
+    .mode-toggle-btn svg { width: 0.95rem; height: 0.95rem; vertical-align: -0.18em; }
+    .mode-toggle-btn:hover { color: var(--pico-color); background: rgba(140, 149, 159, 0.18); }
+    .mode-toggle-btn.active { color: #8957e5; }
+    .mode-toggle-btn.active:hover { color: #8957e5; background: rgba(137, 87, 229, 0.14); }
+    .mode-toggle-btn:focus-visible {
+      outline: 2px solid #8957e5;
+      outline-offset: 1px;
+    }
+
+    /* AI verdict detail popover — extends action-popover with verdict-
+       specific blocks (summary, rationale, action list, buttons).
+       white-space override is needed because the popover descends from
+       td.actions { white-space: nowrap }, and unlike the existing
+       popovers (whose content is mostly textareas that block-level out
+       of the inheritance), the verdict's prose blocks would otherwise
+       refuse to wrap and force horizontal scroll. overflow-wrap: anywhere
+       handles unbreakable runs (long URLs, model IDs in tooltips). */
+    .ai-verdict-popover,
+    .ai-verdict-popover .popover-title {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .ai-verdict-popover .ai-verdict-priority-tag {
+      display: inline-block;
+      padding: 0 0.35rem;
+      margin-left: 0.35rem;
+      border-radius: 0.3rem;
+      font-size: 0.6rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      vertical-align: 1px;
+    }
+    .ai-verdict-popover .ai-verdict-priority-tag.priority-low {
+      background: rgba(140, 149, 159, 0.2);
+      color: var(--pico-muted-color);
+    }
+    .ai-verdict-popover .ai-verdict-priority-tag.priority-normal {
+      background: rgba(31, 122, 207, 0.22);
+      color: #1f7acf;
+    }
+    .ai-verdict-popover .ai-verdict-priority-tag.priority-high {
+      background: rgba(207, 100, 31, 0.25);
+      color: #cf641f;
+    }
+    .ai-verdict-popover .ai-verdict-stale {
+      margin: 0.3rem 0;
+      padding: 0.3rem 0.45rem;
+      border-radius: 0.3rem;
+      background: rgba(207, 100, 31, 0.12);
+      color: #cf641f;
+      font-size: 0.72rem;
+      line-height: 1.35;
+    }
+    .ai-verdict-popover .ai-verdict-description {
+      margin: 0.3rem 0 0.45rem;
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+    .ai-verdict-popover .ai-verdict-meta {
+      font-size: 0.66rem;
+      color: var(--pico-muted-color);
+      margin: 0.25rem 0 0.45rem;
+    }
+    .ai-verdict-popover .ai-verdict-buttons {
+      display: flex;
+      gap: 0.3rem;
+      padding-top: 0.4rem;
+      border-top: 1px solid var(--pico-muted-border-color);
+    }
+    .ai-verdict-popover .ai-verdict-buttons button {
+      flex: 1;
+      background: none;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.3rem;
+      padding: 0.22rem 0.4rem;
+      margin: 0;
+      font-size: 0.72rem;
+      line-height: 1.3;
+      cursor: pointer;
+      color: var(--pico-color);
+    }
+    .ai-verdict-popover .ai-verdict-buttons button:hover { filter: brightness(1.1); }
+
+    /* Existing AI summary surfaced in the item popover when present —
+       quiet block above the Done section. The 'AI' tag mirrors the
+       popover-kind chip so the source is unambiguous. */
+    .action-popover .popover-note-ai {
+      margin: 0 0 0.35rem;
+      padding: 0.3rem 0.4rem;
+      border-radius: 0.3rem;
+      background: rgba(137, 87, 229, 0.1);
+      font-size: 0.74rem;
+      line-height: 1.35;
+      color: var(--pico-color);
+    }
+    .action-popover .popover-note-ai-label {
+      display: inline-block;
+      margin-right: 0.4rem;
+      padding: 0 0.3rem;
+      background: rgba(137, 87, 229, 0.25);
+      border-radius: 0.25rem;
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: #8957e5;
+      vertical-align: 1px;
+    }
+
     /* time bucket separators */
     tr.bucket-separator td {
       background: transparent;
@@ -1178,6 +1465,18 @@
     };
     document.addEventListener("change", onFilterEvent);
     document.addEventListener("input", onFilterEvent);
+
+    // Brain button in the Relevance column header. Flips the hidden
+    // triage_mode input in #filters and dispatches a bubbled 'change' so
+    // HTMX (bound to #filters via hx-trigger="change") fires /list and
+    // the existing filter-sync handler updates the URL bar. Inline-callable
+    // from the button's onclick.
+    window.toggleTriageMode = function () {
+      const input = document.querySelector('#filters input[name="triage_mode"]');
+      if (!input) return;
+      input.value = input.value === "ai" ? "manual" : "ai";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    };
 
     // Preset tab active-state detection. Normalize both the live URL and
     // each tab's href into a sorted, default-stripped string, then mark

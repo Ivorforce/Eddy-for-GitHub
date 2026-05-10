@@ -105,7 +105,7 @@
       <a class="item-title{% if n.is_tracked %} is-tracked{% endif %}"
          href="{{ click_url }}" target="_blank" rel="noopener"
          title="{{ n.title }}"
-         {% if n.unread %}onclick="htmx.ajax('POST', '/set/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML'})"{% endif %}><span class="item-title-text">{{ n.title }}</span></a>
+         {% if n.unread %}onclick="htmx.ajax('POST', '/set/{{ n.id }}/read', {target: this.closest('tr'), swap: 'outerHTML', source: '#filters'})"{% endif %}><span class="item-title-text">{{ n.title }}</span></a>
     {% else %}
       <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}" title="{{ n.title }}"><span class="item-title-text">{{ n.title }}</span></span>
     {% endif %}
@@ -162,11 +162,93 @@
     </div>
   </td>
   <td class="status">
-    {# Headline pill = single most action-defining signal; prose subhead
-       absorbs everything else. When AI v0 lands, action_now → pill text
-       and summary → prose, with no template change. #}
-    {% if n.status_pill %}<span class="status-pill {{ n.status_pill.cls }}">{{ n.status_pill.text }}</span>{% endif %}
-    {% if n.status_prose %}<div class="status-prose">{{ n.status_prose }}</div>{% endif %}
+    {% if triage_mode == 'ai' %}
+      {# AI mode — column shows the AI's verdict + selected signals,
+         instead of the rule-based pill+prose. Per-row "Ask AI" button
+         when no verdict exists yet; split-pill (popover left + approve
+         right) once it does. The signal pills below replace the manual-
+         mode prose, and only show signals the AI deemed relevant. #}
+      {% if n.ai_verdict %}
+      <span class="ai-verdict-pill-group priority-{{ n.ai_verdict.priority }}{% if n.ai_verdict.stale %} stale{% endif %}">
+        {# popovertarget (native) instead of data-popover-target (JS) so the
+           browser's built-in toggle handles repeat clicks correctly. The
+           JS path always-reopens because light-dismiss on pointerdown
+           closes the popover before the JS click handler fires. #}
+        <button type="button" class="ai-verdict-main"
+                popovertarget="pop-ai-{{ n.id }}"
+                style="anchor-name: --pop-ai-{{ n.id }}"
+                title="{{ n.ai_verdict.description }}{% if n.ai_verdict.stale %} · stale verdict — re-poll happened after judgment{% endif %}"><svg class="ai-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>{{ n.ai_verdict.pill_text }}</button><button type="button" class="ai-verdict-approve"
+                {% if n.ai_verdict.approve_label %}
+                hx-post="/ai/{{ n.id }}/approve"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                hx-include="#filters"
+                hx-indicator="closest tr"
+                aria-label="{{ n.ai_verdict.approve_label }}"
+                title="{{ n.ai_verdict.approve_label }}"
+                {% else %}
+                disabled
+                aria-disabled="true"
+                aria-label="Nothing to apply"
+                title="Nothing to apply — verdict proposes no state change. Use Dismiss to clear."
+                {% endif %}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
+      </span>
+      <div class="action-popover ai-verdict-popover" popover id="pop-ai-{{ n.id }}"
+           data-kind="ai" data-thread-id="{{ n.id }}"
+           style="position-anchor: --pop-ai-{{ n.id }}">
+        <div class="popover-title">
+          <span class="popover-kind">AI verdict</span>
+          <span class="ai-verdict-priority-tag priority-{{ n.ai_verdict.priority }}">{{ n.ai_verdict.priority }} · {{ '%.2f' % n.ai_verdict.priority_score }}</span>
+        </div>
+        {% if n.ai_verdict.stale %}
+        <div class="ai-verdict-stale">⚠ This verdict predates the latest re-poll. The thread may have changed since — consider re-asking before approving.</div>
+        {% endif %}
+        {% if n.ai_verdict.description %}<div class="ai-verdict-description">{{ n.ai_verdict.description }}</div>{% endif %}
+        <div class="ai-verdict-meta">{{ n.ai_verdict.model }} · {{ n.ai_verdict.age_text }}</div>
+        <div class="ai-verdict-buttons">
+          {# Hide the popover on click so the user sees the row's pill go
+             into its loading state rather than a stale popover sitting on
+             top of an in-flight request. The HTMX request still fires
+             (hx-* take precedence over native popover dismissal). #}
+          <button type="button" class="ai-rejudge-btn"
+                  hx-post="/ai/{{ n.id }}/judge"
+                  hx-target="closest tr"
+                  hx-swap="outerHTML"
+                  hx-include="#filters"
+                  hx-indicator="closest tr"
+                  onclick="this.closest('[popover]').hidePopover()"
+                  title="Discard this verdict and ask the AI again">↻ Re-ask</button>
+          <button type="button" class="ai-dismiss-btn"
+                  hx-post="/ai/{{ n.id }}/dismiss"
+                  hx-target="closest tr"
+                  hx-swap="outerHTML"
+                  hx-include="#filters"
+                  hx-indicator="closest tr"
+                  onclick="this.closest('[popover]').hidePopover()"
+                  title="Discard this verdict, take no action">✕ Dismiss</button>
+        </div>
+      </div>
+      {% if n.ai_verdict.signals %}
+      <div class="signal-row">
+        {% for s in n.ai_verdict.signals %}
+        <span class="signal-pill {{ s.cls }}">{{ s.label }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% else %}
+      <button type="button" class="ai-ask-btn"
+              hx-post="/ai/{{ n.id }}/judge"
+              hx-target="closest tr"
+              hx-swap="outerHTML"
+              hx-include="#filters"
+              hx-indicator="closest tr"
+              title="Ask Claude to triage this thread"><svg class="ai-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>Ask AI</button>
+      {% endif %}
+    {% else %}
+      {# Manual mode — rule-based status pill + demoted prose subhead. #}
+      {% if n.status_pill %}<span class="status-pill {{ n.status_pill.cls }}">{{ n.status_pill.text }}</span>{% endif %}
+      {% if n.status_prose %}<div class="status-prose">{{ n.status_prose }}</div>{% endif %}
+    {% endif %}
   </td>
   <td class="actions">
     {% set is_read_now = (not n.unread) and (not n.ignored) %}
@@ -203,6 +285,11 @@
             hx-swap="none">
         <textarea name="note_user" rows="3" placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
       </form>
+      {% if n.note_ai %}
+      <div class="popover-note-ai" title="AI summary saved when this row's verdict was approved">
+        <span class="popover-note-ai-label">AI</span>{{ n.note_ai }}
+      </div>
+      {% endif %}
       {# Done section is intentionally bottom + separated: GitHub's mark-
          done has no API undo, so it's the destructive category. The
          popover-then-click is the friction; no extra confirm dialog. #}
