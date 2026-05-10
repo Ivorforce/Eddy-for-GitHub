@@ -271,6 +271,21 @@ _AUTHOR_BADGE = {
     "FIRST_TIME_CONTRIBUTOR": ("first-time", "first-time"),
 }
 
+
+def _author_badge_class(login: str | None, assoc: str | None, user_login: str | None) -> str:
+    """Pick the badge CSS class for an author rendering. The user's own
+    login wins over any association ('self' icon); otherwise the
+    _AUTHOR_BADGE lookup applies. Empty string when there's no badge —
+    template renders the muted generic person icon.
+
+    Centralized here so both the existing Repo column (where the row
+    author is the lookup target) and the popover timeline (where each
+    commenter / reviewer is) derive the badge from one place."""
+    if user_login and login == user_login:
+        return "self"
+    badge = _AUTHOR_BADGE.get(assoc or "")
+    return badge[0] if badge else ""
+
 # GitHub reaction emoji buckets. Same user can react with multiple positives;
 # max() approximates a lower bound on distinct users in that sentiment bucket
 # (sum overcounts; max never overcounts a single category).
@@ -815,38 +830,45 @@ def _coalesce_comments(events: list[dict]) -> list[dict]:
         if len(group) == 1:
             out.append(ev)
         else:
-            authors: list[str] = []
+            # Distinct authors in first-appearance order, each carrying
+            # the badge_class derived during _format_event_for_render so
+            # the template can render their inline icon.
+            authors: list[dict] = []
             seen: set[str] = set()
             for c in group:
                 a = (c.get("payload") or {}).get("author")
                 if a and a not in seen:
                     seen.add(a)
-                    authors.append(a)
+                    authors.append({
+                        "login":       a,
+                        "badge_class": c.get("author_badge_class", ""),
+                    })
             shown = authors[:3]
             extra = max(0, len(authors) - len(shown))
-            who = ", ".join(shown) if shown else "unknown"
-            if extra:
-                who = f"{who} +{extra} more"
             last = group[-1]
             out.append({
-                "kind":     "comment_group",
-                "source":   "github",
-                "at_ts":    last["at_ts"],
-                "age_text": last["age_text"],
-                "payload":  {},
-                "actor":    "GitHub",
-                "summary":  f"{len(group)} comments by {who}",
+                "kind":           "comment_group",
+                "source":         "github",
+                "at_ts":          last["at_ts"],
+                "age_text":       last["age_text"],
+                "payload":        {},
+                "actor":          "GitHub",
+                "count":          len(group),
+                "shown_authors":  shown,
+                "extra_authors":  extra,
             })
         i = j
     return out
 
 
-def _format_event_for_render(row, now: int) -> dict:
+def _format_event_for_render(row, now: int, user_login: str | None = None) -> dict:
     """Convert one thread_events row into a display-ready dict for the
     popover timeline. Each kind gets an `actor` (display name shown in
     the row gutter) and either a `summary` string (one-liner kinds) or
     full payload fields (ai_verdict / user_chat) for the chat-bubble
-    rendering."""
+    rendering. comment / review events also pick up `author_badge_class`
+    so the template can render the same icon styling the Repo column
+    uses (self/member/first-time/generic)."""
     try:
         payload = json.loads(row["payload_json"])
     except (ValueError, TypeError):
@@ -864,12 +886,20 @@ def _format_event_for_render(row, now: int) -> dict:
     }
 
     if kind == "comment":
-        out["actor"] = payload.get("author") or "?"
-        out["summary"] = f"@{out['actor']} commented"
+        author = payload.get("author") or "?"
+        out["actor"] = author
+        out["author_badge_class"] = _author_badge_class(
+            author, payload.get("author_association"), user_login,
+        )
+        out["summary"] = "commented"
     elif kind == "review":
-        out["actor"] = payload.get("author") or "?"
+        author = payload.get("author") or "?"
+        out["actor"] = author
+        out["author_badge_class"] = _author_badge_class(
+            author, payload.get("author_association"), user_login,
+        )
         state = (payload.get("state") or "").lower().replace("_", " ") or "reviewed"
-        out["summary"] = f"@{out['actor']} review: {state}"
+        out["summary"] = f"review: {state}"
     elif kind == "user_action":
         out["actor"] = "AI" if source == "ai" else "You"
         action = payload.get("action") or "?"
@@ -907,7 +937,8 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
         (d["id"],),
     ).fetchall()
     now = int(time.time())
-    timeline = [_format_event_for_render(r, now) for r in rows]
+    user_login = app.config.get("USER_LOGIN")
+    timeline = [_format_event_for_render(r, now, user_login=user_login) for r in rows]
     # Coalesce comment runs BEFORE marking the pending ai_verdict —
     # ai_verdict events aren't touched by coalescing, so the in-bubble
     # approve/dismiss markers still land on the same object identity.
@@ -1748,7 +1779,8 @@ def ai_chat(thread_id: str):
     finally:
         conn.close()
     # Render via the same partial the row template uses, so styling and
-    # markup stay in one place.
+    # markup stay in one place. user_login isn't needed for user_chat
+    # events (no author badge applies; the actor is always "You").
     ev = _format_event_for_render(
         {"ts": ts, "kind": "user_chat", "source": "user",
          "payload_json": json.dumps({"body": body})},

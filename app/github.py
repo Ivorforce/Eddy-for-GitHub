@@ -246,6 +246,7 @@ query($owner: String!, $name: String!, $number: Int!) {
         nodes {
           databaseId
           author { login }
+          authorAssociation
           bodyText
           createdAt
           lastEditedAt
@@ -345,6 +346,7 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
         comment_history.append({
             "database_id": c.get("databaseId"),
             "user": {"login": login},
+            "author_association": c.get("authorAssociation"),
             "created_at": c.get("createdAt"),
             "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
@@ -426,6 +428,7 @@ query($owner: String!, $name: String!, $number: Int!) {
         nodes {
           databaseId
           author { login }
+          authorAssociation
           bodyText
           createdAt
           lastEditedAt
@@ -436,6 +439,7 @@ query($owner: String!, $name: String!, $number: Int!) {
           databaseId
           state
           author { login }
+          authorAssociation
           bodyText
           submittedAt
           lastEditedAt
@@ -514,6 +518,7 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         comment_history.append({
             "database_id": c.get("databaseId"),
             "user": {"login": login},
+            "author_association": c.get("authorAssociation"),
             "created_at": c.get("createdAt"),
             "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
@@ -531,6 +536,7 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
             "database_id": rev.get("databaseId"),
             "state": state,
             "user": {"login": author_login},
+            "author_association": rev.get("authorAssociation"),
             "submitted_at": rev.get("submittedAt"),
             "edited_at": rev.get("lastEditedAt"),
             "body": rev.get("bodyText") or "",
@@ -644,6 +650,7 @@ query($owner: String!, $name: String!, $number: Int!) {
         nodes {
           databaseId
           author { login }
+          authorAssociation
           bodyText
           createdAt
           lastEditedAt
@@ -713,6 +720,7 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         comment_history.append({
             "database_id": c.get("databaseId"),
             "user": {"login": login},
+            "author_association": c.get("authorAssociation"),
             "created_at": c.get("createdAt"),
             "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
@@ -886,6 +894,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 external_id=str(db_id),
                 payload={
                     "author": (c.get("user") or {}).get("login"),
+                    "author_association": c.get("author_association"),
                     "body": c.get("body") or "",
                     "created_at": c.get("created_at"),
                     "edited_at": c.get("edited_at"),
@@ -905,6 +914,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 external_id=str(db_id),
                 payload={
                     "author": (rev.get("user") or {}).get("login"),
+                    "author_association": rev.get("author_association"),
                     "body": rev.get("body") or "",
                     "state": rev.get("state"),
                     "submitted_at": rev.get("submitted_at"),

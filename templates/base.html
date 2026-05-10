@@ -227,7 +227,14 @@
       height: 0.95em;
       flex-shrink: 0;
       cursor: help;
+      vertical-align: -0.13em;
     }
+    /* Inline timeline contexts — popover one-liners + the AI verdict
+       bubble head — render the icon directly next to the login as
+       inline content (vs the Repo column's flex layout which gets
+       spacing from its parent's `gap`). Margin gives them breathing
+       room so the icon doesn't crash into the name. */
+    .ai-verdict-popover .author-icon { margin-right: 0.18rem; }
     .author-icon.icon-member    { color: #1a7f37; }
     .author-icon.icon-firsttime { color: #bf8700; }
     .author-icon.icon-self      { color: #4493f8; }
@@ -798,6 +805,13 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    /* Author logins in timeline lines pick up the muted color from
+       .timeline-line; restore content color so the name stays
+       legible against the muted "commented" / "review: approved" text. */
+    .ai-verdict-popover .timeline-line .author-login {
+      color: var(--pico-color);
+      font-weight: 500;
     }
     .ai-verdict-popover .timeline-age {
       font-size: 0.65rem;
