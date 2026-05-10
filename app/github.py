@@ -1149,11 +1149,15 @@ def _get_paginated(
     params: dict,
     last_modified: str | None,
     max_pages: int = MAX_PAGES_PER_FETCH,
+    use_cache: bool = True,
 ) -> tuple[list[dict[str, Any]], str | None, int]:
     """GET /notifications with optional If-Modified-Since + page cap.
-    Returns (items, new_last_modified, status). status=304 means no changes."""
+    Returns (items, new_last_modified, status). status=304 means no changes.
+    Pass use_cache=False to skip the conditional header — needed when the
+    caller wants a guaranteed re-pull even if the feed's Last-Modified
+    matches the bookmark (manual refresh repairing a local desync)."""
     headers = _auth_headers(token)
-    if last_modified:
+    if last_modified and use_cache:
         headers["If-Modified-Since"] = last_modified
     r = _session.get(API_NOTIFICATIONS, headers=headers, params=params, timeout=30)
     if r.status_code == 304:
@@ -1171,17 +1175,26 @@ def _get_paginated(
     return items, new_last_modified, 200
 
 
-def _fetch_unread(conn: sqlite3.Connection, token: str) -> int:
+def _fetch_unread(
+    conn: sqlite3.Connection, token: str, force: bool = False
+) -> int:
     """Fetch currently-unread notifications + reconcile read-state of items
     missing from the response (they were marked read elsewhere). This is the
     only path that catches read-state changes on threads with no new activity
-    (e.g. user clicked through on github.com/mobile without commenting)."""
+    (e.g. user clicked through on github.com/mobile without commenting).
+
+    `force=True` bypasses If-Modified-Since so the call always returns the
+    current unread set. The conditional header otherwise short-circuits a
+    manual refresh whenever the unread feed's Last-Modified matches our
+    bookmark — even when local state is desynced — because GitHub's
+    Last-Modified reflects the most recent unread item, not whether local
+    truth matches."""
     last_modified = (
         db.get_meta(conn, "last_modified_unread")
         or db.get_meta(conn, "last_modified")  # fallback to legacy single-key
     )
     items, new_last_modified, status = _get_paginated(
-        token, {"per_page": PER_PAGE}, last_modified
+        token, {"per_page": PER_PAGE}, last_modified, use_cache=not force
     )
     if status == 304:
         return 0
@@ -1287,6 +1300,6 @@ def poll_once(
     n_combined = _fetch_combined(conn, token)
     n_unread = 0
     if force_full or _has_unread_outside_window(conn):
-        n_unread = _fetch_unread(conn, token)
+        n_unread = _fetch_unread(conn, token, force=force_full)
     _enrich(conn, token)
     return n_combined + n_unread
