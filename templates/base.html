@@ -1701,12 +1701,14 @@
       if (send) send.disabled = !hasText;
       const rejudgeLabel = popover.querySelector(".ai-rejudge-btn .rejudge-label");
       if (rejudgeLabel) {
-        // Re-ask alone vs Send + Re-ask. Preserve the events-since-judgment
-        // count suffix from the server-rendered initial label by stripping
-        // any trailing "(N)" before re-templating; pull it back on if no text.
+        // Two distinct invocation modes share this button. Empty textarea
+        // → re-evaluate ("↻ Re-ask", with optional events-since count
+        // suffix from the server render). Text present → chat: the user
+        // wants the AI to reply, not re-summarize. Different label +
+        // icon to make the mode shift legible at a glance.
         const initial = rejudgeLabel.dataset.initial || rejudgeLabel.textContent;
         rejudgeLabel.dataset.initial = initial;
-        rejudgeLabel.textContent = hasText ? "Send + Re-ask" : initial;
+        rejudgeLabel.textContent = hasText ? "✉ Send & Reply" : initial;
       }
     };
 

@@ -261,7 +261,7 @@
                     hx-include="#filters, closest form"
                     hx-indicator="closest tr"
                     onclick="this.closest('[popover]').hidePopover()"
-                    title="Re-judge with the latest timeline (Ctrl+Enter; sends any text first)">↻ <span class="rejudge-label">Re-ask{% if n.events_since_verdict %} ({{ n.events_since_verdict }}){% endif %}</span></button>
+                    title="Empty: re-evaluate based on changed state. With text: send your message and the AI replies (Ctrl+Enter)."><span class="rejudge-label">↻ Re-ask{% if n.events_since_verdict %} ({{ n.events_since_verdict }}){% endif %}</span></button>
           </div>
         </form>
       </div>

@@ -556,6 +556,7 @@ def judge(
     *,
     user_login: str | None = None,
     user_teams=None,
+    invocation_mode: str = "summary",
 ) -> dict:
     """Generate a verdict for one thread, persist it on the row, log the
     call, and return the verdict dict. Raises AIError on failure.
@@ -564,7 +565,12 @@ def judge(
     (stored in app.config); when present, they're prepended to the system
     prompt so the model can recognize the user's own login in author /
     assignee / reviewer / commenter fields. Both default to None so this
-    module remains callable without web's app context."""
+    module remains callable without web's app context.
+
+    invocation_mode — one of `summary` / `re_evaluate` / `chat`. Surfaced
+    in the user message so the system prompt can branch on what tone
+    the description should take (see ai_system_prompt.md §Invocation
+    modes). Defaults to `summary` for callers that don't supply it."""
     model = _model_id()
     cap = _daily_cap()
     spent = _spent_today(conn)
@@ -581,6 +587,7 @@ def judge(
     ctx = _load_thread_context(conn, thread_id)
     if ctx is None:
         raise AIError(f"Thread {thread_id} not found")
+    ctx["invocation_mode"] = invocation_mode
 
     system_prompt = _read_system_prompt()
     identity = _identity_block(user_login, user_teams)

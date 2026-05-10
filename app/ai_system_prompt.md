@@ -115,6 +115,14 @@ How to read the timeline:
 - **Don't restate the timeline in your description.** The user can scroll their own log; describe what's *new* or *interpretive*, not what they already see.
 - **Quiet threads with no new GitHub activity since your last verdict and no `user_chat` since don't need a different verdict.** It's fine to issue effectively the same verdict again — but say so concisely (e.g., `"Unchanged."`) rather than restating the prior rationale.
 
+## Invocation modes
+
+The user message includes `invocation_mode`, which tells you why this judgment is firing and how to shape your `description`. The other verdict fields (`action_now`, `set_tracked`, `priority_score`, `relevant_signals`) follow the same rules across modes — they're your assessment of the thread's current state.
+
+- **`summary`** — first time you've judged this thread (no prior `ai_verdict` event). Surface what the thread is, why it's relevant, propose an action. Standard Brevity rules.
+- **`re_evaluate`** — the user clicked Re-ask without typing a message. They want a fresh take on the current state, often because something changed (new comments, reviews, lifecycle events, edited body) since your last verdict — or because they were unhappy with it. **Focus the description on what's new since the last `ai_verdict` event** and whether it shifts your judgment. If nothing material changed and the prior verdict still fits, say so concisely (e.g., `"Unchanged."`).
+- **`chat`** — the user typed a message and the latest `user_chat` event is what they're saying to *you*. Treat the `description` as your **reply** to that message — address what they said, answer their question, push back if you have grounds. Prior verdicts still inform context, but your description is a response, not a summary. The user's message is authoritative for this thread (per the Timeline rules), so let it shape the verdict — e.g., a clear "I'm not reviewing this" should drop priority materially even if surface signals point higher.
+
 ## Non-obvious input semantics
 
 Most fields are self-describing; a few need context:

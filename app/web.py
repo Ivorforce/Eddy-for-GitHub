@@ -1812,29 +1812,43 @@ def ai_judge(thread_id: str):
     """Generate a verdict for one thread. The verdict is cached on the row
     but no GitHub or DB state mutates until the user clicks Approve.
 
-    Optional `body` form field — if non-empty, write a user_chat event
-    for it BEFORE judging, so the AI sees the user's message in the
-    timeline as part of this judgment. Powers the popover's
-    "Send + Re-ask" flow (Ctrl+Enter)."""
+    Three invocation modes, derived from the request shape:
+      - body present                          → 'chat'         (the user
+        is talking to the AI; the verdict's description should reply to
+        their message rather than summarize the thread)
+      - body empty + cached verdict exists    → 're_evaluate'  (Re-ask
+        button; focus on what's changed since the last verdict)
+      - body empty + no cached verdict        → 'summary'      (first
+        Ask AI on this row; standard summarize-and-propose)
+    The mode is passed through to ai.judge → user message → system
+    prompt, which branches the description tone accordingly."""
     body = (request.form.get("body") or "").strip()
     error: str | None = None
     conn = db.connect()
     try:
+        if body:
+            mode = "chat"
+            db.write_thread_event(
+                conn,
+                thread_id=thread_id,
+                ts=int(time.time()),
+                kind="user_chat",
+                source="user",
+                payload={"body": body},
+            )
+        else:
+            row = conn.execute(
+                "SELECT ai_verdict_at FROM notifications WHERE id = ?",
+                (thread_id,),
+            ).fetchone()
+            mode = "re_evaluate" if (row and row["ai_verdict_at"]) else "summary"
         try:
-            if body:
-                db.write_thread_event(
-                    conn,
-                    thread_id=thread_id,
-                    ts=int(time.time()),
-                    kind="user_chat",
-                    source="user",
-                    payload={"body": body},
-                )
             ai.judge(
                 thread_id,
                 conn,
                 user_login=app.config.get("USER_LOGIN"),
                 user_teams=app.config.get("USER_TEAMS"),
+                invocation_mode=mode,
             )
         except ai.AIError as e:
             log.warning("AI judge failed for %s: %s", thread_id, e)
