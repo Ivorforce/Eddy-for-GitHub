@@ -120,8 +120,11 @@
       <span class="category-pill" title="Discussion category">{{ n.category }}</span>
       {% endif %}
       {% if m.complexity %}
-        <span class="stat-add" title="{{ m.complexity[0] }} lines added">+{{ m.complexity[0] }}</span>
-        <span class="stat-del" title="{{ m.complexity[1] }} lines deleted">−{{ m.complexity[1] }}</span>
+        <span class="diff-stats"
+              title="{% if m.top_files %}{% for f in m.top_files %}{{ f.filename }}  +{{ f.additions or 0 }}/−{{ f.deletions or 0 }}{% if not loop.last %}&#10;{% endif %}{% endfor %}{% else %}{{ m.complexity[0] }} lines added, {{ m.complexity[1] }} lines deleted{% endif %}">
+          <span class="stat-add">+{{ m.complexity[0] }}</span>
+          <span class="stat-del">−{{ m.complexity[1] }}</span>
+        </span>
       {% endif %}
       {% for label in n.labels_visible %}
         <span class="label-pill"

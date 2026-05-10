@@ -228,6 +228,17 @@ def _summarize_details(d: dict, subject_type: str) -> dict:
         out["requested_teams"] = [
             (t or {}).get("slug") for t in (d.get("requested_teams") or []) if (t or {}).get("slug")
         ]
+        # Per-file diff stats as a compact string list — "path +N/-M". String
+        # form is ~2.5x cheaper in tokens than the equivalent JSON objects,
+        # which matters because file lists can run to 100 entries on big PRs.
+        # Truncation: GraphQL caps at 100 files; the AI compares list length
+        # against `changed_files` (total) to know when it's seeing a subset.
+        files = d.get("files") or []
+        if files:
+            out["files"] = [
+                f"{f.get('filename')} +{f.get('additions') or 0}/-{f.get('deletions') or 0}"
+                for f in files if f.get("filename")
+            ]
     if subject_type == "Discussion":
         out["category"] = d.get("category")
     body = d.get("body") or ""

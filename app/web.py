@@ -358,8 +358,9 @@ def _format_meta(
         complexity: PR diff size (additions, deletions)
         reception:  sentiment polarity (positive max, negative max)
         interest:   attention volume (comments + new, distinct-reacter approximation)
+        top_files:  up to 5 most-changed files for diff-label hover tooltip
     Each is None when not applicable so the pill hides."""
-    out = {"complexity": None, "reception": None, "interest": None}
+    out = {"complexity": None, "reception": None, "interest": None, "top_files": None}
     if not details_json:
         return out
     try:
@@ -372,6 +373,20 @@ def _format_meta(
         dels = d.get("deletions") or 0
         if adds or dels:
             out["complexity"] = (adds, dels)
+        # Top 5 files by total changed lines, for the diff-label hover. Sort
+        # is descending on additions+deletions so the user sees the biggest
+        # touch points first; ties break on filename for stability across
+        # re-renders.
+        files = d.get("files") or []
+        ranked = sorted(
+            (f for f in files if f.get("filename")),
+            key=lambda f: (
+                -((f.get("additions") or 0) + (f.get("deletions") or 0)),
+                f.get("filename") or "",
+            ),
+        )[:5]
+        if ranked:
+            out["top_files"] = ranked
 
     # Reactions: PRs come from the separately-fetched issue-form endpoint;
     # Issues already have them embedded in details_json.

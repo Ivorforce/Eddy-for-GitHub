@@ -134,7 +134,11 @@
     }
     svg.stat-icon { height: 1em; }
     /* Diff stats — desaturated greens/reds so they read as factual metric,
-       distinct from the saturated reaction sentiment colors below. */
+       distinct from the saturated reaction sentiment colors below. The
+       wrapper carries the hover tooltip (top-5 changed files); inline-flex
+       restores the visual gap between +N and −M that the parent meta-row's
+       gap would otherwise collapse since the two spans are now one item. */
+    .diff-stats { display: inline-flex; gap: 0.4rem; }
     .stat-add { color: #5b8c64; }
     .stat-del { color: #a8676b; }
     td.activity .activity-stats .stat { min-width: 2.5rem; }

@@ -384,6 +384,14 @@ query($owner: String!, $name: String!, $number: Int!) {
       mergeStateStatus
       additions
       deletions
+      changedFiles
+      files(first: 100) {
+        nodes {
+          path
+          additions
+          deletions
+        }
+      }
       authorAssociation
       author { login avatarUrl }
       assignees(first: 10) { nodes { login } }
@@ -513,6 +521,21 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         for l in (pr.get("labels") or {}).get("nodes") or []
     ]
 
+    # Per-file diff stats. REST-shaped (filename / additions / deletions) so
+    # details_json stays consistent with the rest of this module's contract.
+    # Capped at 100 by the GraphQL query; PRs with more changed files will
+    # show a truncated list — the AI cross-references against `changed_files`
+    # (the total count) to know it's not seeing everything.
+    files = [
+        {
+            "filename": (f or {}).get("path"),
+            "additions": (f or {}).get("additions"),
+            "deletions": (f or {}).get("deletions"),
+        }
+        for f in (pr.get("files") or {}).get("nodes") or []
+        if (f or {}).get("path")
+    ]
+
     # State: GraphQL OPEN/CLOSED/MERGED → REST 'open'/'closed'. _type_state
     # checks merged + draft *before* state, so a merged PR ends up correctly
     # classified regardless.
@@ -536,6 +559,8 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "mergeable_state": merge_status,
         "additions": pr.get("additions"),
         "deletions": pr.get("deletions"),
+        "changed_files": pr.get("changedFiles"),
+        "files": files,
         "comments": comment_total,
         "author_association": pr.get("authorAssociation"),
         "user": {
