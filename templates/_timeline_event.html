@@ -77,11 +77,18 @@
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
-  {% elif ev.kind in ('comment', 'review') %}
+  {% elif ev.kind == 'comment' %}
     <div class="timeline-line">
       <span class="timeline-summary">
         {{ author_chip(ev.actor, ev.author_badge_class, ev.payload.author_association or '') }}
         {{ ev.summary }}
+      </span>
+      <span class="timeline-age">{{ ev.age_text }}</span>
+    </div>
+  {% elif ev.kind == 'review' %}
+    <div class="timeline-line">
+      <span class="timeline-summary">
+        {{ author_chip(ev.actor, ev.author_badge_class, ev.payload.author_association or '') }}: <span class="review-state {{ ev.review_state_class }}">{{ ev.review_state_label }}</span>
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>

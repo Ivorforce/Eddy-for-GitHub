@@ -753,6 +753,21 @@ _USER_ACTION_LABELS = {
 }
 
 
+# PR review state → (display label, CSS modifier class). Title-case
+# labels match the popover's chat-prose tone better than the GraphQL
+# enum's SHOUTED form. The class drives a colored text treatment that
+# matches the state's affordance: green for approval, the existing
+# desaturated red tone for change-requests, muted for dismissed/pending,
+# default for plain comments.
+_REVIEW_STATE = {
+    "APPROVED":          ("Approved",          "state-approved"),
+    "CHANGES_REQUESTED": ("Requested Changes", "state-changes-requested"),
+    "DISMISSED":         ("Dismissed review",  "state-dismissed"),
+    "COMMENTED":         ("Reviewed",          "state-commented"),
+    "PENDING":           ("Pending",           "state-pending"),
+}
+
+
 def _verdict_render_dict(payload: dict) -> dict:
     """Display-ready bits of a past ai_verdict event's payload, for
     rendering inside the timeline list. Distinct from _ai_verdict_dict,
@@ -898,8 +913,10 @@ def _format_event_for_render(row, now: int, user_login: str | None = None) -> di
         out["author_badge_class"] = _author_badge_class(
             author, payload.get("author_association"), user_login,
         )
-        state = (payload.get("state") or "").lower().replace("_", " ") or "reviewed"
-        out["summary"] = f"review: {state}"
+        state = (payload.get("state") or "").upper()
+        label, cls = _REVIEW_STATE.get(state, (state.title() or "Reviewed", ""))
+        out["review_state_label"] = label
+        out["review_state_class"] = cls
     elif kind == "user_action":
         out["actor"] = "AI" if source == "ai" else "You"
         action = payload.get("action") or "?"

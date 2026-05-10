@@ -813,6 +813,16 @@
       color: var(--pico-color);
       font-weight: 500;
     }
+    /* Review state labels — colored to read as the affordance: green
+       approval, the existing desaturated red tone for change-requests,
+       muted for dismissed/pending. Plain "Commented" stays default
+       color (it's the noisiest state and rarely a singleton anyway —
+       coalescing usually folds it into a comment_group line). */
+    .ai-verdict-popover .timeline-line .review-state { font-weight: 500; }
+    .ai-verdict-popover .timeline-line .state-approved          { color: #1a7f37; }
+    .ai-verdict-popover .timeline-line .state-changes-requested { color: #a8676b; }
+    .ai-verdict-popover .timeline-line .state-dismissed         { color: var(--pico-muted-color); }
+    .ai-verdict-popover .timeline-line .state-pending           { color: var(--pico-muted-color); }
     .ai-verdict-popover .timeline-age {
       font-size: 0.65rem;
       color: var(--pico-muted-color);
