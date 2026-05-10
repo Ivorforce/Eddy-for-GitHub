@@ -241,10 +241,12 @@ query($owner: String!, $name: String!, $number: Int!) {
       upvoteCount
       category { name }
       author { login avatarUrl }
-      comments(first: 100) {
+      comments(last: 100) {
         totalCount
         nodes {
           author { login }
+          bodyText
+          createdAt
           replies(first: 100) { nodes { author { login } } }
         }
       }
@@ -327,6 +329,7 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
     comments = disc.get("comments") or {}
     comment_total = comments.get("totalCount") or 0
     logins: set[str] = set()
+    comment_history: list[dict] = []
     for c in comments.get("nodes") or []:
         login = (c.get("author") or {}).get("login")
         if login:
@@ -335,6 +338,13 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
             rl = (rep.get("author") or {}).get("login")
             if rl:
                 logins.add(rl)
+        # Top-level comments only — replies still flow through commenter
+        # counting above, but their bodies aren't in the AI context yet.
+        comment_history.append({
+            "user": {"login": login},
+            "created_at": c.get("createdAt"),
+            "body": c.get("bodyText") or "",
+        })
 
     # State flows through the same field as Issues so _type_state can
     # branch on it. 'answered' wins over 'closed' — an answered then
@@ -358,6 +368,7 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
             "avatar_url": author.get("avatarUrl"),
         },
         "comments": comment_total,
+        "comment_history": comment_history,
         "reactions": reactions,
         "_unique_commenters": len(logins),
     }
@@ -406,14 +417,20 @@ query($owner: String!, $name: String!, $number: Int!) {
       }
       labels(first: 20) { nodes { name color description } }
       reactionGroups { content reactors { totalCount } }
-      comments(first: 100) {
+      comments(last: 100) {
         totalCount
-        nodes { author { login } }
+        nodes {
+          author { login }
+          bodyText
+          createdAt
+        }
       }
-      reviews(first: 100) {
+      reviews(last: 100) {
         nodes {
           state
           author { login }
+          bodyText
+          submittedAt
         }
       }
     }
@@ -476,23 +493,36 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         rx_total += n
     reactions["total_count"] = rx_total
 
-    # Commenters.
+    # Commenters + comment history (chronological; the connection uses
+    # last:100 so we keep the most-recent slice).
     comments_node = pr.get("comments") or {}
     comment_total = comments_node.get("totalCount") or 0
     commenter_logins: set[str] = set()
+    comment_history: list[dict] = []
     for c in comments_node.get("nodes") or []:
         login = (c.get("author") or {}).get("login")
         if login:
             commenter_logins.add(login)
+        comment_history.append({
+            "user": {"login": login},
+            "created_at": c.get("createdAt"),
+            "body": c.get("bodyText") or "",
+        })
 
     # Reviews — feed _compute_review_state in REST shape, count distinct
-    # non-PENDING authors.
+    # non-PENDING authors. Body and submittedAt ride along so the AI
+    # summary can surface change-request rationales.
     rest_reviews: list[dict] = []
     reviewer_logins: set[str] = set()
     for rev in (pr.get("reviews") or {}).get("nodes") or []:
         state = rev.get("state")
         author_login = (rev.get("author") or {}).get("login")
-        rest_reviews.append({"state": state, "user": {"login": author_login}})
+        rest_reviews.append({
+            "state": state,
+            "user": {"login": author_login},
+            "submitted_at": rev.get("submittedAt"),
+            "body": rev.get("bodyText") or "",
+        })
         if state != "PENDING" and author_login:
             reviewer_logins.add(author_login)
     review_state = _compute_review_state(rest_reviews)
@@ -562,6 +592,8 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "changed_files": pr.get("changedFiles"),
         "files": files,
         "comments": comment_total,
+        "comment_history": comment_history,
+        "reviews": rest_reviews,
         "author_association": pr.get("authorAssociation"),
         "user": {
             "login": author.get("login"),
@@ -595,9 +627,13 @@ query($owner: String!, $name: String!, $number: Int!) {
       assignees(first: 10) { nodes { login } }
       labels(first: 20) { nodes { name color description } }
       reactionGroups { content reactors { totalCount } }
-      comments(first: 100) {
+      comments(last: 100) {
         totalCount
-        nodes { author { login } }
+        nodes {
+          author { login }
+          bodyText
+          createdAt
+        }
       }
     }
   }
@@ -655,10 +691,16 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
     comments_node = issue.get("comments") or {}
     comment_total = comments_node.get("totalCount") or 0
     commenter_logins: set[str] = set()
+    comment_history: list[dict] = []
     for c in comments_node.get("nodes") or []:
         login = (c.get("author") or {}).get("login")
         if login:
             commenter_logins.add(login)
+        comment_history.append({
+            "user": {"login": login},
+            "created_at": c.get("createdAt"),
+            "body": c.get("bodyText") or "",
+        })
 
     assignees = [
         {"login": (a or {}).get("login")}
@@ -688,6 +730,7 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         "state": state,
         "state_reason": state_reason,
         "comments": comment_total,
+        "comment_history": comment_history,
         "author_association": issue.get("authorAssociation"),
         "user": {
             "login": author.get("login"),

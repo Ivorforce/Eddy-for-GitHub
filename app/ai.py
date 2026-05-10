@@ -198,6 +198,40 @@ def _identity_block(user_login: str | None, user_teams) -> str | None:
 # bundle reports) that would otherwise dominate the prompt.
 _BODY_TRUNC = 32000
 
+# Recent comment / review surface for triage signal. The full lists live in
+# details_json; we surface only the tail so the prompt stays bounded. 1000
+# chars per comment is enough to convey the gist of even paste-heavy
+# comments — the AI just needs to know "is someone asking the user
+# something" / "what's the changes-requested rationale", not to ingest
+# the full thread verbatim.
+_RECENT_COMMENT_LIMIT = 5
+_RECENT_REVIEW_LIMIT = 5
+_COMMENT_BODY_TRUNC = 1000
+
+
+def _format_history(items, *, date_key: str, include_state: bool, limit: int) -> list[dict]:
+    """Take the latest `limit` items with non-empty bodies, truncate each
+    body, return a compact list of {author, at, body[, state]} dicts.
+
+    Empty-body entries (common for APPROVED reviews — the state itself is
+    the content) are filtered before slicing so the cap reflects items the
+    AI can actually act on."""
+    filtered = [it for it in items if (it.get("body") or "").strip()]
+    out: list[dict] = []
+    for it in filtered[-limit:]:
+        body = (it.get("body") or "").strip()
+        if len(body) > _COMMENT_BODY_TRUNC:
+            body = body[:_COMMENT_BODY_TRUNC] + "…[truncated]"
+        entry: dict = {
+            "author": (it.get("user") or {}).get("login"),
+            "at": it.get(date_key),
+            "body": body,
+        }
+        if include_state:
+            entry["state"] = it.get("state")
+        out.append(entry)
+    return out
+
 # Fields we extract from details_json. Listed explicitly rather than
 # passing the whole blob so the model isn't trained on incidental schema
 # drift, and so the request is small enough to actually fit in the cache.
@@ -239,8 +273,27 @@ def _summarize_details(d: dict, subject_type: str) -> dict:
                 f"{f.get('filename')} +{f.get('additions') or 0}/-{f.get('deletions') or 0}"
                 for f in files if f.get("filename")
             ]
+        # Recent reviews — non-empty bodies only. APPROVED with no body adds
+        # no signal beyond pr_review_state, which is already in `activity`.
+        recent_reviews = _format_history(
+            d.get("reviews") or [],
+            date_key="submitted_at",
+            include_state=True,
+            limit=_RECENT_REVIEW_LIMIT,
+        )
+        if recent_reviews:
+            out["recent_reviews"] = recent_reviews
     if subject_type == "Discussion":
         out["category"] = d.get("category")
+    # Recent top-level comments — works for all subject types that have them.
+    recent_comments = _format_history(
+        d.get("comment_history") or [],
+        date_key="created_at",
+        include_state=False,
+        limit=_RECENT_COMMENT_LIMIT,
+    )
+    if recent_comments:
+        out["recent_comments"] = recent_comments
     body = d.get("body") or ""
     if body:
         out["body"] = body[:_BODY_TRUNC] + ("…[truncated]" if len(body) > _BODY_TRUNC else "")
