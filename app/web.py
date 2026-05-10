@@ -780,6 +780,60 @@ def _coalesce_visits(events: list[dict]) -> list[dict]:
     return out
 
 
+# Dismissal-style user actions: row-state changes via the Ignore / Done / Mute
+# buttons (or their reverts). Streaks of these with no other event in between
+# represent user oscillation and collapse to just the latest — `visited` /
+# `read_on_github` aren't included here because they're engagement / external
+# observations, not the user toggling dismissal state.
+_DISMISSAL_ACTIONS = {"read", "done", "muted", "kept_unread", "undone", "unmuted"}
+# Reverts: kept_unread reverts read, undone reverts done, unmuted reverts muted.
+# When the latest event in a streak is the revert of the one immediately
+# before it, both vanish — the streak's net effect is zero, no need to
+# clutter the timeline with the vacillation.
+_REVERT_OF = {
+    "kept_unread": "read",
+    "undone":      "done",
+    "unmuted":     "muted",
+}
+
+
+def _coalesce_user_actions(events: list[dict]) -> list[dict]:
+    """Collapse runs of adjacent dismissal user_actions (Ignore / Done / Mute
+    and their reverts) with no other event between them. Rule: keep only the
+    latest; if the latest reverts the one immediately before it, drop both
+    so the streak vanishes entirely. Non-dismissal events (including
+    `visited` and `read_on_github`) break runs and pass through unchanged."""
+    out: list[dict] = []
+    i = 0
+    while i < len(events):
+        ev = events[i]
+        action = (ev.get("payload") or {}).get("action") if ev.get("kind") == "user_action" else None
+        if action not in _DISMISSAL_ACTIONS:
+            out.append(ev)
+            i += 1
+            continue
+        streak_end = i + 1
+        while streak_end < len(events):
+            nxt = events[streak_end]
+            nxt_action = (
+                (nxt.get("payload") or {}).get("action")
+                if nxt.get("kind") == "user_action" else None
+            )
+            if nxt_action not in _DISMISSAL_ACTIONS:
+                break
+            streak_end += 1
+        latest = events[streak_end - 1]
+        latest_action = (latest.get("payload") or {}).get("action")
+        if streak_end - i >= 2:
+            prev_action = (events[streak_end - 2].get("payload") or {}).get("action")
+            if _REVERT_OF.get(latest_action) == prev_action:
+                i = streak_end
+                continue
+        out.append(latest)
+        i = streak_end
+    return out
+
+
 def _is_comment_like(ev: dict) -> bool:
     """A `review` with state COMMENTED is a top-level review with no
     verdict, just prose — semantically the same as a regular comment
@@ -943,6 +997,7 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     timeline = [_format_event_for_render(r, now, user_login=user_login) for r in rows]
     timeline = _coalesce_comments(timeline)
     timeline = _coalesce_visits(timeline)
+    timeline = _coalesce_user_actions(timeline)
     d["timeline"] = timeline
     # "Stale" count: GitHub events + the user's own typed messages that
     # postdate the cached verdict. Row-state user_actions (mark-read,
