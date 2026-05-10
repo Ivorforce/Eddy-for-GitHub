@@ -60,7 +60,10 @@
     {% if n.author_login %}
     <div class="repo-author">
       {# Author icon: badged variants for self/member/first-time, generic
-         person glyph otherwise. Priority: self > member > first-time. #}
+         person glyph otherwise. Priority: self > member > first-time.
+         The generic glyph still carries an author_assoc tooltip when the
+         association is meaningful (CONTRIBUTOR, COLLABORATOR, …) so the
+         icon isn't a black box; NONE / empty stays silent. #}
       <span class="author-by">by</span>
       {% if n.is_author %}
       <svg class="author-icon icon-self" viewBox="0 0 24 24" fill="currentColor"><title>you (authored this)</title><circle cx="12" cy="8" r="5"/><path d="M3 21a9 9 0 0 1 18 0H3z"/></svg>
@@ -69,7 +72,8 @@
       {% elif n.author_badge_class == 'first-time' %}
       <svg class="author-icon icon-firsttime" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><title>first-time contributor</title><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0z"/></svg>
       {% else %}
-      <svg class="author-icon icon-generic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      {% set assoc_tip = n.author_assoc|lower if n.author_assoc and n.author_assoc != 'NONE' else '' %}
+      <svg class="author-icon icon-generic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"{% if not assoc_tip %} aria-hidden="true"{% endif %}>{% if assoc_tip %}<title>{{ assoc_tip }}</title>{% endif %}<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       {% endif %}
       <a class="author-login entity-trigger{% if n.author_is_tracked %} is-tracked{% endif %}"
          href="https://github.com/{{ n.author_login }}"
