@@ -767,6 +767,65 @@ def _verdict_render_dict(payload: dict) -> dict:
     }
 
 
+# Comments closer than this collapse into a single timeline line
+# ("5 comments by alice, bob"). Any larger gap reads as a separate
+# conversation worth its own entry — picked at ~1 month so a single
+# discussion (typically minutes-to-days of activity) stays grouped while
+# distinct flare-ups months apart don't merge into a misleading summary.
+_COMMENT_COALESCE_GAP_SECS = 30 * 86400
+
+
+def _coalesce_comments(events: list[dict]) -> list[dict]:
+    """Collapse runs of adjacent `comment` events that fall within
+    _COMMENT_COALESCE_GAP_SECS of each other into a single
+    `comment_group` event. Other kinds break the run. The group's
+    timestamp / age_text comes from the latest comment so the line
+    reads as "happened recently" not "happened a while ago"."""
+    out: list[dict] = []
+    i = 0
+    while i < len(events):
+        ev = events[i]
+        if ev["kind"] != "comment":
+            out.append(ev)
+            i += 1
+            continue
+        group = [ev]
+        j = i + 1
+        while (j < len(events)
+               and events[j]["kind"] == "comment"
+               and (events[j]["at_ts"] - events[j - 1]["at_ts"])
+                   < _COMMENT_COALESCE_GAP_SECS):
+            group.append(events[j])
+            j += 1
+        if len(group) == 1:
+            out.append(ev)
+        else:
+            authors: list[str] = []
+            seen: set[str] = set()
+            for c in group:
+                a = (c.get("payload") or {}).get("author")
+                if a and a not in seen:
+                    seen.add(a)
+                    authors.append(a)
+            shown = authors[:3]
+            extra = max(0, len(authors) - len(shown))
+            who = ", ".join(shown) if shown else "unknown"
+            if extra:
+                who = f"{who} +{extra} more"
+            last = group[-1]
+            out.append({
+                "kind":     "comment_group",
+                "source":   "github",
+                "at_ts":    last["at_ts"],
+                "age_text": last["age_text"],
+                "payload":  {},
+                "actor":    "GitHub",
+                "summary":  f"{len(group)} comments by {who}",
+            })
+        i = j
+    return out
+
+
 def _format_event_for_render(row, now: int) -> dict:
     """Convert one thread_events row into a display-ready dict for the
     popover timeline. Each kind gets an `actor` (display name shown in
@@ -834,6 +893,10 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     ).fetchall()
     now = int(time.time())
     timeline = [_format_event_for_render(r, now) for r in rows]
+    # Coalesce comment runs BEFORE marking the pending ai_verdict —
+    # ai_verdict events aren't touched by coalescing, so the in-bubble
+    # approve/dismiss markers still land on the same object identity.
+    timeline = _coalesce_comments(timeline)
     # Walk from newest backward; first ai_verdict wins.
     for ev in reversed(timeline):
         if ev["kind"] == "ai_verdict":
