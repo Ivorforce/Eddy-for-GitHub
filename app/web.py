@@ -813,7 +813,13 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     """Mutate `d` in place: attach `timeline` + `events_since_verdict`
     fields when the row has a cached verdict (i.e., the popover will
     render). Skipped otherwise so bulk list rendering doesn't pay the
-    cost on rows that aren't going to display a popover."""
+    cost on rows that aren't going to display a popover.
+
+    The latest `ai_verdict` event in the timeline gets `is_pending=True`
+    and inherits the cached verdict's `approve_label`. The popover
+    template renders the in-bubble Approve / Dismiss buttons only on
+    that event — past verdicts are history; you can't approve them
+    retroactively."""
     verdict = d.get("ai_verdict")
     if not verdict:
         return
@@ -827,7 +833,14 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
         (d["id"],),
     ).fetchall()
     now = int(time.time())
-    d["timeline"] = [_format_event_for_render(r, now) for r in rows]
+    timeline = [_format_event_for_render(r, now) for r in rows]
+    # Walk from newest backward; first ai_verdict wins.
+    for ev in reversed(timeline):
+        if ev["kind"] == "ai_verdict":
+            ev["is_pending"] = True
+            ev["approve_label"] = verdict.get("approve_label")
+            break
+    d["timeline"] = timeline
     # "Stale" count: GitHub events + the user's own typed messages that
     # postdate the cached verdict. user_action events on the verdict
     # itself (approve/dismiss) clear the cache, so they never appear
@@ -1563,11 +1576,26 @@ def _ai_response(thread_id: str, error: str | None):
 @app.post("/ai/<thread_id>/judge")
 def ai_judge(thread_id: str):
     """Generate a verdict for one thread. The verdict is cached on the row
-    but no GitHub or DB state mutates until the user clicks Approve."""
+    but no GitHub or DB state mutates until the user clicks Approve.
+
+    Optional `body` form field — if non-empty, write a user_chat event
+    for it BEFORE judging, so the AI sees the user's message in the
+    timeline as part of this judgment. Powers the popover's
+    "Send + Re-ask" flow (Ctrl+Enter)."""
+    body = (request.form.get("body") or "").strip()
     error: str | None = None
     conn = db.connect()
     try:
         try:
+            if body:
+                db.write_thread_event(
+                    conn,
+                    thread_id=thread_id,
+                    ts=int(time.time()),
+                    kind="user_chat",
+                    source="user",
+                    payload={"body": body},
+                )
             ai.judge(
                 thread_id,
                 conn,
@@ -1619,24 +1647,33 @@ def ai_dismiss(thread_id: str):
 
 @app.post("/ai/<thread_id>/chat")
 def ai_chat(thread_id: str):
-    """Persist a free-text user message as a user_chat thread_event.
-    The composer in the popover POSTs this on debounced keyup / blur.
-    Returns 204 (no row swap) so the popover stays open and the user can
-    keep typing — the message becomes visible in the timeline next time
-    the popover renders."""
+    """Persist a free-text user message as a user_chat thread_event,
+    return the rendered timeline-event LI so HTMX can append it to the
+    open popover's <ol class="timeline-list"> via hx-swap=beforeend.
+    The composer's textarea is cleared client-side after a successful
+    POST so subsequent messages append rather than re-save the same draft.
+    Empty bodies short-circuit with 204 — nothing to append."""
     body = (request.form.get("body") or "").strip()
     if not body:
         return ("", 204)
+    ts = int(time.time())
     conn = db.connect()
     try:
         db.write_thread_event(
             conn,
             thread_id=thread_id,
-            ts=int(time.time()),
+            ts=ts,
             kind="user_chat",
             source="user",
             payload={"body": body},
         )
     finally:
         conn.close()
-    return ("", 204)
+    # Render via the same partial the row template uses, so styling and
+    # markup stay in one place.
+    ev = _format_event_for_render(
+        {"ts": ts, "kind": "user_chat", "source": "user",
+         "payload_json": json.dumps({"body": body})},
+        ts,
+    )
+    return render_template("_timeline_event.html", ev=ev, thread_id=thread_id)
