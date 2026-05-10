@@ -775,24 +775,39 @@ def _verdict_render_dict(payload: dict) -> dict:
 _COMMENT_COALESCE_GAP_SECS = 30 * 86400
 
 
+def _is_comment_like(ev: dict) -> bool:
+    """A `review` with state COMMENTED is a top-level review with no
+    verdict, just prose — semantically the same as a regular comment
+    from the timeline-summary perspective. APPROVED / CHANGES_REQUESTED
+    / DISMISSED reviews carry distinct signal and stay as their own
+    lines."""
+    kind = ev.get("kind")
+    if kind == "comment":
+        return True
+    if kind == "review" and (ev.get("payload") or {}).get("state") == "COMMENTED":
+        return True
+    return False
+
+
 def _coalesce_comments(events: list[dict]) -> list[dict]:
-    """Collapse runs of adjacent `comment` events that fall within
+    """Collapse runs of adjacent comment-like events (issue/PR comments
+    plus review-with-state-COMMENTED) that fall within
     _COMMENT_COALESCE_GAP_SECS of each other into a single
     `comment_group` event. Other kinds break the run. The group's
-    timestamp / age_text comes from the latest comment so the line
+    timestamp / age_text comes from the latest in the run so the line
     reads as "happened recently" not "happened a while ago"."""
     out: list[dict] = []
     i = 0
     while i < len(events):
         ev = events[i]
-        if ev["kind"] != "comment":
+        if not _is_comment_like(ev):
             out.append(ev)
             i += 1
             continue
         group = [ev]
         j = i + 1
         while (j < len(events)
-               and events[j]["kind"] == "comment"
+               and _is_comment_like(events[j])
                and (events[j]["at_ts"] - events[j - 1]["at_ts"])
                    < _COMMENT_COALESCE_GAP_SECS):
             group.append(events[j])
