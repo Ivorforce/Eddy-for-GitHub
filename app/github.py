@@ -232,6 +232,7 @@ query($owner: String!, $name: String!, $number: Int!) {
     discussion(number: $number) {
       number
       title
+      body
       url
       createdAt
       updatedAt
@@ -349,6 +350,7 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
     return {
         "html_url": disc.get("url"),
         "created_at": disc.get("createdAt"),
+        "body": disc.get("body"),
         "state": state,
         "category": (disc.get("category") or {}).get("name"),
         "user": {
@@ -372,6 +374,7 @@ query($owner: String!, $name: String!, $number: Int!) {
     pullRequest(number: $number) {
       number
       title
+      body
       url
       createdAt
       updatedAt
@@ -526,6 +529,7 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "html_url": pr.get("url"),
         "created_at": pr.get("createdAt"),
         "updated_at": pr.get("updatedAt"),
+        "body": pr.get("body"),
         "state": state,
         "draft": pr.get("isDraft"),
         "merged": pr.get("merged"),
@@ -555,6 +559,7 @@ query($owner: String!, $name: String!, $number: Int!) {
     issue(number: $number) {
       number
       title
+      body
       url
       createdAt
       updatedAt
@@ -654,6 +659,7 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         "html_url": issue.get("url"),
         "created_at": issue.get("createdAt"),
         "updated_at": issue.get("updatedAt"),
+        "body": issue.get("body"),
         "state": state,
         "state_reason": state_reason,
         "comments": comment_total,

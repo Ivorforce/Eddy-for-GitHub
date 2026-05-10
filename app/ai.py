@@ -169,10 +169,12 @@ def _read_preferences() -> str:
 
 # ---- Context assembly ---------------------------------------------------
 
-# Body truncation limit when building the per-thread context. PR/issue
-# bodies can be massive; we keep the leading 4KB which is almost always
-# the part that explains what the thread is about.
-_BODY_TRUNC = 4000
+# Body truncation limit when building the per-thread context. Sized to fit
+# virtually all human-authored PR / issue / discussion bodies (typical max
+# is ~10KB even for RFC-style threads); the cap is a guardrail against
+# pathological auto-generated walls (release-please changelogs, dependabot
+# bundle reports) that would otherwise dominate the prompt.
+_BODY_TRUNC = 32000
 
 # Fields we extract from details_json. Listed explicitly rather than
 # passing the whole blob so the model isn't trained on incidental schema
