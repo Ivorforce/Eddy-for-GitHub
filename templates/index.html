@@ -62,10 +62,10 @@
        filter state and toggles .active. Edit URLs / labels here; nowhere
        else needs to know about them. #}
     <a href="/" class="preset-tab">Inbox</a>
-    <a href="/?actions=assigned&actions=review_you&actions=mentioned&hide_done=on" class="preset-tab">Action needed</a>
-    <a href="/?mine_only=on&hide_done=on" class="preset-tab">Mine</a>
-    <a href="/?tracked_only=on&hide_done=on" class="preset-tab">Tracked</a>
-    <a href="/?sort=engaged&hide_done=on" class="preset-tab">Hot</a>
+    <a href="/?actions=assigned&actions=review_you&actions=mentioned&hide_resolved=on" class="preset-tab">Action needed</a>
+    <a href="/?mine_only=on&hide_resolved=on" class="preset-tab">Mine</a>
+    <a href="/?tracked_only=on&hide_resolved=on" class="preset-tab">Tracked</a>
+    <a href="/?sort=engaged&hide_resolved=on" class="preset-tab">Hot</a>
   </nav>
 </div>
 <form id="filters"
@@ -84,8 +84,8 @@
       </li>
       <li>
         <label class="filter-toggle">
-          <input type="checkbox" name="hide_done" {% if filters.hide_done %}checked{% endif %}>
-          Hide done
+          <input type="checkbox" name="hide_resolved" {% if filters.hide_resolved %}checked{% endif %}>
+          Hide resolved
         </label>
       </li>
       <li>
