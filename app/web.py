@@ -976,10 +976,10 @@ def _format_event_for_render(row, now: int, user_login: str | None = None) -> di
 
 
 def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
-    """Mutate `d` in place: attach `timeline` + `events_since_verdict`
-    fields when the row has a cached verdict (i.e., the popover will
-    render). Skipped otherwise so bulk list rendering doesn't pay the
-    cost on rows that aren't going to display a popover."""
+    """Mutate `d` in place: attach the `timeline` field when the row has a
+    cached verdict (i.e., the popover will render). Skipped otherwise so
+    bulk list rendering doesn't pay the cost on rows that aren't going to
+    display a popover."""
     verdict = d.get("ai_verdict")
     if not verdict:
         return
@@ -999,15 +999,6 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     timeline = _coalesce_visits(timeline)
     timeline = _coalesce_user_actions(timeline)
     d["timeline"] = timeline
-    # "Stale" count: GitHub events + the user's own typed messages that
-    # postdate the cached verdict. Row-state user_actions (mark-read,
-    # mute, etc.) aren't counted — they're the user's response to the
-    # verdict, not new context that invalidates it.
-    after = verdict.get("at") or 0
-    d["events_since_verdict"] = sum(
-        1 for r in rows
-        if r["ts"] > after and r["kind"] in ("comment", "review", "user_chat")
-    )
 
 
 def _ai_verdict_dict(

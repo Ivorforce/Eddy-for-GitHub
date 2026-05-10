@@ -204,9 +204,6 @@
            style="position-anchor: --pop-ai-{{ n.id }}">
         <div class="popover-title">
           <span class="popover-kind">Thread × AI</span>
-          {% if n.events_since_verdict and n.events_since_verdict > 0 %}
-          <span class="ai-verdict-stale-badge" title="GitHub or chat events landed after the latest verdict. Approve still works; re-ask to incorporate them.">⚠ {{ n.events_since_verdict }} new since judgment</span>
-          {% endif %}
         </div>
 
         {# Chronological timeline. The partial renders one <li> per event;
@@ -246,7 +243,7 @@
                     hx-include="#filters, closest form"
                     hx-indicator="closest tr"
                     hx-on::before-request="aiBusyOn(this)"
-                    title="Empty: re-evaluate based on changed state. With text: send your message and the AI replies (Ctrl+Enter)."><span class="rejudge-label">↻ Re-ask{% if n.events_since_verdict %} ({{ n.events_since_verdict }}){% endif %}</span></button>
+                    title="Empty: re-evaluate based on changed state. With text: send your message and the AI replies (Ctrl+Enter)."><span class="rejudge-label">↻ Re-ask</span></button>
           </div>
         </form>
       </div>
