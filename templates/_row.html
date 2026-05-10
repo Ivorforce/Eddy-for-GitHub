@@ -252,7 +252,8 @@
                     hx-post="/ai/{{ n.id }}/chat"
                     hx-target="#timeline-{{ n.id }}"
                     hx-swap="beforeend"
-                    hx-on::after-request="if (event.detail.successful) { var ta = this.closest('form').querySelector('textarea'); ta.value = ''; aiChatInput({target: ta}); }"
+                    hx-on::before-request="aiBusyOn(this)"
+                    hx-on::after-request="aiSendAfterRequest(this, event)"
                     title="Send chat message (Enter)">Send</button>
             <button type="button" class="ai-rejudge-btn"
                     hx-post="/ai/{{ n.id }}/judge"
@@ -260,7 +261,7 @@
                     hx-swap="outerHTML"
                     hx-include="#filters, closest form"
                     hx-indicator="closest tr"
-                    onclick="this.closest('[popover]').hidePopover()"
+                    hx-on::before-request="aiBusyOn(this)"
                     title="Empty: re-evaluate based on changed state. With text: send your message and the AI replies (Ctrl+Enter)."><span class="rejudge-label">↻ Re-ask{% if n.events_since_verdict %} ({{ n.events_since_verdict }}){% endif %}</span></button>
           </div>
         </form>

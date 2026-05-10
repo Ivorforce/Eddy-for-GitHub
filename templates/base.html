@@ -980,6 +980,20 @@
       border-color: rgba(31, 122, 207, 0.32);
       color: #1f7acf;
     }
+    /* In-flight state. Popover stays open so the user can see the new
+       chat bubble appear when the response arrives (same visual idiom
+       as the row-level pulse on the Relevance pill). pointer-events:
+       none disables clicks; keyboard activations are gated separately
+       in aiChatKeydown so submitting again mid-flight doesn't pile up
+       requests. */
+    .ai-verdict-popover.busy {
+      pointer-events: none;
+      opacity: 0.75;
+    }
+    .ai-verdict-popover.busy .ai-send-btn,
+    .ai-verdict-popover.busy .ai-rejudge-btn {
+      animation: ai-pulse 1.2s ease-in-out infinite;
+    }
 
     /* Existing AI summary surfaced in the item popover when present —
        quiet block above the Done section. The 'AI' tag mirrors the
@@ -1686,12 +1700,57 @@
     window.aiChatKeydown = function (e) {
       if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
       const popover = e.target.closest(".ai-verdict-popover");
-      if (!popover) return;
+      if (!popover || popover.classList.contains("busy")) return;
       e.preventDefault();
       const sel = (e.ctrlKey || e.metaKey) ? ".ai-rejudge-btn" : ".ai-send-btn";
       const btn = popover.querySelector(sel);
       if (btn && !btn.disabled) btn.click();
     };
+
+    // Visual busy state for AI requests fired from inside the popover.
+    // Adds .busy on the popover so CSS dims + pulses the controls and the
+    // keyboard handler bails. For Send (timeline append, no row swap) we
+    // remove it on after-request and clear the textarea on success. For
+    // Re-ask / Send & Reply (full row swap), the popover element itself
+    // is replaced — the new instance has no .busy class, and a separate
+    // beforeSwap/afterSwap handler re-opens it (see below) so the
+    // conversation stays visible.
+    window.aiBusyOn = function (btn) {
+      btn.closest(".ai-verdict-popover")?.classList.add("busy");
+    };
+    window.aiSendAfterRequest = function (btn, evt) {
+      btn.closest(".ai-verdict-popover")?.classList.remove("busy");
+      if (evt.detail.successful) {
+        const ta = btn.closest("form").querySelector("textarea");
+        ta.value = "";
+        aiChatInput({ target: ta });
+      }
+    };
+
+    // Keep the AI popover open across the row swaps that judgments
+    // trigger (Send & Reply, Re-ask). The general per-row handler
+    // intentionally lets popovers close because most per-row swaps come
+    // from "the action is done" buttons (mark read, mute) — but the AI
+    // popover hosts an ongoing conversation, so closing it mid-flow loses
+    // the user's place. Approve / Dismiss buttons still call hidePopover()
+    // synchronously, so by the time beforeSwap runs the popover isn't
+    // open and the snapshot is null — they close cleanly.
+    let aiPopoverPreserve = null;
+    document.addEventListener("htmx:beforeSwap", (e) => {
+      const open = document.querySelector(".ai-verdict-popover:popover-open");
+      aiPopoverPreserve = open ? open.dataset.threadId : null;
+    });
+    document.addEventListener("htmx:afterSwap", (e) => {
+      if (!aiPopoverPreserve) return;
+      const id = aiPopoverPreserve;
+      aiPopoverPreserve = null;
+      const pop = document.querySelector(
+        `.ai-verdict-popover[data-thread-id="${CSS.escape(id)}"]`
+      );
+      if (pop && typeof pop.showPopover === "function") {
+        try { pop.showPopover(); } catch (_) {}
+      }
+    });
     window.aiChatInput = function (e) {
       const ta = e.target;
       const popover = ta.closest(".ai-verdict-popover");
