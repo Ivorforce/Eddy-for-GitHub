@@ -372,7 +372,7 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
             "avatar_url": author.get("avatarUrl"),
         },
         "comments": comment_total,
-        "comment_history": comment_history,
+        "_comment_history": comment_history,
         "reactions": reactions,
         "_unique_commenters": len(logins),
     }
@@ -604,8 +604,8 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "changed_files": pr.get("changedFiles"),
         "files": files,
         "comments": comment_total,
-        "comment_history": comment_history,
-        "reviews": rest_reviews,
+        "_comment_history": comment_history,
+        "_reviews": rest_reviews,
         "author_association": pr.get("authorAssociation"),
         "user": {
             "login": author.get("login"),
@@ -746,7 +746,7 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         "state": state,
         "state_reason": state_reason,
         "comments": comment_total,
-        "comment_history": comment_history,
+        "_comment_history": comment_history,
         "author_association": issue.get("authorAssociation"),
         "user": {
             "login": author.get("login"),
@@ -835,11 +835,15 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
             continue
 
         # Pop the bonus keys so they don't leak into details_json (which is
-        # supposed to be REST-shaped). Bonus keys live in dedicated columns.
+        # supposed to be REST-shaped). Bonus keys live in dedicated columns
+        # or, for the comment / review streams, get fanned out into
+        # thread_events below.
         pr_reactions = details.pop("_pr_reactions", None)
         n_commenters = details.pop("_unique_commenters", None)
         n_reviewers = details.pop("_unique_reviewers", None)
         review_state = details.pop("_review_state", None)
+        comment_history = details.pop("_comment_history", None) or []
+        pr_reviews = details.pop("_reviews", None) or []
 
         # COALESCE captures baseline_comments on first enrichment so the
         # '+N new comments' indicator stays alive through Read actions and
@@ -863,12 +867,12 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 (author["login"], author.get("avatar_url"), now),
             )
 
-        # Mirror comments and reviews into thread_events for the stateful
-        # AI integration. Idempotent on databaseId — re-fetch updates the
-        # payload (catches body edits) instead of appending duplicates.
-        # Comments without a databaseId (rare; only happens when the
+        # Fan comments + reviews out into thread_events for the stateful
+        # AI integration. Idempotent on the GitHub databaseId — re-fetch
+        # updates the payload (catches body edits) instead of appending
+        # duplicates. Comments without a databaseId (rare; only when the
         # author's account is deleted) get skipped — no stable dedup key.
-        for c in details.get("comment_history") or []:
+        for c in comment_history:
             db_id = c.get("database_id")
             if db_id is None:
                 continue
@@ -887,7 +891,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                     "edited_at": c.get("edited_at"),
                 },
             )
-        for rev in details.get("reviews") or []:
+        for rev in pr_reviews:
             db_id = rev.get("database_id")
             if db_id is None:
                 continue
