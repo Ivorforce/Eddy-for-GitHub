@@ -58,7 +58,7 @@ judge_thread({
 
 **Approve-button no-op detection:** `_approve_label` in `app/web.py` drops parts of the verdict that are already true on the row (mark_read on a read row, track on a tracked row, …). When everything's a no-op, the button is `disabled` and tells the user to use Dismiss. Both the row-level approve (✓ on the split-pill) and the popover Approve button respect this.
 
-**Mode toggle plumbing:** `triage_mode` is part of `_filters_from_request`. The hidden input lives inside `<form id="filters">` (in `index.html`); the brain button in the column header (in `_table.html`) flips it via `toggleTriageMode()` and dispatches a bubbled `change` so HTMX picks it up. Per-row HTMX buttons inherit `hx-include="#filters"` from `<tbody>` so the mode rides every row swap.
+**Mode toggle plumbing:** `triage_mode` is a persisted user setting, not a filter — stored in the `meta` table (`_get_triage_mode` / `_set_triage_mode` in `app/web.py`). The brain button in the column header posts to `/settings/triage_mode`, which flips the value and returns the re-rendered table. Per-row HTMX swaps read the mode server-side, so it doesn't need to ride the request.
 
 **History compression** (deferred): timelines are uncompressed in v1. When threads grow long enough to matter, the hook is `kind=ai_recap` events that summarize older history; the AI reads recaps in lieu of the events they replaced.
 

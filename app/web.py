@@ -1245,9 +1245,6 @@ def _load_repo_options() -> tuple[list[str], list[str]]:
 
 def _filters_from_request() -> dict:
     src = request.values  # union of query string + form fields
-    mode = (src.get("triage_mode") or "manual").strip()
-    if mode not in ("manual", "ai"):
-        mode = "manual"
     return {
         "actions":      src.getlist("actions"),
         "hide_read":    bool(src.get("hide_read")),
@@ -1259,19 +1256,37 @@ def _filters_from_request() -> dict:
         "sort":         src.get("sort") or "updated",
         "q":            (src.get("q") or "").strip(),
         "types":        src.getlist("types"),
-        "triage_mode":  mode,
     }
 
 
-def _render_row(n: dict):
-    """Wrap render_template('_row.html', ...) so every row swap carries the
-    active triage_mode. Read from request.values so per-row HTMX swaps that
-    include #filters automatically pick up the current mode; falls back to
-    'manual' when the request didn't include it (e.g. a stale buttontag)."""
-    mode = (request.values.get("triage_mode") or "manual").strip()
+# Triage mode (manual / ai) is a user setting, not a filter. It's stored
+# in `meta` so it persists across browser sessions and isn't entangled
+# with the filter URL — bookmarked filter views shouldn't pin a mode.
+def _get_triage_mode() -> str:
+    conn = db.connect()
+    try:
+        mode = (db.get_meta(conn, "triage_mode") or "manual").strip()
+    finally:
+        conn.close()
+    return mode if mode in ("manual", "ai") else "manual"
+
+
+def _set_triage_mode(mode: str) -> str:
     if mode not in ("manual", "ai"):
         mode = "manual"
-    return render_template("_row.html", n=n, triage_mode=mode)
+    conn = db.connect()
+    try:
+        db.set_meta(conn, "triage_mode", mode)
+        conn.commit()
+    finally:
+        conn.close()
+    return mode
+
+
+def _render_row(n: dict):
+    """Wrap render_template('_row.html', ...) so every row swap carries
+    the active triage_mode (read from the persisted setting)."""
+    return render_template("_row.html", n=n, triage_mode=_get_triage_mode())
 
 
 def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
@@ -1383,7 +1398,7 @@ def index():
         owners=owners,
         repo_names=repo_names,
         filters=f,
-        triage_mode=f["triage_mode"],
+        triage_mode=_get_triage_mode(),
         type_labels=TYPE_LABELS_LONG,
         action_labels=ACTION_FILTER_LABELS,
     )
@@ -1396,7 +1411,25 @@ def list_view():
     rows = _filter_and_sort(_load_notifications(), f)
     return render_template(
         "_table.html", notifications=rows, error=None, filters=f,
-        triage_mode=f["triage_mode"],
+        triage_mode=_get_triage_mode(),
+    )
+
+
+@app.post("/settings/triage_mode")
+def set_triage_mode():
+    """Persist the Relevance-column mode (manual vs ai) and re-render the
+    table so the brain button + per-row Relevance cells reflect the change.
+    Body field 'mode' is optional — when omitted, flip the current value."""
+    requested = (request.values.get("mode") or "").strip()
+    new_mode = requested if requested in ("manual", "ai") else (
+        "manual" if _get_triage_mode() == "ai" else "ai"
+    )
+    _set_triage_mode(new_mode)
+    f = _filters_from_request()
+    rows = _filter_and_sort(_load_notifications(), f)
+    return render_template(
+        "_table.html", notifications=rows, error=None, filters=f,
+        triage_mode=new_mode,
     )
 
 
@@ -1406,7 +1439,7 @@ def _table_response(error: str | None) -> "Response":
     f = _filters_from_request()
     rows = _filter_and_sort(_load_notifications(), f)
     body = render_template(
-        "_table.html", notifications=rows, filters=f, triage_mode=f["triage_mode"],
+        "_table.html", notifications=rows, filters=f, triage_mode=_get_triage_mode(),
     )
     response = make_response(body, 200)
     if error:

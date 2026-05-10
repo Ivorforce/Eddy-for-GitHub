@@ -683,8 +683,8 @@
 
     /* Mode toggle in the Relevance column header. Single brain-icon
        button: muted in manual mode, purple-tinted in AI mode. Click
-       flips the hidden triage_mode input in #filters and dispatches a
-       'change' so HTMX picks it up — see toggleTriageMode() below. */
+       posts to /settings/triage_mode (see _table.html); the response
+       is the re-rendered table. */
     .col-header-with-toggle {
       display: inline-flex;
       align-items: center;
@@ -1670,18 +1670,6 @@
     };
     document.addEventListener("change", onFilterEvent);
     document.addEventListener("input", onFilterEvent);
-
-    // Brain button in the Relevance column header. Flips the hidden
-    // triage_mode input in #filters and dispatches a bubbled 'change' so
-    // HTMX (bound to #filters via hx-trigger="change") fires /list and
-    // the existing filter-sync handler updates the URL bar. Inline-callable
-    // from the button's onclick.
-    window.toggleTriageMode = function () {
-      const input = document.querySelector('#filters input[name="triage_mode"]');
-      if (!input) return;
-      input.value = input.value === "ai" ? "manual" : "ai";
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    };
 
     // AI chat composer: keyboard shortcuts + button-state syncing.
     //
