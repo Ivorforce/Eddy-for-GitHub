@@ -247,14 +247,16 @@
        GitHub's content-link convention (bold-ish text, blue only on hover).
        Tracked-state tint takes priority over the default color. */
     /* Title is clamped to 1 line: text ellipsizes, full string lives in
-       the title attribute (hover tooltip). Flex layout lets the trailing
-       "never visited" dot stay pinned to the right while only the inner
-       .item-title-text is the ellipsis target. */
+       the title attribute (hover tooltip). inline-flex (vs flex) keeps
+       the clickable area to the actual text — long titles still truncate
+       via the inner .item-title-text overflow, but short titles don't
+       have the link extend across the entire cell width. */
     a.item-title, span.item-title {
       color: var(--content-color);
       text-decoration: none;
       font-weight: 500;
-      display: flex;
+      display: inline-flex;
+      max-width: 100%;
       align-items: baseline;
       min-width: 0;
     }
