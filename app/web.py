@@ -231,39 +231,6 @@ def _verdict_priority(verdict: dict) -> tuple[str, float]:
     return _score_to_priority_level(score), score
 
 
-# Vocabulary of "relevant signals" the AI can flag, mapped to display
-# (label, css_class). The keys mirror app/ai.py:SIGNAL_VOCAB; adding one
-# requires touching both files. CSS classes reuse the existing .status-pill
-# variants where they exist (so colors stay consistent with the rule-based
-# Manual mode), with .signal-neutral as a quiet fallback for informational
-# signals that don't have a strong color.
-_SIGNAL_LABELS: dict[str, tuple[str, str]] = {
-    "review_you":         ("Review you",        "action-review-you"),
-    "review_team":        ("Review team",       "action-review-team"),
-    "assigned":           ("Assigned",          "action-assigned"),
-    "mentioned":          ("Mentioned",         "flag-mention"),
-    "approved":           ("Approved",          "review-approved"),
-    "changes_requested":  ("Changes requested", "review-changes"),
-    "merge_dirty":        ("Conflicts",         "sev-danger"),
-    "merge_unstable":     ("CI failing",        "sev-warning"),
-    "merge_behind":       ("Behind base",       "sev-warning"),
-    "new_comments":       ("New comments",      "new-comments"),
-    "popular":            ("Popular",           "signal-positive"),
-    "controversial":      ("Controversial",     "signal-warning"),
-    "engaged":            ("Engaged",           "signal-neutral"),
-    "merged":             ("Merged",            "signal-neutral"),
-    "closed":             ("Closed",            "signal-neutral"),
-    "answered":           ("Answered",          "signal-positive"),
-    "draft":              ("Draft",             "signal-neutral"),
-    "tracked_author":     ("Tracked author",    "signal-tracked"),
-    "tracked_repo":       ("Tracked repo",      "signal-tracked"),
-    "tracked_org":        ("Tracked org",       "signal-tracked"),
-    "bot_author":         ("Bot",               "signal-neutral"),
-    "first_timer":        ("First-time",        "signal-neutral"),
-    "large_diff":         ("Large diff",        "signal-neutral"),
-    "small_diff":         ("Small diff",        "signal-neutral"),
-}
-
 # author_association -> (badge css class, display label).
 # Only high-signal associations get a badge; CONTRIBUTOR/NONE etc. stay quiet.
 _AUTHOR_BADGE = {
@@ -812,14 +779,6 @@ def _verdict_render_dict(
     doesn't apply to historical entries)."""
     priority_level, priority_score = _verdict_priority(payload)
 
-    raw_signals = payload.get("relevant_signals") or []
-    signals: list[dict] = []
-    if isinstance(raw_signals, list):
-        for key in raw_signals[:3]:
-            if isinstance(key, str) and key in _SIGNAL_LABELS:
-                label, cls = _SIGNAL_LABELS[key]
-                signals.append({"key": key, "label": label, "cls": cls})
-
     description = (payload.get("description") or "").strip()
     return {
         "description":      description,
@@ -829,7 +788,6 @@ def _verdict_render_dict(
         ),
         "priority_level": priority_level,
         "priority_score": priority_score,
-        "signals":        signals,
         "model":          payload.get("model") or "",
     }
 
@@ -1215,18 +1173,6 @@ def _ai_verdict_dict(
 
     description = (verdict.get("description") or "").strip()
 
-    # Render relevant_signals (priority-ordered enum keys) into displayable
-    # (key, label, cls) triples. Drop unknown keys silently — they're
-    # forward-compat with vocabulary expansions on a model that's been
-    # told about a key the running app doesn't yet know.
-    raw_signals = verdict.get("relevant_signals") or []
-    signals = []
-    if isinstance(raw_signals, list):
-        for key in raw_signals[:3]:
-            if isinstance(key, str) and key in _SIGNAL_LABELS:
-                label, cls = _SIGNAL_LABELS[key]
-                signals.append({"key": key, "label": label, "cls": cls})
-
     return {
         "verdict":         verdict,
         "action_now":      action_now,
@@ -1239,7 +1185,6 @@ def _ai_verdict_dict(
         # links (it dismisses on mouse-out), so refs/mentions there render as
         # styled spans, not anchors. `code` still renders.
         "description_html": ghmd.render(description, cur_repo=cur_repo, interactive=False),
-        "signals":         signals,
         "model":           model or "",
         "at":              at,
         "age_text":        age_text,

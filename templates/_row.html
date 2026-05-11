@@ -189,7 +189,7 @@
          trigger: disabled and green when the verdict already reflects
          current state, otherwise a refresh icon inviting a (re-)run. The
          verdict is advisory — nothing auto-applies; the user takes their
-         own row actions. Signal pills below mirror what the AI flagged. #}
+         own row actions. #}
       {% set v = n.ai_verdict %}
       <span class="ai-verdict-pill-group{% if v and not n.ai_uptodate %} outdated{% endif %}"
             {% if n.priority_score is not none %}style="--imp: {{ '%.3f' % n.priority_score }}"{% endif %}>
@@ -289,13 +289,6 @@
         <span class="priority-band-label" style="grid-column: {{ loop.index0 * 2 + 1 }} / span 2;" aria-hidden="true">{{ g.group }}</span>
         {% endfor %}
       </div>
-      {% if v and v.signals %}
-      <div class="signal-row">
-        {% for s in v.signals %}
-        <span class="signal-pill {{ s.cls }}">{{ s.label }}</span>
-        {% endfor %}
-      </div>
-      {% endif %}
     {% else %}
       {# Manual mode — rule-based status pill + demoted prose subhead. #}
       {% if n.status_pill %}<span class="status-pill {{ n.status_pill.cls }}">{{ n.status_pill.text }}</span>{% endif %}

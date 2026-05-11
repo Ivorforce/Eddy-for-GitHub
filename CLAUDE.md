@@ -22,14 +22,14 @@ Flask + Jinja + HTMX + Pico CSS + SQLite. Static assets vendored under `static/v
 
 User-triggered, **advisory** per-thread judgment with **episodic memory**. Each thread carries a chronological event log (`thread_events` table) — every comment, review, AI verdict, row-state user action, and free-text user message. The AI sees the full timeline on every judgment, so it reasons about *what's changed since last time* rather than re-classifying a thread from scratch.
 
-Lives in the Relevance column, behind a brain-icon mode toggle in the column header. Manual mode shows the rule-based status pill + prose subhead; AI mode replaces both with a **split pill** + AI-selected signal pills below. Left half = the AI's current take (`look`/`ignore`/`mute`/`archive` + track hint, or `unassessed` before the first run); clicking it opens the popover timeline — reachable even with no verdict yet. Right half = the assess / re-assess trigger (`POST /ai/<id>/judge`), a refresh icon: greyed + disabled when `ai_uptodate` (a verdict exists, the row's details weren't re-enriched after it, and no `comment`/`review`/`lifecycle`/`user_chat` has landed since — see `_VERDICT_INVALIDATING_KINDS` and `_attach_timeline`), otherwise purple and clickable. An outdated verdict also gets a dashed pill border.
+Lives in the Relevance column, behind a brain-icon mode toggle in the column header. Manual mode shows the rule-based status pill + prose subhead; AI mode replaces both with a **split pill** (the AI's `description` lives in the pill's hover tooltip). Left half = the AI's current take (`look`/`ignore`/`mute`/`archive` + track hint, or `unassessed` before the first run); clicking it opens the popover timeline — reachable even with no verdict yet. Right half = the assess / re-assess trigger (`POST /ai/<id>/judge`), a refresh icon: greyed + disabled when `ai_uptodate` (a verdict exists, the row's details weren't re-enriched after it, and no `comment`/`review`/`lifecycle`/`user_chat` has landed since — see `_VERDICT_INVALIDATING_KINDS` and `_attach_timeline`), otherwise purple and clickable. An outdated verdict also gets a dashed pill border.
 
-Verdicts are advisory only: the pill / signal pills / priority color shape *display*, but no row state is auto-applied. The user takes their own row actions (visit, mark read, mute, archive, track). Those land as `user_action` events in the timeline; the next judgment compares them against the prior verdict and recalibrates ("I suggested ignore, they visited → I underestimated interest").
+Verdicts are advisory only: the pill / priority color shape *display*, but no row state is auto-applied. The user takes their own row actions (visit, mark read, mute, archive, track). Those land as `user_action` events in the timeline; the next judgment compares them against the prior verdict and recalibrates ("I suggested ignore, they visited → I underestimated interest").
 
 **Inputs:**
 
 - `config/preferences.md` — free-text user prefs (interests, important repos / people, noise patterns). Loaded into the cached system block. `config/preferences.example.md` ships as a template.
-- `app/ai_system_prompt.md` — shipped instructions (cost asymmetry, brevity rules, output-field semantics, signal vocabulary, **timeline interpretation**). The "do not restate row-visible facts" rule is load-bearing; "user_chat is authoritative for this thread" and "user_action after a verdict is calibration feedback" are the v1 reading-rules.
+- `app/ai_system_prompt.md` — shipped instructions (cost asymmetry, brevity rules, output-field semantics, **timeline interpretation**). The "do not restate row-visible facts" rule is load-bearing; "user_chat is authoritative for this thread" and "user_action after a verdict is calibration feedback" are the v1 reading-rules.
 
 **Verdict shape (single tool call, forced via the prompt):**
 
@@ -38,12 +38,11 @@ judge_thread({
     action_now:       "look" | "ignore" | "mute" | "archive",
     set_tracked:      "track" | "untrack" | "leave",
     priority_score:   float ∈ [0, 1],   # bucketed to low/normal/high for color
-    relevant_signals: list[str],         # 0–3 keys from a controlled vocabulary
     description:      str,               # what the row doesn't already show
 })
 ```
 
-`action_now` is a suggestion for what the user should do — `look` (open the link), `ignore` (mark read without engaging), `mute` (silence further updates), `archive` (nothing left to do). Nothing auto-applies. `relevant_signals` vocabulary lives in `app/ai.py:SIGNAL_VOCAB`; the display label / CSS class for each key is in `app/web.py:_SIGNAL_LABELS`. Adding a key requires touching both. The verdict cache (`notifications.ai_verdict_*`) is never auto-cleared — Re-ask overwrites it (and `_save_verdict` keeps the prior verdict in `thread_events` for the next judgment to see).
+`action_now` is a suggestion for what the user should do — `look` (open the link), `ignore` (mark read without engaging), `mute` (silence further updates), `archive` (nothing left to do). Nothing auto-applies. The verdict cache (`notifications.ai_verdict_*`) is never auto-cleared — Re-ask overwrites it (and `_save_verdict` keeps the prior verdict in `thread_events` for the next judgment to see).
 
 **`thread_events` table (SCHEMA_V20):** chronological per-thread log keyed by `(thread_id, kind, external_id)` where present. The unique partial index makes re-fetched comments / reviews idempotent — same GitHub `databaseId` UPDATEs the payload (catches body edits) instead of appending. Event kinds:
 

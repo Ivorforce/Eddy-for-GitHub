@@ -144,7 +144,7 @@ ALTER TABLE notifications ADD COLUMN link_url TEXT;
 # output from judge_thread; ai_verdict_at is when it was produced; model is
 # the model ID that produced it (so the UI can flag stale/legacy verdicts
 # and the user can audit which model said what). The verdict is advisory:
-# it drives the pill / signals / priority color, but no row state is
+# it drives the pill / priority color, but no row state is
 # auto-applied. Re-ask overwrites it; nothing else clears it.
 SCHEMA_V18 = """
 ALTER TABLE notifications ADD COLUMN ai_verdict_json TEXT;

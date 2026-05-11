@@ -748,43 +748,6 @@
       text-shadow: 0 0 2px var(--pico-background-color);
     }
 
-    /* Signal row — small pills below the verdict explaining what the AI
-       decided is making this thread relevant. Replaces the manual-mode
-       prose subhead in AI mode. Color classes reuse status-pill variants
-       where they exist (so colors match across modes); the four signal-*
-       categories cover everything else. */
-    .signal-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.25rem;
-      margin-top: 0.3rem;
-    }
-    .signal-pill {
-      display: inline-block;
-      padding: 0.04rem 0.4rem;
-      border-radius: 0.4rem;
-      font-size: 0.62rem;
-      font-weight: 500;
-      line-height: 1.45;
-      white-space: nowrap;
-    }
-    .signal-pill.action-review-you,
-    .signal-pill.action-assigned    { background: rgba(207, 34, 46, 0.16); color: #cf222e; }
-    .signal-pill.action-review-team { background: rgba(210, 153, 34, 0.18); color: #966c00; }
-    .signal-pill.flag-mention       { background: rgba(188, 76, 0, 0.16); color: #bc4c00; }
-    .signal-pill.review-approved    { background: rgba(26, 127, 55, 0.16); color: #1a7f37; }
-    .signal-pill.review-changes     { background: rgba(207, 34, 46, 0.18); color: #cf222e; }
-    .signal-pill.sev-danger         { background: rgba(207, 34, 46, 0.18); color: #cf222e; }
-    .signal-pill.sev-warning        { background: rgba(191, 135, 0, 0.18); color: #966c00; }
-    .signal-pill.new-comments       { background: rgba(191, 135, 0, 0.16); color: #966c00; }
-    .signal-pill.signal-positive    { background: rgba(26, 127, 55, 0.14); color: #1a7f37; }
-    .signal-pill.signal-warning     { background: rgba(191, 135, 0, 0.14); color: #966c00; }
-    .signal-pill.signal-tracked     { background: rgba(234, 165, 74, 0.18); color: #b46c1f; }
-    .signal-pill.signal-neutral {
-      background: rgba(140, 149, 159, 0.14);
-      color: var(--pico-muted-color);
-    }
-
     /* Mode toggle in the Relevance column header. Single brain-icon
        button: muted in manual mode, purple-tinted in AI mode. Click
        posts to /settings/triage_mode (see _table.html); the response
@@ -965,12 +928,6 @@
       font-size: 0.78rem;
       line-height: 1.4;
       white-space: pre-wrap;
-    }
-    .ai-verdict-popover .timeline-signals {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.25rem;
-      margin-top: 0.3rem;
     }
     .ai-verdict-popover .timeline-bubble-meta {
       font-size: 0.6rem;

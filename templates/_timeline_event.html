@@ -24,13 +24,6 @@
         <span class="timeline-age">{{ ev.age_text }}</span>
       </div>
       {% if ev.verdict.description %}<div class="timeline-bubble-body">{{ ev.verdict.description_html }}</div>{% endif %}
-      {% if ev.verdict.signals %}
-      <div class="timeline-signals">
-        {% for s in ev.verdict.signals %}
-        <span class="signal-pill {{ s.cls }}">{{ s.label }}</span>
-        {% endfor %}
-      </div>
-      {% endif %}
       {% if ev.verdict.model %}<div class="timeline-bubble-meta">{{ ev.verdict.model }}</div>{% endif %}
     </div>
   {% elif ev.kind == 'user_chat' %}

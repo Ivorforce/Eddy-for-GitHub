@@ -2,7 +2,7 @@
 
 User clicks "Ask AI" on a row → judge() generates a structured verdict and
 caches it on the row + appends it to the per-thread timeline. The verdict
-is advisory only: the pill, signals, and priority color shape display, but
+is advisory only: the pill and priority color shape display, but
 no row state changes automatically. The user takes their own row actions
 (visit, mark read, mute, archive, track); those land as `user_action`
 events in the timeline, so the next judgment sees what the user actually
@@ -58,32 +58,6 @@ _PRICES = {
 }
 
 
-# Vocabulary of "relevant signals" the AI can flag for surface in the
-# Relevance column. Listed here as the source of truth — the schema enum
-# below is generated from this list, and the rendering map in
-# app/web.py:_SIGNAL_LABELS is keyed by these strings. Adding a new key
-# requires touching both files.
-SIGNAL_VOCAB = (
-    # Action-required signals (typically high priority)
-    "review_you", "review_team", "assigned", "mentioned",
-    # PR review state
-    "approved", "changes_requested",
-    # Merge state warnings
-    "merge_dirty", "merge_unstable", "merge_behind",
-    # Activity / freshness
-    "new_comments",
-    # Reception flavors (mutually exclusive — pick one)
-    "popular", "controversial", "engaged",
-    # Lifecycle signals
-    "merged", "closed", "answered", "draft",
-    # Identity / tracking
-    "tracked_author", "tracked_repo", "tracked_org",
-    "bot_author", "first_timer",
-    # Diff size hints
-    "large_diff", "small_diff",
-)
-
-
 # The judge_thread tool. Forced via the system prompt + only-tool-defined
 # pattern; its arguments are the verdict.
 TOOL_DEF: dict = {
@@ -137,16 +111,6 @@ TOOL_DEF: dict = {
                     "Independent of action_now: 0.9 + 'look' means 'leave it visible and flag it as urgent'."
                 ),
             },
-            "relevant_signals": {
-                "type": "array",
-                "items": {"type": "string", "enum": list(SIGNAL_VOCAB)},
-                "maxItems": 3,
-                "description": (
-                    "Up to 3 signal keys, in descending order of relevance, that explain why this thread matters. "
-                    "The app renders these in the Relevance column. Pick only signals the user should actually weigh — "
-                    "not every applicable signal. Empty list is valid (and correct for routine noise)."
-                ),
-            },
             "description": {
                 "type": "string",
                 "description": (
@@ -155,7 +119,7 @@ TOOL_DEF: dict = {
                 ),
             },
         },
-        "required": ["action_now", "set_tracked", "priority_score", "relevant_signals", "description"],
+        "required": ["action_now", "set_tracked", "priority_score", "description"],
     },
 }
 
@@ -173,7 +137,7 @@ def _read_system_prompt() -> str:
         log.warning("ai_system_prompt.md not found; using minimal fallback")
         return (
             "You are a GitHub notification triage assistant. "
-            "Call judge_thread exactly once with action_now, set_tracked, priority_score, relevant_signals, description."
+            "Call judge_thread exactly once with action_now, set_tracked, priority_score, description."
         )
 
 
@@ -686,7 +650,7 @@ def judge(
         raise AIError(msg)
 
     verdict = dict(tool_use.input or {})
-    required = {"action_now", "set_tracked", "priority_score", "relevant_signals", "description"}
+    required = {"action_now", "set_tracked", "priority_score", "description"}
     missing = required - verdict.keys()
     if missing:
         msg = f"Verdict missing fields: {sorted(missing)}"
