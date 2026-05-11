@@ -16,6 +16,8 @@ Flask + Jinja + HTMX + Pico CSS + SQLite. Static assets vendored under `static/v
 
 **Two-fetch poll.** Each poll runs an unread fetch (default `/notifications` + reconciliation) and a since-fetch (`?all=true&since=<bookmark>`). They catch disjoint cases — see the docstrings in `app/github.py`. Both bounded; deeper history goes through Backfill.
 
+**Archive is soft; Mute is permanent.** Done (`action='done'`, hidden by default) resurfaces — `action`→NULL — the next time a poll re-delivers the notification, which GitHub only does on new activity (mirrors github.com's Done auto-reset). Mute (`action='done'` + `ignored=1`) doesn't: the unsubscribe stops delivery. AI re-judgment never resurfaces a row — only GitHub activity (or clicking Done again). Lives in `_upsert`; logs an `unarchived` user_action.
+
 ## AI v1 (event-sourced)
 
 User-triggered, **advisory** per-thread judgment with **episodic memory**. Each thread carries a chronological event log (`thread_events` table) — every comment, review, AI verdict, row-state user action, and free-text user message. The AI sees the full timeline on every judgment, so it reasons about *what's changed since last time* rather than re-classifying a thread from scratch.
@@ -47,7 +49,7 @@ judge_thread({
 
 - `comment` / `review` / `lifecycle` — GitHub-side activity, source `github`. Written by `_enrich` in `app/github.py`.
 - `ai_verdict` — the AI's verdict, source `ai`. external_id joins back to `ai_calls.id` so the full request / response is one query away. Written by `ai.judge` on success.
-- `user_action` — `visited` / `read` / `read_on_github` / `muted` / `done` / `kept_unread` / `unmuted`. source is `user` (clicked in our app) or `github` (observed remotely, e.g. mark-read on github.com). Written by `_apply_action`.
+- `user_action` — `visited` / `read` / `read_on_github` / `done` / `muted` / `undone` / `unmuted` / `kept_unread` / `unarchived`. source is `user` (clicked in our app) or `github` (observed remotely — `read_on_github`, plus `unarchived` when a poll resurfaces an archived thread). Written by `_apply_action`, except `read_on_github` / `unarchived` which the `_enrich`/upsert path in `app/github.py` writes.
 - `user_chat` — free-text per-thread message, source `user`. Written by `POST /ai/<id>/chat`. NULL external_id; each save is its own event (no dedup).
 
 **Popover (`templates/_row.html`):** chat-style conversation log. AI verdicts and user chat messages render as full chat bubbles (purple-tinted on the right for AI, blue-tinted on the left for the user); comment / review / user_action events collapse to one-line muted entries. Adjacent dismissal user_actions (Ignore / Done / Mute and their reverts) are coalesced — see `_coalesce_user_actions`. Composer at the bottom posts to `/ai/<id>/chat`; `hx-on::after-request` clears the textarea on success so chat is appended, not overwritten.

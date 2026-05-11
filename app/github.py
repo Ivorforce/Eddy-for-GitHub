@@ -1100,10 +1100,20 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
     # just dismissed the notification, so the action label reflects that
     # uncertainty (distinct from the local 'visited' / 'read' labels).
     prev = conn.execute(
-        "SELECT unread FROM notifications WHERE id = ?", (item["id"],)
+        "SELECT unread, action, ignored FROM notifications WHERE id = ?",
+        (item["id"],),
     ).fetchone()
     new_unread = 1 if item.get("unread") else 0
     external_read = (prev is not None and prev["unread"] == 1 and new_unread == 0)
+    # Resurface a locally-archived ("done") thread when GitHub hands us the
+    # notification again — done removes it from GitHub's inbox, so a re-fetch
+    # means genuinely new activity landed (this mirrors github.com's own
+    # "Done" auto-reset). Mute (action='done' + ignored) stays archived: the
+    # unsubscribe means GitHub won't deliver further activity, and the point
+    # of Mute is "I never want to see this again".
+    resurfaced = (
+        prev is not None and prev["action"] == "done" and not prev["ignored"]
+    )
     conn.execute(
         """
         INSERT INTO notifications (
@@ -1150,6 +1160,20 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
             kind="user_action",
             source="github",
             payload={"action": "read_on_github"},
+        )
+    if resurfaced:
+        conn.execute(
+            "UPDATE notifications SET action = NULL, actioned_at = NULL, "
+            "action_source = NULL WHERE id = ?",
+            (item["id"],),
+        )
+        db.write_thread_event(
+            conn,
+            thread_id=item["id"],
+            ts=now,
+            kind="user_action",
+            source="github",
+            payload={"action": "unarchived"},
         )
 
 

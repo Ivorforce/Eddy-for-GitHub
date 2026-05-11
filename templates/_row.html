@@ -305,7 +305,7 @@
               hx-swap="outerHTML"
               hx-include="#filters"
               aria-label="Done"
-              title="Done — archive on GitHub. Hides from view; future activity can resurface it. Click again (with Show archived on) to revert locally."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg></button>
+              title="Done — archive on GitHub. Hides from view; new activity resurfaces it. Click again (with Show archived on) to revert locally."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg></button>
       <button type="button"
               class="action-segment seg-mute{% if is_muted_active %} active{% endif %}"
               hx-post="/set/{{ n.id }}/muted"
