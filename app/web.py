@@ -146,6 +146,7 @@ _AI_ACTION_LABELS = {
     "ignore":  "ignore",
     "mute":    "mute",
     "archive": "archive",
+    "snooze":  "snooze",   # _ai_verdict_dict appends "~Nd" from snooze_days
 }
 _AI_TRACK_LABELS = {
     "track":   "track",
@@ -1197,7 +1198,15 @@ def _ai_verdict_dict(
 
     priority_level, priority_score = _verdict_priority(verdict)
 
-    parts = [_AI_ACTION_LABELS.get(action_now, action_now)]
+    # snooze_days is meaningful only with action_now == "snooze"; validate it
+    # to the route's accepted range so the picker shortcut can post it safely.
+    sd = verdict.get("snooze_days")
+    snooze_days = sd if (action_now == "snooze" and isinstance(sd, int) and 1 <= sd <= 90) else None
+
+    action_label = _AI_ACTION_LABELS.get(action_now, action_now)
+    if snooze_days:
+        action_label = f"{action_label} ~{_short_duration(snooze_days * 86400)}"
+    parts = [action_label]
     if set_tracked in _AI_TRACK_LABELS:
         parts.append(_AI_TRACK_LABELS[set_tracked])
     pill_text = " · ".join(parts)
@@ -1221,6 +1230,7 @@ def _ai_verdict_dict(
     return {
         "verdict":         verdict,
         "action_now":      action_now,
+        "snooze_days":     snooze_days,   # None unless action_now == "snooze"
         "set_tracked":     set_tracked,
         "priority_level":  priority_level,
         "priority_score":  priority_score,
@@ -1869,8 +1879,9 @@ def set_muted(thread_id: str):
     return _archive_response(thread_id)
 
 
-# Snooze durations offered by the picker (days). Whitelist for the route.
-_SNOOZE_DAYS = (1, 3, 7, 14, 30, 60)
+# Fixed durations offered by the picker dropdown (the route accepts any
+# 1..90, so the AI's `snooze_days` estimate can be posted as a shortcut).
+SNOOZE_PICKER_DAYS = (1, 3, 7, 14, 30, 60)
 
 
 @app.post("/set/<thread_id>/snooze")
@@ -1878,8 +1889,8 @@ def set_snooze(thread_id: str):
     """Snooze a thread: archive it on GitHub (like Done) and set a wake
     timer. The poll loop resurfaces it (unread again) when the timer passes,
     or new GitHub activity resurfaces it sooner — whichever comes first.
-    POST `?days=N` (one of `_SNOOZE_DAYS`) to snooze; POST with no `days`
-    (the "wake now" click on an already-snoozed row) to clear it."""
+    POST `?days=N` (1..90) to snooze; POST with no `days` (the "wake now"
+    click on an already-snoozed row) to clear it."""
     token = app.config["GITHUB_TOKEN"]
     n = _load_one(thread_id)
     if not n:
@@ -1894,7 +1905,7 @@ def set_snooze(thread_id: str):
         days = int(days_raw)
     except ValueError:
         return ("", 400)
-    if days not in _SNOOZE_DAYS:
+    if not 1 <= days <= 90:
         return ("", 400)
     # Mirror Done's GitHub side-effect: archive (unless already archived as
     # done/snoozed), and stay subscribed so new activity can still resurface it.

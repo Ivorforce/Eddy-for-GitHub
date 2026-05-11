@@ -97,13 +97,25 @@ TOOL_DEF: dict = {
         "properties": {
             "action_now": {
                 "type": "string",
-                "enum": ["look", "ignore", "mute", "archive"],
+                "enum": ["look", "ignore", "mute", "archive", "snooze"],
                 "description": (
                     "What you suggest the user do with this thread. "
                     "'look' (open the link), 'ignore' (mark read without engaging), "
-                    "'mute' (silence further updates), 'archive' (nothing left to do). "
+                    "'mute' (silence further updates), 'archive' (nothing left to do), "
+                    "'snooze' (nothing to do *now* but it won't stay quiet — hide it until ~snooze_days from now; "
+                    "blocked-on-someone, scheduled-for-later). "
                     "Advisory only — the user takes their own row actions; nothing auto-applies. "
-                    "Prefer 'look' over 'ignore' over 'archive' when uncertain."
+                    "Prefer 'look' over 'ignore' over 'archive' when uncertain; reach for 'snooze' only with a concrete reason it'll be quiet until then."
+                ),
+            },
+            "snooze_days": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 90,
+                "description": (
+                    "Only when action_now is 'snooze': roughly how many days until the thread is worth another look "
+                    "(your best estimate — e.g. a review the user is waiting on a teammate for, a release dated ~3 weeks out). "
+                    "Ignored for any other action_now."
                 ),
             },
             "set_tracked": {

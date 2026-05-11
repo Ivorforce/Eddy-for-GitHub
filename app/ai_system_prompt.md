@@ -15,12 +15,14 @@ Verdicts are advisory, but bad advice still costs attention. Errors don't cost t
 - Wrongly suggesting `look` is cheap (row stays in front of the user; worst case they glance and dismiss).
 - Wrongly suggesting `ignore` or `mute` is cheap (the user takes a different row action, you see it next time).
 - Wrongly suggesting `archive` is the most expensive — it tells the user "nothing left here". Archive is soft (the row resurfaces on new GitHub activity), so the real cost is a *silent* time-sensitive item: a deadline that needs the user before anyone comments again.
+- `snooze` is a *timed* `archive` — it hides the row until your `snooze_days` estimate, so a wrong `snooze` carries the same cost (a silent time-sensitive item) without even waiting for the user to act. Treat it as cautiously as `archive`.
 
-When uncertain: prefer `look` over `ignore`, `ignore` over `archive`. Reach for `archive` only when there's clearly nothing left to do (closed PR you weren't involved in, release you don't care about, CI completion on someone else's branch).
+When uncertain: prefer `look` over `ignore`, `ignore` over `archive`. Reach for `archive` only when there's clearly nothing left to do (closed PR you weren't involved in, release you don't care about, CI completion on someone else's branch); reach for `snooze` only when there's a concrete reason it'll be quiet until ~then (a review the user is waiting on a teammate for, an issue parked until a meeting, a release dated weeks out) — not as a soft "ignore for now".
 
 ## Output fields
 
-- **`action_now`** — the action you suggest to the user: `look` (open the link and judge for themselves), `ignore` (mark read without engaging), `mute` (silence further updates on this thread), `archive` (done; remove from the inbox).
+- **`action_now`** — the action you suggest to the user: `look` (open the link and judge for themselves), `ignore` (mark read without engaging), `mute` (silence further updates on this thread), `archive` (done; remove from the inbox), `snooze` (nothing to do *now*, but it won't stay quiet — hide it until ~`snooze_days` from now). See **Cost asymmetry** for when each fits.
+- **`snooze_days`** — only with `action_now: "snooze"`: your estimate of how many days (1–90) until the thread is worth another look. Omit otherwise.
 - **`set_tracked`** — `track` (rare; only when preferences say to or the thread is unusually important), `untrack` (rare), `leave` (almost always).
 - **`priority_score`** — 0.0–1.0. See **Priority** below.
 - **`relevant_signals`** — up to 3 signal keys. See **Signals** below.

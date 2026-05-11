@@ -370,6 +370,9 @@
               aria-label="Snooze" title="Snooze — hide until N days pass (or new activity, whichever first)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/></svg></button>
       <div class="snooze-pop" popover id="pop-snooze-{{ n.id }}"
            style="position-anchor: --pop-snooze-{{ n.id }}">
+        {% if n.ai_verdict and n.ai_verdict.snooze_days %}
+        <button type="button" class="snooze-ai" hx-post="/set/{{ n.id }}/snooze?days={{ n.ai_verdict.snooze_days }}" hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters" title="AI's suggestion">~{{ n.ai_verdict.snooze_days }}d · AI</button>
+        {% endif %}
         <button type="button" hx-post="/set/{{ n.id }}/snooze?days=1"  hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 day</button>
         <button type="button" hx-post="/set/{{ n.id }}/snooze?days=3"  hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">3 days</button>
         <button type="button" hx-post="/set/{{ n.id }}/snooze?days=7"  hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 week</button>
