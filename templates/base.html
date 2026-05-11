@@ -22,15 +22,17 @@
        show up — bottom padding had been the hidden constraint. */
     table td { padding: 0.45rem 0.5rem; }
     /* Headline pill carries the single most action-defining signal;
-       everything else demotes to a muted prose subhead below. Cell wraps
-       so prose can breathe and a future AI sentence (1–3 lines) drops in
-       without layout reflow. max-width keeps long prose from devouring
-       horizontal space the title column needs. */
+       everything else demotes to a muted prose subhead below. Fixed width
+       (a touch over the priority picker's min-width + cell padding): the
+       column doesn't grow with content — manual-mode prose wraps within
+       it, and the AI strip's description echo ellipsizes to whatever
+       fits. Keeps the title column from being squeezed. */
     td.status {
       white-space: normal;
       vertical-align: top;
       padding-top: 0.3rem;
-      max-width: 16rem;
+      width: 13.5rem;
+      max-width: 13.5rem;
       line-height: 1.3;
     }
     td.status .status-prose {
@@ -579,44 +581,22 @@
     }
 
     /* AI verdict pill. Lives in the Relevance column when triage mode =
-       AI. Split: left half = the AI's current take (opens the popover),
-       right half = the assess / re-assess trigger. Priority drives the
-       container's tint; the brain glyph keeps its purple identity across
-       all tints. The pill is advisory — nothing auto-applies. */
-    /* --imp is set inline from priority_score (0..1); unset (= 0, the
-       "unassessed" state) renders grey. bg / border are built from
-       oklch() so the color slides grey → weak green → weak gold → strong
-       orange-gold along a single hue arc as importance climbs. Chroma +
-       alpha use pow(imp, 1.4) so mid scores (0.5–0.6) stay near-neutral;
-       the hue itself uses pow(imp, 2.5) so green holds through ~0.7 and
-       the swing toward orange is compressed into the top of the range.
-       Font weight on the pill's main label scales with the same eased
-       ramp. */
+       AI. Full-width strip stacked directly above the priority picker so
+       the two read as one structural pair (no reflow when a re-assess
+       changes the label). Left = the AI's take: brain glyph + suggested
+       action + a muted, truncated echo of the description (full text on
+       hover / in the popover); clicking it opens the popover timeline.
+       Right = the assess / re-assess trigger. Purple framing is the AI
+       identity — priority lives entirely in the picker below, so the
+       strip carries no priority tint. Advisory; nothing auto-applies. */
     .ai-verdict-pill-group {
-      --imp: 0;
-      --imp-e: pow(var(--imp), 1.4);
-      --hue: calc(165 - pow(var(--imp), 2.5) * 115);
-      --chroma: calc(var(--imp-e) * 0.19);
-      display: inline-flex;
-      max-width: 100%;
+      display: flex;
+      width: 100%;
       margin: 0 0 0.25rem;
-      background: oklch(
-        calc(0.40 + var(--imp-e) * 0.20)
-        var(--chroma)
-        var(--hue)
-        / calc(0.18 + var(--imp-e) * 0.62));
-      border: 1px solid oklch(
-        calc(0.36 + var(--imp-e) * 0.24)
-        var(--chroma)
-        var(--hue)
-        / calc(0.45 + var(--imp-e) * 0.55));
+      background: rgba(137, 87, 229, 0.08);
+      border: 1px solid rgba(137, 87, 229, 0.30);
       border-radius: 0.4rem;
       overflow: hidden;
-      vertical-align: top;
-    }
-    .ai-verdict-pill-group .ai-verdict-main {
-      color: #fff;  /* full white regardless of priority tint */
-      font-weight: calc(550 + var(--imp-e) * 150);
     }
     /* Outdated: a verdict exists but new activity (or a re-poll) landed
        after it. Dashed border signals "this take is behind the thread". */
@@ -637,14 +617,26 @@
     }
     .ai-verdict-main {
       flex: 1;
-      min-width: 0; /* lets ellipsis trigger when label is long */
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;                  /* generous air between the verb and the description echo */
       padding: 0.14rem 0.5rem;
-      text-align: center;
       letter-spacing: 0.01em;
+      border-right: 1px solid rgba(137, 87, 229, 0.30);
+    }
+    .ai-verdict-take {
+      flex-shrink: 0;
       white-space: nowrap;
+    }
+    .ai-verdict-desc {
+      flex: 1;
+      min-width: 0;               /* lets the ellipsis trigger */
       overflow: hidden;
       text-overflow: ellipsis;
-      border-right: 1px solid rgba(140, 149, 159, 0.45);
+      white-space: nowrap;
+      font-weight: 400;
+      color: var(--pico-muted-color);
     }
     .ai-verdict-rerun {
       display: inline-flex;
@@ -661,15 +653,14 @@
       color: var(--pico-muted-color);   /* greyed — assessment is current, nothing to do */
     }
     .ai-verdict-main:hover,
-    .ai-verdict-rerun:not(.current):hover { background: rgba(255, 255, 255, 0.18); }
-    /* Brain glyph in the pill main area — kept purple even on tinted pills. */
+    .ai-verdict-rerun:not(.current):hover { background: rgba(137, 87, 229, 0.13); }
+    /* Brain glyph leading the take label. */
     .ai-verdict-pill-group .ai-pill-icon {
       width: 0.85em;
       height: 0.85em;
       margin-right: 0.3rem;
       vertical-align: -0.12em;
       color: #8957e5;
-      flex-shrink: 0;
     }
 
     /* Pulse the pill while an AI request is in flight on this row (Ask AI

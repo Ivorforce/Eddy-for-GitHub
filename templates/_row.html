@@ -191,8 +191,7 @@
          verdict is advisory — nothing auto-applies; the user takes their
          own row actions. #}
       {% set v = n.ai_verdict %}
-      <span class="ai-verdict-pill-group{% if v and not n.ai_uptodate %} outdated{% endif %}"
-            {% if n.priority_score is not none %}style="--imp: {{ '%.3f' % n.priority_score }}"{% endif %}>
+      <span class="ai-verdict-pill-group{% if v and not n.ai_uptodate %} outdated{% endif %}">
         {# popovertarget (native) instead of data-popover-target (JS) so the
            browser's built-in toggle handles repeat clicks correctly. The
            JS path always-reopens because light-dismiss on pointerdown
@@ -200,7 +199,7 @@
         <button type="button" class="ai-verdict-main"
                 popovertarget="pop-ai-{{ n.id }}"
                 style="anchor-name: --pop-ai-{{ n.id }}"
-                {% if v and v.description %}data-tip-html="{{ v.description_html|forceescape }}" aria-label="{{ v.description }}"{% endif %}><svg class="ai-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>{% if v %}{{ v.pill_text }}{% else %}unassessed{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
+                {% if v and v.description %}data-tip-html="{{ v.description_html|forceescape }}" aria-label="{{ v.description }}"{% endif %}><span class="ai-verdict-take"><svg class="ai-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>{% if v %}{{ v.pill_text }}{% else %}unassessed{% endif %}</span>{% if v and v.description %}<span class="ai-verdict-desc">{{ v.description }}</span>{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
                 {% if n.ai_uptodate %}
                 disabled
                 aria-disabled="true"
