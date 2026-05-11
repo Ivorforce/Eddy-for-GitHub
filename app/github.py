@@ -1154,9 +1154,10 @@ def _upsert(
 ) -> None:
     """Insert/update one notification row. If `touched` is given and the row
     existed before with a non-empty `muted_kinds`, append a
-    (thread_id, prev_unread, prev_action, prev_ignored, prev_effective_updated_at)
-    tuple to it — the absorb pass (_apply_mute_filter) needs the pre-delivery
-    state to decide whether to re-suppress this re-delivery."""
+    (thread_id, prev_unread, prev_action, prev_ignored,
+     prev_effective_updated_at, prev_snooze_until) tuple to it — the absorb
+    pass (_apply_mute_filter) needs the pre-delivery state to decide whether to
+    re-suppress this re-delivery (and to restore a snooze deadline intact)."""
     subject = item.get("subject") or {}
     repo = item.get("repository") or {}
     reason = item.get("reason") or ""
@@ -1174,14 +1175,14 @@ def _upsert(
     # just dismissed the notification, so the action label reflects that
     # uncertainty (distinct from the local 'visited' / 'read' labels).
     prev = conn.execute(
-        "SELECT unread, action, ignored, muted_kinds, effective_updated_at "
-        "FROM notifications WHERE id = ?",
+        "SELECT unread, action, ignored, muted_kinds, effective_updated_at, "
+        "snooze_until FROM notifications WHERE id = ?",
         (item["id"],),
     ).fetchone()
     if touched is not None and prev is not None and prev["muted_kinds"]:
         touched.append((
             item["id"], prev["unread"], prev["action"], prev["ignored"],
-            prev["effective_updated_at"],
+            prev["effective_updated_at"], prev["snooze_until"],
         ))
     new_unread = 1 if item.get("unread") else 0
     external_read = (prev is not None and prev["unread"] == 1 and new_unread == 0)
@@ -1309,10 +1310,12 @@ def _apply_mute_filter(
     its sort slot instead of jumping to the top.
 
     `touched` is the (thread_id, prev_unread, prev_action, prev_ignored,
-    prev_effective_updated_at) tuples _upsert collected for rows that had a
-    non-empty muted_kinds; `new_kinds` is _enrich's per-thread new-kind map.
+    prev_effective_updated_at, prev_snooze_until) tuples _upsert collected for
+    rows that had a non-empty muted_kinds; `new_kinds` is _enrich's per-thread
+    new-kind map.
     """
-    for thread_id, prev_unread, prev_action, prev_ignored, prev_eff in touched:
+    for (thread_id, prev_unread, prev_action, prev_ignored, prev_eff,
+         prev_snooze) in touched:
         nk = new_kinds.get(thread_id)
         if not nk:
             continue  # no detectable new activity — surface normally (safe default)
@@ -1340,14 +1343,24 @@ def _apply_mute_filter(
         try:
             now = int(time.time())
             if prev_action in ("done", "snoozed") and not prev_ignored:
-                # _upsert just resurfaced it (action→NULL, 'unarchived' logged)
-                # — undo: archive on GitHub again, restore the 'done' row state.
+                # _upsert just resurfaced it (action→NULL, snooze cleared,
+                # 'unarchived' logged) — undo: archive on GitHub again and
+                # restore the prior hidden state. A snoozed thread keeps its
+                # original deadline, so absorbed activity can't push it past
+                # the wake time or downgrade it to a plain Done.
                 mark_done(token, thread_id)
-                conn.execute(
-                    "UPDATE notifications SET action = 'done', actioned_at = ?, "
-                    "action_source = 'auto', snooze_until = NULL WHERE id = ?",
-                    (now, thread_id),
-                )
+                if prev_action == "snoozed":
+                    conn.execute(
+                        "UPDATE notifications SET action = 'snoozed', actioned_at = ?, "
+                        "action_source = 'auto', snooze_until = ? WHERE id = ?",
+                        (now, prev_snooze, thread_id),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE notifications SET action = 'done', actioned_at = ?, "
+                        "action_source = 'auto', snooze_until = NULL WHERE id = ?",
+                        (now, thread_id),
+                    )
             elif not prev_unread and row["unread"]:
                 # Was read; the re-delivery flipped it unread — re-mark read.
                 mark_read(token, thread_id)
