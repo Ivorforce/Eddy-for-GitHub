@@ -145,13 +145,12 @@ def _build_tool_def(notif_type: str, muted_kinds) -> dict:
         "items": {"type": "string", "enum": tokens},
         "description": (
             "Forward-looking subscription tweaks for this thread — quiet (or resume) "
-            "individual activity kinds without unsubscribing. Empty list = no change, "
-            "which is the common case: reserve this for a clear 'the user is waiting on "
-            "X here, Y is just noise' situation. The tokens reflect what's currently "
-            "(un)muted on this thread; `mute_<kind>` stops those notifications going "
-            "forward, `unmute_<kind>` resumes them. Composes with action_now (e.g. "
-            "'ignore' this delivery AND mute_code so future pushes don't keep returning). "
-            "See system prompt §Subscription tweaks."
+            "individual activity kinds without unsubscribing. Empty list = no change "
+            "(the common case). Use it when there's a durable reason the user cares "
+            "about only some kinds here — waiting on a review/merge, or has stepped back "
+            "from the thread entirely (then it pairs with action_now: ignore/mute). "
+            "Tokens reflect current state; `mute_<kind>` stops those notifications going "
+            "forward, `unmute_<kind>` resumes them. See system prompt §Subscription tweaks."
         ),
     }
     return schema

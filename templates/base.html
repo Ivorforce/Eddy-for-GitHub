@@ -586,6 +586,17 @@
        .mk-lbl so the strike line doesn't run through it. */
     .mutekind-pop .mutekind-opt.on::before { content: "✕"; }
     .mutekind-pop .mutekind-opt.on .mk-lbl { text-decoration: line-through; }
+    /* The non-mutable `lifecycle` row — a <div>, so it needs the .snooze-pop
+       button layout spelled out; greyed and not clickable. */
+    .mutekind-pop .mutekind-opt.always-on {
+      display: block;
+      width: 100%;
+      padding: 0.22rem 0.45rem;
+      font-size: 0.74rem;
+      line-height: 1.3;
+      color: var(--pico-muted-color);
+      cursor: default;
+    }
     /* Purple dashed ring — this option still mismatches the AI's suggestion
        (a suggested mute not yet applied, or a suggested unmute that still is).
        Dashed = hint, not state; goes away on click once state matches. AI mode
@@ -1381,12 +1392,12 @@
        OS-controlled delay (~500–1500ms on macOS) we can't tune. This
        takes over the title attribute, showing after ~120ms instead. */
     .custom-tooltip {
-      /* Plain fixed-position div, not a popover — entering the top layer
-         caused a one-frame cursor recomputation in Chrome that made
-         `cursor: help` flicker off on every hover (and stick until the
-         next mousemove). Tradeoff: tooltips stack below open
-         .action-popovers. Acceptable since stat hover and an open action
-         popover are mutually exclusive flows in practice. */
+      /* Plain fixed-position div, not a popover — making it a popover caused a
+         one-frame cursor recomputation in Chrome that flickered `cursor: help`
+         off on every hover. Being a plain div also lets the hover handler
+         re-home it into an open popover when the hovered element lives there
+         (otherwise a body-parented tooltip renders behind the popover's top
+         layer). position:fixed keeps coordinates viewport-relative either way. */
       position: fixed;
       margin: 0;
       border: none;
@@ -1602,6 +1613,13 @@
       if (suppressDuplicate) return;
       tooltipTimer = setTimeout(() => {
         const tip = ensureTooltip();
+        // If the hovered element lives inside an open popover, the tooltip has
+        // to live there too — a popover sits in the top layer, so a tooltip
+        // parented to <body> renders *behind* it. Re-home on each show (and on
+        // hide it just stays wherever; the next show re-homes it).
+        const hostPopover = target.closest("[popover]:popover-open");
+        const tipParent = hostPopover || document.body;
+        if (tip.parentNode !== tipParent) tipParent.appendChild(tip);
         if (html) tip.innerHTML = html; else tip.textContent = text;
         // Park offscreen first so we can measure without painting at a
         // wrong location. Then position correctly and reveal via .shown.

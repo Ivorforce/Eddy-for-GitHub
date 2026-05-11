@@ -138,7 +138,9 @@ _ROW_COLS = (
 # Per-thread notification-kind filter. The taxonomy (MUTE_KINDS, which type
 # produces which) lives in github.py — _enrich is what emits the events; here
 # we just add the display labels. Labels are spelled out (no tooltips — a
-# tooltip inside the [popover] menu renders behind it).
+# tooltip inside the [popover] menu renders behind it). `lifecycle` isn't
+# mutable but still gets a label: the menu shows it as a disabled row so it
+# doesn't look like a missing toggle.
 MUTE_KINDS = github.MUTE_KINDS
 _MUTE_KINDS_BY_TYPE = github.MUTE_KINDS_BY_TYPE
 MUTE_KIND_UI = (
@@ -150,10 +152,19 @@ MUTE_KIND_UI = (
 _MUTE_KIND_LABEL = dict(MUTE_KIND_UI)
 
 
-def _mute_kind_options(notif_type: str) -> list[tuple[str, str]]:
-    """(key, label) pairs offered in the ▾ menu for a notification of this type."""
-    applicable = _MUTE_KINDS_BY_TYPE.get(notif_type, ())
-    return [(k, lbl) for k, lbl in MUTE_KIND_UI if k in applicable]
+def _mute_kind_options(notif_type: str) -> list[tuple[str, str, bool]]:
+    """(key, label, mutable) rows for the ▾ menu of a notification of this type:
+    the mutable kinds as toggles, plus a non-mutable `lifecycle` row (greyed —
+    state changes always notify) on types that produce lifecycle events. Empty
+    for types with no filter UI at all (Release, CheckSuite, …)."""
+    mutable = _MUTE_KINDS_BY_TYPE.get(notif_type, ())
+    if not mutable:
+        return []
+    opts: list[tuple[str, str, bool]] = [
+        (k, lbl, True) for k, lbl in MUTE_KIND_UI if k in mutable
+    ]
+    opts.append(("lifecycle", _MUTE_KIND_LABEL["lifecycle"], False))
+    return opts
 
 
 # Human-readable labels for the action_now and set_tracked enums in the
@@ -1341,7 +1352,7 @@ def _row_to_dict(
     # purple cues clear (so they never read as an ambiguous "toggle this").
     if d["ai_verdict"]:
         av = d["ai_verdict"]
-        applicable = {k for k, _ in d["mute_kind_options"]}
+        applicable = {k for k, _, mutable in d["mute_kind_options"] if mutable}
         muted_now = set(d["muted_kinds"])
         ms = [k for k in av["mute_suggested"] if k in applicable]
         us = [k for k in av["unmute_suggested"] if k in applicable]
@@ -2123,7 +2134,7 @@ def apply_mute_suggestion(thread_id: str):
     av = n.get("ai_verdict")
     if not av or not av.get("has_subscription_suggestion"):
         return ("", 400)
-    applicable = {k for k, _ in _mute_kind_options(n["type"])}
+    applicable = {k for k, _, mutable in _mute_kind_options(n["type"]) if mutable}
     muted = set(n.get("muted_kinds") or [])
     muted |= {k for k in av.get("mute_suggested", []) if k in applicable}
     muted -= set(av.get("unmute_suggested", []))
