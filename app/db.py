@@ -255,6 +255,27 @@ SCHEMA_V24 = """
 ALTER TABLE notifications ADD COLUMN snooze_until INTEGER;
 """
 
+# Per-thread notification-kind filter ("watch granularity"). GitHub thread
+# subscriptions are all-or-nothing; this lets the user mute individual kinds
+# of activity on a thread (comments / code pushes / reviews / lifecycle). When
+# a poll re-delivers a notification whose new activity is *entirely* of muted
+# kinds, the absorb pass (github._apply_mute_filter) re-applies the thread's
+# prior state and folds the activity into the baselines.
+#   muted_kinds          — JSON array of muted kind names; NULL/[] = nothing muted.
+#                          Like baselines / seen_reasons, NOT touched by _apply_action.
+#   baseline_head_oid    — last-seen PR head commit oid; _enrich diffs against it
+#                          to recognize a "code" push. First-seen capture (like
+#                          baseline_comments). PRs only.
+#   effective_updated_at — local sort key. Mirrors updated_at except an absorbed
+#                          delivery rolls it back to its pre-delivery value, so the
+#                          row keeps its sort slot instead of jumping to the top.
+SCHEMA_V25 = """
+ALTER TABLE notifications ADD COLUMN muted_kinds TEXT;
+ALTER TABLE notifications ADD COLUMN baseline_head_oid TEXT;
+ALTER TABLE notifications ADD COLUMN effective_updated_at TEXT;
+UPDATE notifications SET effective_updated_at = updated_at;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -365,6 +386,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V24)
             _set_version(conn, 24)
             version = 24
+        if version < 25:
+            conn.executescript(SCHEMA_V25)
+            _set_version(conn, 25)
+            version = 25
     finally:
         conn.close()
 

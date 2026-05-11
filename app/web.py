@@ -125,14 +125,40 @@ def _popularity_pill(reception: dict | None) -> dict | None:
 
 _ROW_COLS = (
     "id, repo, type, title, reason, html_url, link_url, updated_at, "
+    "effective_updated_at, "
     "unread, ignored, action, action_source, "
     "details_json, details_fetched_at, "
-    "seen_reasons, baseline_comments, "
+    "seen_reasons, baseline_comments, muted_kinds, "
     "pr_reactions_json, unique_commenters, unique_reviewers, "
     "pr_review_state, baseline_review_state, "
     "note_user, is_tracked, priority_user, snooze_until, "
     "ai_verdict_json, ai_verdict_at, ai_verdict_model"
 )
+
+# Per-thread notification-kind filter. MUTE_KIND_UI is the (key, label) list
+# in display order; labels are spelled out (no tooltips — a tooltip inside the
+# [popover] menu renders behind it). _MUTE_KINDS_BY_TYPE limits a row's ▾ menu
+# to the kinds _enrich can actually emit events for on that type (empty subset
+# → no caret). MUTE_KINDS is just the flat key list (the JSON in
+# notifications.muted_kinds is a subset of it).
+MUTE_KIND_UI = (
+    ("comment",   "Comments"),
+    ("review",    "Reviews"),
+    ("code",      "Code pushes"),
+    ("lifecycle", "State changes"),
+)
+MUTE_KINDS = tuple(k for k, _ in MUTE_KIND_UI)
+_MUTE_KINDS_BY_TYPE = {
+    "PullRequest": ("comment", "review", "code", "lifecycle"),
+    "Issue":       ("comment", "lifecycle"),
+    "Discussion":  ("comment", "lifecycle"),
+}
+
+
+def _mute_kind_options(notif_type: str) -> list[tuple[str, str]]:
+    """(key, label) pairs offered in the ▾ menu for a notification of this type."""
+    applicable = _MUTE_KINDS_BY_TYPE.get(notif_type, ())
+    return [(k, lbl) for k, lbl in MUTE_KIND_UI if k in applicable]
 
 
 # Human-readable labels for the action_now and set_tracked enums in the
@@ -204,7 +230,6 @@ PRIORITY_UI = tuple(
     for label, members in PRIORITY_GROUPS
 )
 app.jinja_env.globals["PRIORITY_UI"] = PRIORITY_UI
-
 
 def _clamp01(x) -> float | None:
     try:
@@ -725,6 +750,7 @@ _USER_ACTION_LABELS = {
     "snoozed":          "Snoozed",
     "unsnoozed":        "Un-snoozed",
     "woken":            "Woke from snooze",
+    "absorbed":         "Absorbed — muted activity",
 }
 
 
@@ -755,6 +781,7 @@ _LIFECYCLE_LABEL = {
     "reopened":           ("reopened",                "lifecycle-reopened"),
     "ready_for_review":   ("marked ready for review", "lifecycle-neutral"),
     "converted_to_draft": ("converted to draft",      "lifecycle-neutral"),
+    "answered":           ("marked answered",         "lifecycle-merged"),
 }
 
 
@@ -1214,6 +1241,19 @@ def _row_to_dict(
         except (ValueError, TypeError):
             pass
 
+    # Per-thread muted notification kinds — render order follows MUTE_KINDS;
+    # the ▾ menu only offers the kinds that can actually fire for this type.
+    muted_kinds_json = d.pop("muted_kinds", None)
+    muted_kinds: list[str] = []
+    if muted_kinds_json:
+        try:
+            stored = set(json.loads(muted_kinds_json))
+            muted_kinds = [k for k in MUTE_KINDS if k in stored]
+        except (ValueError, TypeError):
+            pass
+    d["muted_kinds"] = muted_kinds
+    d["mute_kind_options"] = _mute_kind_options(d["type"])
+
     d["meta"] = _format_meta(
         details_json,
         d["type"],
@@ -1313,7 +1353,7 @@ def _load_notifications():
         # `show_archived` filter in _filter_and_sort decides visibility.
         rows = conn.execute(
             f"SELECT {_ROW_COLS} FROM notifications "
-            "ORDER BY updated_at DESC"
+            "ORDER BY COALESCE(effective_updated_at, updated_at) DESC"
         ).fetchall()
         out = [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
         # Both modes render the timeline popover; AI mode also needs
@@ -1402,6 +1442,13 @@ def _render_row(n: dict):
     return render_template("_row.html", n=n, triage_mode=_get_triage_mode())
 
 
+def _eff_updated(r: dict) -> str:
+    """The local sort timestamp: effective_updated_at, which mirrors GitHub's
+    updated_at except an absorbed muted-only re-delivery leaves it frozen so
+    the row keeps its slot. Falls back to updated_at for safety."""
+    return r.get("effective_updated_at") or r.get("updated_at") or ""
+
+
 def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
     # Archived (action='done') and snoozed (action='snoozed') rows are hidden
     # by default and only surface when Show archived is on. Distinct from Hide
@@ -1453,7 +1500,7 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         # review-requested / mentioned), then most-recently-updated. Two
         # stable passes: the recency pass below is preserved within each
         # (score, actionable) group by the main sort.
-        rows.sort(key=lambda r: r["updated_at"] or "", reverse=True)
+        rows.sort(key=_eff_updated, reverse=True)
         rows.sort(key=lambda r: (
             r["priority_score"] is None,
             -(r["priority_score"] or 0.0),
@@ -1469,7 +1516,7 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
     elif f["sort"] == "stale":
         # Oldest-updated first. Pairs with Hide resolved to surface forgotten
         # open work; on its own, surfaces both forgotten and long-resolved.
-        rows.sort(key=lambda r: r["updated_at"] or "")
+        rows.sort(key=_eff_updated)
     elif f["sort"] == "oldest":
         # Oldest-created first. Differs from 'stale': a long-running issue
         # that just got a comment is old here but fresh by stale's measure.
@@ -1490,7 +1537,7 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
     sort = f["sort"]
     if sort in ("updated", "stale"):
         for r in rows:
-            r["bucket"] = _bucket(r["updated_at"])
+            r["bucket"] = _bucket(_eff_updated(r))
     elif sort in ("newest", "oldest"):
         for r in rows:
             r["bucket"] = _bucket(r["created_at"])
@@ -1959,6 +2006,35 @@ def toggle_track(thread_id: str):
         conn.execute(
             "UPDATE notifications SET is_tracked = ? WHERE id = ?",
             (new_val, thread_id),
+        )
+    finally:
+        conn.close()
+    return _render_row(_load_one(thread_id))
+
+
+@app.post("/set/<thread_id>/mute-kinds")
+def set_mute_kinds(thread_id: str):
+    """Toggle one notification kind in the thread's per-thread mute set
+    (muted_kinds JSON array). When a poll re-delivers this thread with new
+    activity entirely of muted kinds, github._apply_mute_filter absorbs it —
+    re-applies the prior row state, folds the activity into the baselines, and
+    leaves the sort position frozen. Persists locally; no GitHub API call."""
+    kind = (request.values.get("kind") or "").strip()
+    if kind not in MUTE_KINDS:
+        return ("", 400)
+    n = _load_one(thread_id)
+    if not n:
+        return ("", 404)
+    if kind not in _MUTE_KINDS_BY_TYPE.get(n["type"], ()):
+        return ("", 400)  # not an applicable kind for this notification type
+    current = set(n.get("muted_kinds") or [])
+    current.symmetric_difference_update({kind})
+    stored = [k for k in MUTE_KINDS if k in current]
+    conn = db.connect()
+    try:
+        conn.execute(
+            "UPDATE notifications SET muted_kinds = ? WHERE id = ?",
+            (json.dumps(stored) if stored else None, thread_id),
         )
     finally:
         conn.close()

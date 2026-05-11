@@ -530,6 +530,48 @@
       border-bottom: 1px solid var(--pico-muted-border-color);
     }
 
+    /* ▾ caret after the Mute segment — opens the per-kind mute menu. Narrower
+       than the icon segments; the amber `has-muted` tint marks "some kind is
+       muted" and stays distinct from the red full-mute `.seg-mute.active`. */
+    td.actions .action-segment.seg-mute-caret {
+      padding: 0.1rem 0.26rem;
+      font-size: 0.62rem;
+      line-height: 1;
+    }
+    td.actions .action-segment.seg-mute-caret.has-muted {
+      background: rgba(191, 135, 0, 0.18);
+      color: #d29922;   /* same amber as the note / partial-state accents */
+    }
+    /* Inline ▾ after an icon — signals "opens a menu" on buttons that aren't
+       part of a segmented control (Snooze). Same glyph as the Mute caret. */
+    td.actions .row2-btn .disclosure {
+      font-size: 0.62rem;
+      line-height: 1;
+      opacity: 0.7;
+    }
+    .mutekind-pop .mutekind-title {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--pico-muted-color);
+      padding: 0.1rem 0.45rem 0.2rem;
+      margin-bottom: 0.1rem;
+      border-bottom: 1px solid var(--pico-muted-border-color);
+    }
+    /* .mutekind-opt inherits .snooze-pop button (block, full-width, left). The
+       leading slot keeps the checked ✓ from shifting the labels. */
+    .mutekind-pop .mutekind-opt::before {
+      content: "";
+      display: inline-block;
+      width: 1em;
+      margin-right: 0.15rem;
+    }
+    /* ✕ (not ✓) + struck label — the marked state means "this kind is
+       silenced on this thread", not "enabled". The ✕ glyph lives outside
+       .mk-lbl so the strike line doesn't run through it. */
+    .mutekind-pop .mutekind-opt.on::before { content: "✕"; }
+    .mutekind-pop .mutekind-opt.on .mk-lbl { text-decoration: line-through; }
+
     /* AI verdict pill. Lives in the Relevance column when triage mode =
        AI. Full-width strip stacked directly above the priority picker so
        the two read as one structural pair (no reflow when a re-assess
@@ -1794,6 +1836,20 @@
         rejudgeLabel.dataset.initial = initial;
         rejudgeLabel.textContent = hasText ? "✉ Send & Reply" : initial;
       }
+    };
+
+    // Per-kind mute toggle. The POST is hx-swap="none" (the row's rendering
+    // doesn't depend on muted_kinds beyond the ▾ caret tint), so flip the
+    // clicked option and re-derive the caret marker client-side — keeps the
+    // menu open so several kinds can be toggled in one go.
+    window.muteKindToggled = function (btn) {
+      btn.classList.toggle("on");
+      const pop = btn.closest(".mutekind-pop");
+      if (!pop) return;
+      const anyOn = !!pop.querySelector(".mutekind-opt.on");
+      const id = pop.id.replace(/^pop-mutekinds-/, "");
+      const caret = document.getElementById("mk-caret-" + id);
+      if (caret) caret.classList.toggle("has-muted", anyOn);
     };
 
     // Preset tab active-state detection. Normalize both the live URL and

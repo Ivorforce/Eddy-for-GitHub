@@ -889,16 +889,22 @@ def fetch_release(token: str, api_url: str | None) -> dict | None:
     }
 
 
-def _enrich(conn: sqlite3.Connection, token: str) -> None:
+def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
     """Fetch full details for up to ENRICHMENT_PER_POLL notifications that need it.
 
     PR / Issue / Discussion go through GraphQL (one round trip each, with
     reactions / review state / commenter counts folded in). Release goes
     through REST since the GraphQL release lookup needs the tag name.
+
+    Returns {thread_id: {new event kinds this poll}} for the rows it touched —
+    'comment' / 'review' / 'lifecycle' (a thread_event with an external_id we
+    hadn't recorded before) and 'code' (a PR head commit oid that differs from
+    baseline_head_oid). Consumed by _apply_mute_filter; threads not enriched
+    this poll (beyond the cap, or non-PR/Issue types) simply aren't in the map.
     """
     rows = conn.execute(
         """
-        SELECT id, api_url, type FROM notifications
+        SELECT id, api_url, type, baseline_head_oid, details_json FROM notifications
         WHERE type IN ('PullRequest', 'Issue', 'Discussion', 'Release')
           AND (
             details_json IS NULL
@@ -911,6 +917,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
         (ENRICHMENT_PER_POLL,),
     ).fetchall()
 
+    new_kinds: dict[str, set[str]] = {}
     for row in rows:
         try:
             if row["type"] == "Discussion":
@@ -967,6 +974,20 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 (author["login"], author.get("avatar_url"), now),
             )
 
+        # Snapshot the comment / review / lifecycle events we already have so
+        # the fan-out below can tell which arrived *this poll* — that's the
+        # signal _apply_mute_filter needs to decide whether a re-delivery is
+        # all-muted activity.
+        nk: set[str] = set()
+        existing_events = {
+            (r["kind"], r["external_id"])
+            for r in conn.execute(
+                "SELECT kind, external_id FROM thread_events "
+                "WHERE thread_id = ? AND kind IN ('comment', 'review', 'lifecycle')",
+                (row["id"],),
+            )
+        }
+
         # Fan comments + reviews out into thread_events for the stateful
         # AI integration. Idempotent on the GitHub databaseId — re-fetch
         # updates the payload (catches body edits) instead of appending
@@ -976,6 +997,8 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
             db_id = c.get("database_id")
             if db_id is None:
                 continue
+            if ("comment", str(db_id)) not in existing_events:
+                nk.add("comment")
             ts = db.iso_to_unix(c.get("created_at")) or now
             db.write_thread_event(
                 conn,
@@ -996,6 +1019,8 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
             db_id = rev.get("database_id")
             if db_id is None:
                 continue
+            if ("review", str(db_id)) not in existing_events:
+                nk.add("review")
             ts = db.iso_to_unix(rev.get("submitted_at")) or now
             db.write_thread_event(
                 conn,
@@ -1021,6 +1046,8 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
             ev_id = ev.get("id")
             if ev_id is None:
                 continue
+            if ("lifecycle", str(ev_id)) not in existing_events:
+                nk.add("lifecycle")
             ts = db.iso_to_unix(ev.get("created_at")) or now
             payload = {
                 "action": ev.get("action"),
@@ -1038,17 +1065,51 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 payload=payload,
             )
 
+        # 'code' push: a PR head commit oid that differs from the one we last
+        # saw. First enrichment (baseline_head_oid still NULL) captures the oid
+        # without counting it as new — same shape as baseline_comments.
+        new_oid = None
+        if row["type"] == "PullRequest":
+            new_oid = (details.get("last_commit") or {}).get("abbrev_oid")
+            if new_oid and row["baseline_head_oid"] and new_oid != row["baseline_head_oid"]:
+                nk.add("code")
+        # Discussion close / reopen / answered isn't a GraphQL timeline event
+        # (Discussion has no timelineItems) — detect it by diffing the `state`
+        # we last stored against the fresh one, and synthesize a lifecycle
+        # event so it shows in the timeline like a PR/Issue state change.
+        if row["type"] == "Discussion" and row["details_json"]:
+            try:
+                old_state = (json.loads(row["details_json"]) or {}).get("state")
+            except (ValueError, TypeError):
+                old_state = None
+            new_state = details.get("state")
+            if old_state and new_state and old_state != new_state:
+                nk.add("lifecycle")
+                db.write_thread_event(
+                    conn,
+                    thread_id=row["id"],
+                    ts=now,
+                    kind="lifecycle",
+                    source="github",
+                    payload={"action": {"open": "reopened"}.get(new_state, new_state)},
+                )
+        if nk:
+            new_kinds[row["id"]] = nk
+
         if row["type"] == "PullRequest":
             # All four bonus signals come from the same GraphQL call — write
             # them in one statement. COALESCE on baseline_review_state keeps
             # the first-seen review state pinned so the 'pill-new' dot only
-            # fires when the state actually shifts after that.
+            # fires when the state actually shifts after that; baseline_head_oid
+            # instead advances on every fetch (it only feeds 'code' detection,
+            # no persistent indicator hangs off it).
             conn.execute(
                 "UPDATE notifications SET "
                 "pr_reactions_json = ?, "
                 "unique_commenters = ?, unique_reviewers = ?, "
                 "pr_review_state = ?, "
-                "baseline_review_state = COALESCE(baseline_review_state, ?) "
+                "baseline_review_state = COALESCE(baseline_review_state, ?), "
+                "baseline_head_oid = COALESCE(?, baseline_head_oid) "
                 "WHERE id = ?",
                 (
                     json.dumps(pr_reactions) if pr_reactions is not None else None,
@@ -1056,6 +1117,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                     n_reviewers,
                     review_state,
                     review_state,
+                    new_oid,
                     row["id"],
                 ),
             )
@@ -1067,6 +1129,8 @@ def _enrich(conn: sqlite3.Connection, token: str) -> None:
                 "UPDATE notifications SET unique_commenters = ? WHERE id = ?",
                 (n_commenters, row["id"]),
             )
+
+    return new_kinds
 
 
 def set_subscribed(token: str, thread_id: str) -> None:
@@ -1082,7 +1146,17 @@ def set_subscribed(token: str, thread_id: str) -> None:
     r.raise_for_status()
 
 
-def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
+def _upsert(
+    conn: sqlite3.Connection,
+    item: dict[str, Any],
+    now: int,
+    touched: list | None = None,
+) -> None:
+    """Insert/update one notification row. If `touched` is given and the row
+    existed before with a non-empty `muted_kinds`, append a
+    (thread_id, prev_unread, prev_action, prev_ignored, prev_effective_updated_at)
+    tuple to it — the absorb pass (_apply_mute_filter) needs the pre-delivery
+    state to decide whether to re-suppress this re-delivery."""
     subject = item.get("subject") or {}
     repo = item.get("repository") or {}
     reason = item.get("reason") or ""
@@ -1100,9 +1174,15 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
     # just dismissed the notification, so the action label reflects that
     # uncertainty (distinct from the local 'visited' / 'read' labels).
     prev = conn.execute(
-        "SELECT unread, action, ignored FROM notifications WHERE id = ?",
+        "SELECT unread, action, ignored, muted_kinds, effective_updated_at "
+        "FROM notifications WHERE id = ?",
         (item["id"],),
     ).fetchone()
+    if touched is not None and prev is not None and prev["muted_kinds"]:
+        touched.append((
+            item["id"], prev["unread"], prev["action"], prev["ignored"],
+            prev["effective_updated_at"],
+        ))
     new_unread = 1 if item.get("unread") else 0
     external_read = (prev is not None and prev["unread"] == 1 and new_unread == 0)
     # Resurface a locally-archived thread — Done (action='done') or Snooze
@@ -1117,12 +1197,14 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
         and prev["action"] in ("done", "snoozed")
         and not prev["ignored"]
     )
+    updated_at = item.get("updated_at") or ""
     conn.execute(
         """
         INSERT INTO notifications (
             id, repo, type, title, reason, api_url, html_url,
-            updated_at, last_read_at, unread, raw_json, fetched_at, link_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            updated_at, last_read_at, unread, raw_json, fetched_at, link_url,
+            effective_updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             repo=excluded.repo,
             type=excluded.type,
@@ -1135,7 +1217,12 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
             unread=excluded.unread,
             raw_json=excluded.raw_json,
             fetched_at=excluded.fetched_at,
-            link_url = COALESCE(excluded.link_url, notifications.link_url)
+            link_url = COALESCE(excluded.link_url, notifications.link_url),
+            effective_updated_at = CASE
+                WHEN excluded.updated_at != notifications.updated_at
+                    THEN excluded.updated_at
+                ELSE notifications.effective_updated_at
+            END
         """,
         (
             item["id"],
@@ -1145,12 +1232,13 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
             reason,
             subject.get("url"),
             derive_html_url(item),
-            item.get("updated_at") or "",
+            updated_at,
             item.get("last_read_at"),
             new_unread,
             json.dumps(item),
             now,
             link_candidate,
+            updated_at,
         ),
     )
     if reason:
@@ -1202,6 +1290,94 @@ def _accumulate_seen_reason(
     )
 
 
+# Notification `reason` values that mean "this is aimed at you" rather than a
+# watch side effect — a re-delivery carrying one of these surfaces even if its
+# activity kind is muted on the thread.
+_DIRECTED_REASONS = {"mention", "team_mention", "assign", "review_requested"}
+
+
+def _apply_mute_filter(
+    conn: sqlite3.Connection,
+    token: str,
+    touched: list,
+    new_kinds: dict[str, set[str]],
+) -> None:
+    """For threads re-delivered this poll whose new activity is *entirely* of
+    kinds muted on that thread (and not a directed-reason delivery), re-apply
+    the thread's pre-delivery state and fold the activity into the baselines —
+    so the row neither resurfaces nor lights up a "+N new" indicator, and keeps
+    its sort slot instead of jumping to the top.
+
+    `touched` is the (thread_id, prev_unread, prev_action, prev_ignored,
+    prev_effective_updated_at) tuples _upsert collected for rows that had a
+    non-empty muted_kinds; `new_kinds` is _enrich's per-thread new-kind map.
+    """
+    for thread_id, prev_unread, prev_action, prev_ignored, prev_eff in touched:
+        nk = new_kinds.get(thread_id)
+        if not nk:
+            continue  # no detectable new activity — surface normally (safe default)
+        row = conn.execute(
+            "SELECT reason, unread, muted_kinds, details_json, pr_review_state "
+            "FROM notifications WHERE id = ?",
+            (thread_id,),
+        ).fetchone()
+        if row is None:
+            continue
+        try:
+            muted = set(json.loads(row["muted_kinds"] or "[]"))
+        except (ValueError, TypeError):
+            muted = set()
+        if not muted:
+            continue
+        if (row["reason"] or "") in _DIRECTED_REASONS:
+            continue  # directed at the user — let it surface
+        if not nk.issubset(muted):
+            continue  # some new activity isn't muted — surface normally
+
+        # Absorb. Re-apply whichever state the thread was in pre-delivery.
+        # A GitHub call here failing shouldn't abort the rest of the poll —
+        # mirrors _enrich's per-row guard.
+        try:
+            now = int(time.time())
+            if prev_action in ("done", "snoozed") and not prev_ignored:
+                # _upsert just resurfaced it (action→NULL, 'unarchived' logged)
+                # — undo: archive on GitHub again, restore the 'done' row state.
+                mark_done(token, thread_id)
+                conn.execute(
+                    "UPDATE notifications SET action = 'done', actioned_at = ?, "
+                    "action_source = 'auto', snooze_until = NULL WHERE id = ?",
+                    (now, thread_id),
+                )
+            elif not prev_unread and row["unread"]:
+                # Was read; the re-delivery flipped it unread — re-mark read.
+                mark_read(token, thread_id)
+                conn.execute(
+                    "UPDATE notifications SET unread = 0 WHERE id = ?", (thread_id,)
+                )
+            # (else: it was already unread and stays unread — only the sort
+            #  rollback below applies, so the row doesn't bubble up.)
+
+            try:
+                comments = (json.loads(row["details_json"] or "{}") or {}).get("comments") or 0
+            except (ValueError, TypeError):
+                comments = 0
+            conn.execute(
+                "UPDATE notifications SET effective_updated_at = COALESCE(?, updated_at), "
+                "baseline_comments = ?, baseline_review_state = ? WHERE id = ?",
+                (prev_eff, comments, row["pr_review_state"], thread_id),
+            )
+            db.write_thread_event(
+                conn,
+                thread_id=thread_id,
+                ts=now,
+                kind="user_action",
+                source="github",
+                payload={"action": "absorbed", "kinds": sorted(nk)},
+            )
+        except Exception:
+            log.exception("mute-filter absorb failed for %s", thread_id)
+
+
 def _get_paginated(
     token: str,
     params: dict,
@@ -1234,7 +1410,8 @@ def _get_paginated(
 
 
 def _fetch_unread(
-    conn: sqlite3.Connection, token: str, force: bool = False
+    conn: sqlite3.Connection, token: str, touched: list | None = None,
+    force: bool = False,
 ) -> int:
     """Fetch currently-unread notifications + reconcile read-state of items
     missing from the response (they were marked read elsewhere). This is the
@@ -1263,7 +1440,7 @@ def _fetch_unread(
         if not item.get("id"):
             continue
         seen_ids.add(item["id"])
-        _upsert(conn, item, now)
+        _upsert(conn, item, now, touched)
 
     # Items previously unread but missing from the response were read elsewhere.
     # Skip rows where the user has explicitly kept-unread locally.
@@ -1289,7 +1466,9 @@ def _fetch_unread(
     return len(items)
 
 
-def _fetch_combined(conn: sqlite3.Connection, token: str) -> int:
+def _fetch_combined(
+    conn: sqlite3.Connection, token: str, touched: list | None = None
+) -> int:
     """Fetch the 100 most-recently-updated notifications (read or unread) in
     a single GET. Each item carries its own `unread` flag, so _upsert
     reconciles local read-state for everything in this window. If-Modified-
@@ -1313,7 +1492,7 @@ def _fetch_combined(conn: sqlite3.Connection, token: str) -> int:
     for item in items:
         if not item.get("id"):
             continue
-        _upsert(conn, item, now)
+        _upsert(conn, item, now, touched)
     if new_last_modified:
         db.set_meta(conn, "last_modified_combined", new_last_modified)
         if db.get_meta(conn, "last_modified_all"):
@@ -1355,9 +1534,11 @@ def poll_once(
     can't handle, since `?all=true` doesn't surface read-on-mobile-no-comment
     events for items beyond the recent window.
     """
-    n_combined = _fetch_combined(conn, token)
+    touched: list = []
+    n_combined = _fetch_combined(conn, token, touched)
     n_unread = 0
     if force_full or _has_unread_outside_window(conn):
-        n_unread = _fetch_unread(conn, token, force=force_full)
-    _enrich(conn, token)
+        n_unread = _fetch_unread(conn, token, touched, force=force_full)
+    new_kinds = _enrich(conn, token)
+    _apply_mute_filter(conn, token, touched, new_kinds)
     return n_combined + n_unread

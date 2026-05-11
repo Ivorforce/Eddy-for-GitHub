@@ -361,7 +361,32 @@
               hx-include="#filters"
               aria-label="Mute"
               title="Mute — archive AND unsubscribe. Won't resurface from new activity. Click again (with Show archived on) to resubscribe and revert."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
+      {# ▾ — per-kind mute: silence chosen activity types on this thread without
+         unsubscribing. A re-delivery that's all-muted activity gets absorbed
+         (re-applies prior state, keeps the sort slot). Tinted when any kind is
+         muted — distinct from the red full-mute fill on the segment itself.
+         Only shown when the type can actually produce filterable activity. #}
+      {% if n.mute_kind_options %}
+      <button type="button" id="mk-caret-{{ n.id }}"
+              class="action-segment seg-mute-caret{% if n.muted_kinds %} has-muted{% endif %}"
+              popovertarget="pop-mutekinds-{{ n.id }}"
+              style="anchor-name: --pop-mutekinds-{{ n.id }}"
+              aria-label="Mute activity kinds"
+              title="{% if n.muted_kinds %}Muting {{ n.muted_kinds | join(', ') }} on this thread{% else %}Mute specific activity kinds on this thread{% endif %}">▾</button>
+      {% endif %}
     </div>
+    {% if n.mute_kind_options %}
+    <div class="snooze-pop mutekind-pop" popover id="pop-mutekinds-{{ n.id }}"
+         style="position-anchor: --pop-mutekinds-{{ n.id }}">
+      <div class="mutekind-title">Mute updates</div>
+      {% for key, label in n.mute_kind_options %}
+      <button type="button" name="kind" value="{{ key }}"
+              class="mutekind-opt{% if key in n.muted_kinds %} on{% endif %}"
+              hx-post="/set/{{ n.id }}/mute-kinds" hx-swap="none"
+              hx-on::after-request="if (event.detail.successful) muteKindToggled(this)"><span class="mk-lbl">{{ label }}</span></button>
+      {% endfor %}
+    </div>
+    {% endif %}
     <div class="action-row2">
       {# Track — given the segmented-control's slot background so it reads as
          a toggle (filled tint when on), unlike Snooze which is a one-shot
@@ -386,7 +411,7 @@
       <button type="button" class="row2-btn snooze-btn"
               popovertarget="pop-snooze-{{ n.id }}"
               style="anchor-name: --pop-snooze-{{ n.id }}"
-              aria-label="Snooze" title="Snooze — hide until N days pass (or new activity, whichever first)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/></svg></button>
+              aria-label="Snooze" title="Snooze — hide until N days pass (or new activity, whichever first)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/></svg><span class="disclosure" aria-hidden="true">▾</span></button>
       <div class="snooze-pop" popover id="pop-snooze-{{ n.id }}"
            style="position-anchor: --pop-snooze-{{ n.id }}">
         {% if n.ai_verdict and n.ai_verdict.snooze_days %}
