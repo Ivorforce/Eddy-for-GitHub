@@ -21,12 +21,10 @@
        row height. Halve it so per-column padding-top overrides actually
        show up — bottom padding had been the hidden constraint. */
     table td { padding: 0.45rem 0.5rem; }
-    /* Headline pill carries the single most action-defining signal;
-       everything else demotes to a muted prose subhead below. Fixed width
-       (a touch over the priority picker's min-width + cell padding): the
-       column doesn't grow with content — manual-mode prose wraps within
-       it, and the AI strip's description echo ellipsizes to whatever
-       fits. Keeps the title column from being squeezed. */
+    /* Fixed width (a touch over the priority picker's min-width + cell
+       padding): the column doesn't grow with content — the thread / AI
+       pill's subtext ellipsizes to whatever fits. Keeps the title column
+       from being squeezed. */
     td.status {
       white-space: normal;
       vertical-align: top;
@@ -35,34 +33,6 @@
       max-width: 13.5rem;
       line-height: 1.3;
     }
-    td.status .status-prose {
-      margin-top: 0.25rem;
-      font-size: 0.78rem;
-      color: var(--pico-muted-color);
-    }
-    .status-pill {
-      display: inline-block;
-      padding: 0.1rem 0.5rem;
-      border-radius: 0.5rem;
-      font-size: 0.7rem;
-      font-weight: 500;
-      color: white;
-      white-space: nowrap;
-    }
-    /* Mergeable state warnings (top of stack — most actionable) */
-    .status-pill.sev-danger  { background: #cf222e; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.66rem; }
-    .status-pill.sev-warning { background: #bf8700; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.66rem; }
-    /* Review state: positive (green) / negative (red) */
-    .status-pill.review-approved { background: #1a7f37; }
-    .status-pill.review-changes  { background: #cf222e; }
-    /* Action-needed: red for direct, orange for team */
-    .status-pill.action-assigned    { background: #cf222e; }
-    .status-pill.action-review-you  { background: #cf222e; }
-    .status-pill.action-review-team { background: #d29922; }
-    /* Independent flags */
-    .status-pill.flag-mention { background: #bc4c00; }
-    /* "Since last looked" signals — same yellow as the pill-new dot. */
-    .status-pill.new-comments { background: #bf8700; }
     /* width:100% + max-width:0 is the classic table-cell ellipsis trick:
        the cell takes all remaining horizontal space (since other cells use
        width:1%), but the max-width forces descendant overflow rules to
@@ -302,25 +272,6 @@
     tr.is-yours-row td:first-child   { box-shadow: inset 3px 0 0 #4493f8; }
     tr.is-tracked-row td:first-child { box-shadow: inset 3px 0 0 #eaa54a; }
 
-    /* Item-level popover trigger ("•••") — sits in the actions cell where
-       the old inline star + Note button used to live, replacing both. */
-    /* Sits on a second line below the segmented control. Text label
-       ("More…") rather than a kebab so the affordance is discoverable —
-       column never goes wider than the segment pill above it. */
-    .item-trigger-btn {
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: var(--pico-muted-color);
-      font-size: 0.7rem;
-      line-height: 1;
-      padding: 0.15rem 0.3rem;
-      margin: 0.2rem 0 0;
-      border-radius: 0.3rem;
-      text-align: left;
-    }
-    .item-trigger-btn:hover { color: var(--pico-color); background: rgba(140, 149, 159, 0.18); }
-
     /* Action popover panel — shared chrome for org / repo / person / item.
        Anchored below its trigger via CSS Anchor Positioning (anchor-name on
        the trigger, position-anchor here). Falls back to default popover
@@ -534,7 +485,6 @@
       background: rgba(191, 135, 0, 0.26);
       color: var(--pico-color);
     }
-    td.actions .item-trigger-btn { margin: 0; }
 
     /* Snooze duration menu — a native [popover] anchored to its trigger
        (no Pico <details> box to override). Sized like a compact menu. */
@@ -663,10 +613,76 @@
       color: #8957e5;
     }
 
+    /* Manual-mode counterpart of the AI strip: left = activity / state
+       summary (headline + ellipsized subtext, full breakdown on hover),
+       clicking opens the timeline popover; right = the per-thread note
+       icon (amber when a note exists). Neutral grey framing — priority
+       lives entirely in the picker below. */
+    .thread-pill-group {
+      display: flex;
+      width: 100%;
+      margin: 0 0 0.25rem;
+      background: rgba(140, 149, 159, 0.07);
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.4rem;
+      overflow: hidden;
+    }
+    .thread-pill-main,
+    .thread-note-btn {
+      background: none;
+      border: none;
+      margin: 0;
+      cursor: pointer;
+      font-size: 0.66rem;
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--pico-color);
+    }
+    .thread-pill-main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 0.7rem;
+      padding: 0.14rem 0.5rem;
+      letter-spacing: 0.01em;
+      border-right: 1px solid rgba(140, 149, 159, 0.55);  /* match the priority picker's band divider */
+    }
+    .thread-pill-headline { flex-shrink: 0; white-space: nowrap; }
+    .thread-pill-subtext {
+      flex: 1;
+      min-width: 0;               /* lets the ellipsis trigger */
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 400;
+      color: var(--pico-muted-color);
+    }
+    .thread-note-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.14rem 0.4rem;
+      color: var(--pico-muted-color);
+    }
+    .thread-note-btn svg { width: 0.82rem; height: 0.82rem; }
+    .thread-note-btn.has-note { color: #d29922; }   /* a saved note — same amber as the note / tracked accents */
+    .thread-pill-main:hover,
+    .thread-note-btn:hover { background: rgba(140, 149, 159, 0.16); }
+    .thread-pill-group .thread-pill-icon {
+      width: 0.85em;
+      height: 0.85em;
+      margin-right: 0.3rem;
+      vertical-align: -0.12em;
+      color: var(--pico-muted-color);
+    }
+
     /* Pulse the pill while an AI request is in flight on this row (Ask AI
        or Re-ask both set hx-indicator="closest tr", so the row gets
-       .htmx-request). */
-    tr.htmx-request .ai-verdict-pill-group {
+       .htmx-request). The manual pill never triggers a long request of its
+       own, but share the rule so a row-level indicator covers it too. */
+    tr.htmx-request .ai-verdict-pill-group,
+    tr.htmx-request .thread-pill-group {
       pointer-events: none;
       animation: ai-pulse 1.2s ease-in-out infinite;
     }

@@ -540,7 +540,7 @@ _REVIEW_LABELS = {
 }
 # Last-resort labels keyed off GitHub's notification `reason`. Used only when
 # nothing more specific (action, mention, review state, new comments, …)
-# applies, so the row always shows *why* it's here. Always rendered as prose.
+# applies, so the thread pill still shows *why* the row is here.
 _REASON_FALLBACK_LABELS = {
     "subscribed": "Subscribed",
     "author": "Your thread",
@@ -561,62 +561,51 @@ _REASON_FALLBACK_LABELS = {
 }
 
 
-def _status_summary(d: dict) -> tuple[dict | None, str]:
-    """Pick the most action-defining signal as the headline pill, demote the
-    rest to a ' · '-joined prose subhead. Empty pill + empty prose means
-    nothing to flag — the cell renders blank.
+def _thread_pill(d: dict) -> dict:
+    """Activity / state summary for the manual-mode relevance pill: one
+    headline (the most action-defining signal), an optional truncated subtext
+    (the remaining signals, ' · '-joined), and an optional full-breakdown
+    tooltip. All derived from baseline diffs / current state — never from the
+    thread_events log — so the indicators persist across user actions.
 
-    Priority is action-defining over merely-blocking: a "Review you" headline
-    tells you what to do; "Conflicts" only tells you something is broken (and
-    still shows up in the prose). Neutral candidates (purely informational,
-    e.g. "+N comments") never get promoted to the pill — they only render as
-    prose, even when they're the highest-priority candidate. When no candidate
-    fires at all, fall back to the GitHub `reason` so the user can still see
-    why the row is here. Designed so a future AI verdict can replace the
-    rules-based pill/prose without changing the template."""
-    # (rank, css_class, text, neutral)
-    candidates: list[tuple[int, str, str, bool]] = []
+    Priority is action-defining over merely-blocking: "Review you" tells you
+    what to do; "Conflicts" only says something is broken (still listed in the
+    subtext). When nothing fires, fall back to the GitHub `reason` so the row
+    still shows why it's here; if even that is empty, headline is None and the
+    pill renders icon-only."""
+    # (rank, text)
+    candidates: list[tuple[int, str]] = []
 
     merge = d.get("merge_state")
     if merge:
-        if merge[1] == "danger":
-            candidates.append((3, "sev-danger", merge[0], False))
-        else:
-            candidates.append((5, "sev-warning", merge[0], False))
+        candidates.append((3 if merge[1] == "danger" else 5, merge[0]))
 
     action = d.get("action_needed")
     if action:
-        candidates.append(
-            (1, f"action-{action.replace('_', '-')}", _ACTION_LABELS[action], False)
-        )
+        candidates.append((1, _ACTION_LABELS[action]))
 
     if d.get("mentioned_since"):
-        candidates.append((2, "flag-mention", "Mentioned", False))
+        candidates.append((2, "Mentioned"))
 
     rs = d.get("pr_review_state")
     if rs in _REVIEW_LABELS:
-        rs_class = "review-approved" if rs == "approved" else "review-changes"
-        candidates.append((4, rs_class, _REVIEW_LABELS[rs], False))
+        candidates.append((4, _REVIEW_LABELS[rs]))
 
     interest = (d.get("meta") or {}).get("interest") or {}
     new_c = interest.get("new_comments") or 0
     if new_c:
-        candidates.append(
-            (6, "new-comments", f"+{new_c} comment{'' if new_c == 1 else 's'}", True)
-        )
-
-    if not candidates:
-        fallback = _REASON_FALLBACK_LABELS.get(d.get("reason") or "")
-        return None, fallback or ""
+        candidates.append((6, f"+{new_c} comment{'' if new_c == 1 else 's'}"))
 
     candidates.sort(key=lambda c: c[0])
-    rank, head_class, head_text, head_neutral = candidates[0]
-    if head_neutral:
-        prose = " · ".join(text for _, _, text, _ in candidates)
-        return None, prose
-    pill = {"text": head_text, "cls": head_class}
-    prose = " · ".join(text for _, _, text, _ in candidates[1:])
-    return pill, prose
+    texts = [t for _, t in candidates]
+    if not texts:
+        fallback = _REASON_FALLBACK_LABELS.get(d.get("reason") or "")
+        return {"headline": fallback or None, "subtext": None, "tip": None}
+    return {
+        "headline": texts[0],
+        "subtext": " · ".join(texts[1:]) or None,
+        "tip": " · ".join(texts) if len(texts) > 1 else None,
+    }
 
 
 def _type_state(details: dict, subject_type: str) -> str:
@@ -1263,7 +1252,7 @@ def _row_to_dict(
     # (action or first ingest, baseline NULL means "never engaged").
     baseline_rs = d.pop("baseline_review_state", None)
     d["is_review_new"] = bool(d["pr_review_state"]) and d["pr_review_state"] != baseline_rs
-    d["status_pill"], d["status_prose"] = _status_summary(d)
+    d["thread_pill"] = _thread_pill(d)
 
     # Author info — pulled from cached details_json; null if not yet enriched.
     author = (details.get("user") or {}) if details else {}
@@ -1327,11 +1316,10 @@ def _load_notifications():
             "ORDER BY updated_at DESC"
         ).fetchall()
         out = [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
-        # The popover (and the timeline / ai_uptodate it needs) only renders
-        # in AI mode — skip the per-row thread_events query in manual mode.
-        if _get_triage_mode() == "ai":
-            for d in out:
-                _attach_timeline(d, conn, tracked_people=t_p, notes_people=n_p)
+        # Both modes render the timeline popover; AI mode also needs
+        # ai_uptodate. Attach unconditionally.
+        for d in out:
+            _attach_timeline(d, conn, tracked_people=t_p, notes_people=n_p)
         return out
     finally:
         conn.close()
