@@ -247,6 +247,14 @@ ALTER TABLE notifications DROP COLUMN priority_user;
 ALTER TABLE notifications ADD COLUMN priority_user REAL;
 """
 
+# Snooze: a unix ts at which a deferred ("done for now") thread should
+# resurface. While set, the row carries action='snoozed' (hidden by default,
+# like 'done'); the poll loop wakes it when the ts passes (action→'woken',
+# unread=1), and a new-activity resurface clears it too. NULL = not snoozed.
+SCHEMA_V24 = """
+ALTER TABLE notifications ADD COLUMN snooze_until INTEGER;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -353,6 +361,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V23)
             _set_version(conn, 23)
             version = 23
+        if version < 24:
+            conn.executescript(SCHEMA_V24)
+            _set_version(conn, 24)
+            version = 24
     finally:
         conn.close()
 

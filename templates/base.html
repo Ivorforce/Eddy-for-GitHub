@@ -493,6 +493,84 @@
       background: rgba(207, 34, 46, 0.22);   /* red — silenced */
     }
 
+    /* Row 2 of the Actions cell — Track + Snooze (+ "Note…" in manual mode).
+       Track wears the segmented-control's slot background (faint grey box,
+       filled tint when on) so it reads as a toggle; Snooze is a one-shot
+       action — no persistent fill, just opens a duration popover. */
+    td.actions .action-row2 {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      margin-top: 0.2rem;
+    }
+    td.actions .row2-btn {
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.4rem;
+      margin: 0;
+      padding: 0.16rem 0.34rem;
+      cursor: pointer;
+      line-height: 1;
+      color: var(--pico-muted-color);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.18rem;
+      font-size: 0.6rem;
+      white-space: nowrap;
+    }
+    td.actions .row2-btn svg { width: 0.95rem; height: 0.95rem; display: block; }
+    td.actions .row2-btn:hover { background: rgba(140, 149, 159, 0.18); color: var(--pico-color); }
+    /* Track — slot background like .action-group above; filled when tracked. */
+    td.actions .track-btn { background: rgba(140, 149, 159, 0.08); }
+    td.actions .track-btn.active {
+      background: rgba(234, 165, 74, 0.20);
+      color: #eaa54a;
+    }
+    /* Snooze trigger — no fill (it's an action, not a state); the snoozed
+       state shows the wake countdown amber-filled, like the Done segment. */
+    td.actions .snooze-btn { background: none; }
+    td.actions .snooze-btn.active {
+      background: rgba(191, 135, 0, 0.26);
+      color: var(--pico-color);
+    }
+    td.actions .item-trigger-btn { margin: 0; }
+
+    /* Snooze duration menu — a native [popover] anchored to its trigger
+       (no Pico <details> box to override). Sized like a compact menu. */
+    /* Don't set `display` here — the UA's `[popover]:not(:popover-open)
+       { display:none }` would lose the specificity tie to an author rule
+       and the menu would show by default. Block layout + width:100% buttons
+       stack fine when open. */
+    .snooze-pop[popover] {
+      inset: auto;
+      margin: 0;
+      padding: 0.2rem;
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.4rem;
+      background: var(--pico-card-background-color);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+      min-width: 6rem;
+    }
+    .snooze-pop[popover]:popover-open {
+      position-area: bottom span-right;
+      margin-top: 0.25rem;
+      position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+    }
+    .snooze-pop button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      border-radius: 0.25rem;
+      margin: 0;
+      padding: 0.22rem 0.45rem;
+      font-size: 0.74rem;
+      line-height: 1.3;
+      color: var(--pico-color);
+      cursor: pointer;
+    }
+    .snooze-pop button:hover { background: rgba(140, 149, 159, 0.16); }
+
     /* AI verdict pill. Lives in the Relevance column when triage mode =
        AI. Split: left half = the AI's current take (opens the popover),
        right half = the assess / re-assess trigger. Priority drives the

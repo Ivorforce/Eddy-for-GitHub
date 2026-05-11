@@ -130,7 +130,7 @@ _ROW_COLS = (
     "seen_reasons, baseline_comments, "
     "pr_reactions_json, unique_commenters, unique_reviewers, "
     "pr_review_state, baseline_review_state, "
-    "note_user, is_tracked, priority_user, "
+    "note_user, is_tracked, priority_user, snooze_until, "
     "ai_verdict_json, ai_verdict_at, ai_verdict_model"
 )
 
@@ -740,6 +740,17 @@ def _humanize_age(secs: int) -> str:
     return f"{secs // 86400}d ago"
 
 
+def _short_duration(secs: int) -> str:
+    """Compact 'time remaining' label (no 'ago' suffix) for the in-row
+    snoozed-state button — '3d', '5h', '12m'."""
+    secs = max(0, secs)
+    if secs < 3600:
+        return f"{max(1, secs // 60)}m"
+    if secs < 86400:
+        return f"{secs // 3600}h"
+    return f"{secs // 86400}d"
+
+
 # Display labels for user_action events in the popover timeline. Source
 # of truth for action strings is web._apply_action; keep this in sync if
 # it grows new action labels. Unknown actions render as the raw key
@@ -754,6 +765,9 @@ _USER_ACTION_LABELS = {
     "unarchived":       "Resurfaced — new activity",
     "kept_unread":      "Kept unread",
     "unmuted":          "Unmuted",
+    "snoozed":          "Snoozed",
+    "unsnoozed":        "Un-snoozed",
+    "woken":            "Woke from snooze",
 }
 
 
@@ -874,15 +888,19 @@ def _drop_close_after_merge(events: list[dict]) -> list[dict]:
 # represent user oscillation and collapse to just the latest — `visited` /
 # `read_on_github` aren't included here because they're engagement / external
 # observations, not the user toggling dismissal state.
-_DISMISSAL_ACTIONS = {"read", "done", "muted", "kept_unread", "undone", "unmuted"}
-# Reverts: kept_unread reverts read, undone reverts done, unmuted reverts muted.
-# When the latest event in a streak is the revert of the one immediately
-# before it, both vanish — the streak's net effect is zero, no need to
-# clutter the timeline with the vacillation.
+_DISMISSAL_ACTIONS = {
+    "read", "done", "muted", "kept_unread", "undone", "unmuted",
+    "snoozed", "unsnoozed",
+}
+# Reverts: kept_unread reverts read, undone reverts done, unmuted reverts
+# muted, unsnoozed reverts snoozed. When the latest event in a streak is the
+# revert of the one immediately before it, both vanish — the streak's net
+# effect is zero, no need to clutter the timeline with the vacillation.
 _REVERT_OF = {
     "kept_unread": "read",
     "undone":      "done",
     "unmuted":     "muted",
+    "unsnoozed":   "snoozed",
 }
 
 
@@ -1330,6 +1348,11 @@ def _row_to_dict(
         d["priority_score"] = None
         d["priority_level"] = None
 
+    # Snooze — `snooze_until` (raw wake ts, or None) is already in `d`; add a
+    # short "wakes in 3d" label for the in-row snoozed-state button.
+    su = d.get("snooze_until")
+    d["snooze_wakes_in"] = _short_duration(su - int(time.time())) if su else None
+
     return d
 
 
@@ -1374,7 +1397,7 @@ def _load_repo_options(show_archived: bool = False) -> tuple[list[str], list[str
         else:
             rows = conn.execute(
                 "SELECT DISTINCT repo FROM notifications "
-                "WHERE COALESCE(action, '') != 'done' AND repo != ''"
+                "WHERE COALESCE(action, '') NOT IN ('done', 'snoozed') AND repo != ''"
             ).fetchall()
     finally:
         conn.close()
@@ -1437,11 +1460,12 @@ def _render_row(n: dict):
 
 
 def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
-    # Archived (locally action='done') rows are hidden by default and only
-    # surface when Show archived is on. Distinct from Hide resolved below,
-    # which filters by GitHub-side resolution state (merged/closed/answered).
+    # Archived (action='done') and snoozed (action='snoozed') rows are hidden
+    # by default and only surface when Show archived is on. Distinct from Hide
+    # resolved below, which filters by GitHub-side resolution state
+    # (merged/closed/answered).
     if not f.get("show_archived"):
-        rows = [r for r in rows if r["action"] != "done"]
+        rows = [r for r in rows if r["action"] not in ("done", "snoozed")]
     if f["actions"]:
         actions = set(f["actions"])
         want_mentioned = "mentioned" in actions
@@ -1648,6 +1672,7 @@ def _apply_action(
     action: str,
     source: str = "user",
     log_action: str | None = None,
+    event_payload: dict | None = None,
     **state,
 ) -> None:
     """Record action + actioned_at + action_source, plus arbitrary state columns.
@@ -1656,7 +1681,13 @@ def _apply_action(
     label (e.g. 'done' hides the row by default). `log_action` overrides the
     value written into `thread_events.payload.action`, so the AI timeline can
     record a more specific label ('muted') while the row column stays 'done'
-    for filter purposes. Defaults to `action` when unset.
+    for filter purposes. Defaults to `action` when unset. `event_payload`
+    merges extra keys into that timeline payload (e.g. the wake time on a
+    `snoozed` event).
+
+    `snooze_until` is reset to NULL by default — any row action other than
+    the snooze handler itself un-snoozes the row — but a caller can pass
+    `snooze_until=<ts>` via `**state` to set it.
 
     NOTE: baselines (baseline_comments, baseline_review_state) and seen_reasons
     are intentionally NOT touched here. 'Since last looked' indicators persist
@@ -1670,6 +1701,7 @@ def _apply_action(
         "action": action,
         "actioned_at": now,
         "action_source": source,
+        "snooze_until": None,
         **state,
     }
     setters = ", ".join(f"{k} = ?" for k in cols)
@@ -1688,7 +1720,7 @@ def _apply_action(
             ts=now,
             kind="user_action",
             source=source,
-            payload={"action": log_action or action},
+            payload={"action": log_action or action, **(event_payload or {})},
         )
     finally:
         conn.close()
@@ -1772,7 +1804,7 @@ def set_ignored(thread_id: str):
     is_active = (
         n["unread"] == 0
         and n["ignored"] == 0
-        and n["action"] != "done"
+        and n["action"] not in ("done", "snoozed")
     )
     if is_active:
         # Click already-active Ignore → deselect → mark unread locally.
@@ -1834,6 +1866,47 @@ def set_muted(thread_id: str):
     # action column stays 'done' (so the show_archived filter handles it);
     # the AI timeline gets 'muted' to preserve the stronger-than-Done signal.
     _apply_action(thread_id, "done", log_action="muted", unread=0, ignored=1)
+    return _archive_response(thread_id)
+
+
+# Snooze durations offered by the picker (days). Whitelist for the route.
+_SNOOZE_DAYS = (1, 3, 7, 14, 30, 60)
+
+
+@app.post("/set/<thread_id>/snooze")
+def set_snooze(thread_id: str):
+    """Snooze a thread: archive it on GitHub (like Done) and set a wake
+    timer. The poll loop resurfaces it (unread again) when the timer passes,
+    or new GitHub activity resurfaces it sooner — whichever comes first.
+    POST `?days=N` (one of `_SNOOZE_DAYS`) to snooze; POST with no `days`
+    (the "wake now" click on an already-snoozed row) to clear it."""
+    token = app.config["GITHUB_TOKEN"]
+    n = _load_one(thread_id)
+    if not n:
+        return ("", 404)
+    days_raw = (request.values.get("days") or "").strip()
+    if not days_raw:
+        # Wake now — un-snooze and bring it back unread (the snooze cleared
+        # unread when it fired; restore it the way a timer wake would).
+        _apply_action(thread_id, "unsnoozed", unread=1)
+        return _render_row(_load_one(thread_id))
+    try:
+        days = int(days_raw)
+    except ValueError:
+        return ("", 400)
+    if days not in _SNOOZE_DAYS:
+        return ("", 400)
+    # Mirror Done's GitHub side-effect: archive (unless already archived as
+    # done/snoozed), and stay subscribed so new activity can still resurface it.
+    if n["action"] not in ("done", "snoozed"):
+        github.mark_done(token, thread_id)
+    if n["ignored"]:
+        github.set_subscribed(token, thread_id)
+    until = int(time.time()) + days * 86400
+    _apply_action(
+        thread_id, "snoozed", unread=0, ignored=0,
+        snooze_until=until, event_payload={"until": until},
+    )
     return _archive_response(thread_id)
 
 

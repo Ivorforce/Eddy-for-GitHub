@@ -300,7 +300,7 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
         """
         SELECT id, repo, type, title, reason, html_url, link_url,
                updated_at, last_read_at, unread, ignored, action,
-               is_tracked, note_user,
+               is_tracked,
                details_json, seen_reasons,
                baseline_comments, baseline_review_state, pr_review_state,
                unique_commenters, unique_reviewers, pr_reactions_json
@@ -416,7 +416,6 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
         "ignored":       bool(row["ignored"]),
         "action":        row["action"],
         "is_tracked":    bool(row["is_tracked"]),
-        "note_user":     row["note_user"] or None,
     }
     notification = {k: v for k, v in notification.items() if v not in (None, "", False)}
 

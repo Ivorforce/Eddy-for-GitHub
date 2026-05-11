@@ -1105,14 +1105,17 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
     ).fetchone()
     new_unread = 1 if item.get("unread") else 0
     external_read = (prev is not None and prev["unread"] == 1 and new_unread == 0)
-    # Resurface a locally-archived ("done") thread when GitHub hands us the
-    # notification again — done removes it from GitHub's inbox, so a re-fetch
-    # means genuinely new activity landed (this mirrors github.com's own
-    # "Done" auto-reset). Mute (action='done' + ignored) stays archived: the
+    # Resurface a locally-archived thread — Done (action='done') or Snooze
+    # (action='snoozed') — when GitHub hands us the notification again: both
+    # archive on GitHub, so a re-fetch means genuinely new activity landed
+    # (this mirrors github.com's own "Done" auto-reset, and beats a pending
+    # snooze timer). Mute (action='done' + ignored) stays archived: the
     # unsubscribe means GitHub won't deliver further activity, and the point
     # of Mute is "I never want to see this again".
     resurfaced = (
-        prev is not None and prev["action"] == "done" and not prev["ignored"]
+        prev is not None
+        and prev["action"] in ("done", "snoozed")
+        and not prev["ignored"]
     )
     conn.execute(
         """
@@ -1164,7 +1167,7 @@ def _upsert(conn: sqlite3.Connection, item: dict[str, Any], now: int) -> None:
     if resurfaced:
         conn.execute(
             "UPDATE notifications SET action = NULL, actioned_at = NULL, "
-            "action_source = NULL WHERE id = ?",
+            "action_source = NULL, snooze_until = NULL WHERE id = ?",
             (item["id"],),
         )
         db.write_thread_event(
