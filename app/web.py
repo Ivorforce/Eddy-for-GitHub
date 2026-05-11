@@ -1457,7 +1457,21 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
             if q in r["title"].lower()
             or q in (r["author_login"] or "").lower()
         ]
-    if f["sort"] == "engaged":
+    if f["sort"] == "priority":
+        # Highest effective priority first (user pin, else AI verdict — see
+        # _row_to_dict); rows with no assessment yet sink to the bottom
+        # rather than rank as zero. Ties — rare for AI floats, routine among
+        # the six user-pin values — break by actionable-to-you (assigned /
+        # review-requested / mentioned), then most-recently-updated. Two
+        # stable passes: the recency pass below is preserved within each
+        # (score, actionable) group by the main sort.
+        rows.sort(key=lambda r: r["updated_at"] or "", reverse=True)
+        rows.sort(key=lambda r: (
+            r["priority_score"] is None,
+            -(r["priority_score"] or 0.0),
+            not (r["action_needed"] or r["mentioned_since"]),
+        ))
+    elif f["sort"] == "engaged":
         rows.sort(
             key=lambda r: (
                 ((r.get("meta") or {}).get("interest") or {}).get("engaged") or 0
@@ -1482,9 +1496,9 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
 
     # Bucket separators reflect the active sort: temporal sorts bucket by
     # the same time key they sort on, so the "Today / Yesterday / ..."
-    # headers are honest about what they're grouping. Non-temporal sorts
-    # (engagement) get no bucketing at all — the order doesn't carry a
-    # date semantics, so headers would be misleading.
+    # headers are honest about what they're grouping; the priority sort
+    # buckets by named band ("Urgent" / "High" / ... / "Unassessed").
+    # Engagement gets no bucketing — the order carries no group semantics.
     sort = f["sort"]
     if sort in ("updated", "stale"):
         for r in rows:
@@ -1492,6 +1506,10 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
     elif sort in ("newest", "oldest"):
         for r in rows:
             r["bucket"] = _bucket(r["created_at"])
+    elif sort == "priority":
+        for r in rows:
+            s = r["priority_score"]
+            r["bucket"] = "Unassessed" if s is None else _score_to_priority_level(s).capitalize()
     # else: leave bucket as None (set in _row_to_dict) → template skips.
     return rows
 
