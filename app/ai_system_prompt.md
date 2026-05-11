@@ -55,7 +55,7 @@ Rules:
 - Don't address the user ("you", "your"). Don't paraphrase preferences. If the description can't stand without referring to the user, write `"Not relevant."` and stop.
 - Don't repeat the verdict ("noise", "no action needed") — `action_now` already conveys it.
 - Pick one reason, not three. If two facts come to mind, take the more discriminating.
-- You can use `` `code` ``, `@mention`, and `#123` (or `repo#123` / `owner/repo#123`) syntax — it renders the way it does on github.com. Use it where it reads naturally; don't force it.
+- Use github.com markup for the things it's for: a GitHub login is always `@login`, an issue / PR is always `#123` (or `repo#123` / `owner/repo#123`), code / identifiers / paths go in `` `backticks` ``. It renders the way it does on github.com. Don't reach past that — no link syntax, no bold/italic for emphasis.
 
 Examples:
 
