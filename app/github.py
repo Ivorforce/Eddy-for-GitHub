@@ -1153,11 +1153,12 @@ def _upsert(
     touched: list | None = None,
 ) -> None:
     """Insert/update one notification row. If `touched` is given and the row
-    existed before with a non-empty `muted_kinds`, append a
-    (thread_id, prev_unread, prev_action, prev_ignored,
-     prev_effective_updated_at, prev_snooze_until) tuple to it — the absorb
-    pass (_apply_mute_filter) needs the pre-delivery state to decide whether to
-    re-suppress this re-delivery (and to restore a snooze deadline intact)."""
+    existed before, append a (thread_id, prev_unread, prev_action, prev_ignored,
+    prev_effective_updated_at, prev_snooze_until) tuple to it — the post-poll
+    passes need the pre-delivery state: _apply_mute_filter to decide whether
+    to re-suppress an all-muted re-delivery (and restore a snooze deadline
+    intact), _apply_throttle to roll effective_updated_at back to the frozen
+    front-fire value inside an active quiet-bystanders window."""
     subject = item.get("subject") or {}
     repo = item.get("repository") or {}
     reason = item.get("reason") or ""
@@ -1179,7 +1180,7 @@ def _upsert(
         "snooze_until FROM notifications WHERE id = ?",
         (item["id"],),
     ).fetchone()
-    if touched is not None and prev is not None and prev["muted_kinds"]:
+    if touched is not None and prev is not None:
         touched.append((
             item["id"], prev["unread"], prev["action"], prev["ignored"],
             prev["effective_updated_at"], prev["snooze_until"],
@@ -1314,6 +1315,41 @@ MUTE_KINDS_BY_TYPE = {
 # activity kind is muted on the thread.
 _DIRECTED_REASONS = {"mention", "team_mention", "assign", "review_requested"}
 
+# Reasons that mean the user is *involved* in the thread (authored it, has
+# commented on it, manually subscribed, or it's tied to their own activity).
+# Like _DIRECTED_REASONS these bypass the quiet-bystanders throttle: an
+# engaged user wants updates promptly. (Does NOT bypass per-kind mute — that's
+# an explicit "I don't want this kind here" override.)
+_INVOLVED_REASONS = {"author", "comment", "manual", "your_activity"}
+
+# Activity kinds the bystander throttle is allowed to suppress. `review` and
+# `lifecycle` always bump (lower-volume, higher-signal — the merge / approval /
+# close ping you want promptly).
+_THROTTLE_KINDS = {"comment", "code"}
+
+# Quiet window after a bystander front-fire. One number, no UI picker — start
+# fixed, only split into a Short/Long preset if 30 min ever feels wrong.
+THROTTLE_WINDOW_SECONDS = 30 * 60
+
+
+def _quiet_bystanders_enabled(conn: sqlite3.Connection) -> bool:
+    """Whether the bystander-throttle toggle is on. Default on; only the
+    explicit string 'off' disables it."""
+    return (db.get_meta(conn, "quiet_bystanders") or "on").strip().lower() != "off"
+
+
+def drain_throttle_windows(conn: sqlite3.Connection) -> None:
+    """Clear every pending throttle window — bumping any row that has
+    accumulated suppressed activity up to its true updated_at. Called from
+    the web layer when the user flips the toggle off, so the effect of
+    disabling is immediate (no waiting for in-flight windows to expire)."""
+    conn.execute(
+        "UPDATE notifications "
+        "SET effective_updated_at = updated_at "
+        "WHERE throttle_until IS NOT NULL AND updated_at > effective_updated_at"
+    )
+    conn.execute("UPDATE notifications SET throttle_until = NULL WHERE throttle_until IS NOT NULL")
+
 
 def _apply_mute_filter(
     conn: sqlite3.Connection,
@@ -1329,8 +1365,8 @@ def _apply_mute_filter(
 
     `touched` is the (thread_id, prev_unread, prev_action, prev_ignored,
     prev_effective_updated_at, prev_snooze_until) tuples _upsert collected for
-    rows that had a non-empty muted_kinds; `new_kinds` is _enrich's per-thread
-    new-kind map.
+    every re-delivered row; rows without a non-empty muted_kinds short-circuit
+    below. `new_kinds` is _enrich's per-thread new-kind map.
     """
     for (thread_id, prev_unread, prev_action, prev_ignored, prev_eff,
          prev_snooze) in touched:
@@ -1407,6 +1443,111 @@ def _apply_mute_filter(
             )
         except Exception:
             log.exception("mute-filter absorb failed for %s", thread_id)
+
+
+def _apply_throttle(
+    conn: sqlite3.Connection,
+    touched: list,
+    new_kinds: dict[str, set[str]],
+) -> None:
+    """Quiet-bystanders throttle. For each re-delivered row whose new activity
+    is entirely `comment` / `code` AND the thread is a bystander (not directed
+    at the user, not involved, not tracked, not archived/snoozed):
+      - If no active window (or it's expired): front-fire — leave the row's
+        sort key advanced (as _upsert did) and open a new window of
+        THROTTLE_WINDOW_SECONDS.
+      - If a window is still active: roll effective_updated_at back to the
+        pre-delivery value (held at the front-fire moment) so the row keeps
+        its slot. Don't reset the window — the timer runs from the front-fire,
+        not from each suppressed delivery.
+    A non-throttled bump (directed/involved/review/lifecycle/etc.) clears any
+    stale window so the next quiet burst starts a fresh one.
+    """
+    if not _quiet_bystanders_enabled(conn):
+        return
+    now = int(time.time())
+    window_end = now + THROTTLE_WINDOW_SECONDS
+    for (thread_id, _pu, _pa, _pi, prev_eff, _ps) in touched:
+        nk = new_kinds.get(thread_id)
+        if not nk:
+            continue  # no new activity detected this poll
+        row = conn.execute(
+            "SELECT reason, action, is_tracked, muted_kinds, throttle_until "
+            "FROM notifications WHERE id = ?",
+            (thread_id,),
+        ).fetchone()
+        if row is None:
+            continue
+        try:
+            muted = set(json.loads(row["muted_kinds"] or "[]"))
+        except (ValueError, TypeError):
+            muted = set()
+        reason = row["reason"] or ""
+        # All-muted re-deliveries were already handled by _apply_mute_filter
+        # (which froze effective_updated_at to prev_eff and re-applied the
+        # archived/read state). Nothing left for throttle to do.
+        absorbed = (nk.issubset(muted) and reason not in _DIRECTED_REASONS)
+        eligible = (
+            not absorbed
+            and row["action"] is None
+            and not row["is_tracked"]
+            and reason not in _DIRECTED_REASONS
+            and reason not in _INVOLVED_REASONS
+            and nk.issubset(_THROTTLE_KINDS)
+        )
+        if not eligible:
+            # A real bump — drop any stale window so the next quiet burst on
+            # this thread starts fresh.
+            if row["throttle_until"] is not None:
+                conn.execute(
+                    "UPDATE notifications SET throttle_until = NULL WHERE id = ?",
+                    (thread_id,),
+                )
+            continue
+        tu = row["throttle_until"]
+        if tu is None or tu <= now:
+            # Front fire: _upsert already set effective_updated_at to the new
+            # updated_at. Open a window so the next burst rides it out.
+            conn.execute(
+                "UPDATE notifications SET throttle_until = ? WHERE id = ?",
+                (window_end, thread_id),
+            )
+        else:
+            # Inside the window: roll the sort key back to where the front
+            # fire left it (prev_eff carries that value forward poll-to-poll,
+            # since each suppression re-pins effective_updated_at to it).
+            conn.execute(
+                "UPDATE notifications SET effective_updated_at = COALESCE(?, updated_at) "
+                "WHERE id = ?",
+                (prev_eff, thread_id),
+            )
+
+
+def _release_throttled(conn: sqlite3.Connection) -> None:
+    """Trailing-edge sweep: any throttle window whose timer has expired gets
+    closed. If activity was suppressed inside it (updated_at advanced past
+    the frozen effective_updated_at), the row bumps now — the single
+    "here's what happened" surface the throttle was building toward. Windows
+    that expired with nothing suppressed just get cleared. Runs every poll
+    independent of the toggle so windows always drain."""
+    now = int(time.time())
+    rows = conn.execute(
+        "SELECT id, updated_at, effective_updated_at FROM notifications "
+        "WHERE throttle_until IS NOT NULL AND throttle_until <= ?",
+        (now,),
+    ).fetchall()
+    for row in rows:
+        if (row["updated_at"] or "") > (row["effective_updated_at"] or ""):
+            conn.execute(
+                "UPDATE notifications SET effective_updated_at = updated_at, "
+                "throttle_until = NULL WHERE id = ?",
+                (row["id"],),
+            )
+        else:
+            conn.execute(
+                "UPDATE notifications SET throttle_until = NULL WHERE id = ?",
+                (row["id"],),
+            )
 
 
 def _get_paginated(
@@ -1572,4 +1713,6 @@ def poll_once(
         n_unread = _fetch_unread(conn, token, touched, force=force_full)
     new_kinds = _enrich(conn, token)
     _apply_mute_filter(conn, token, touched, new_kinds)
+    _apply_throttle(conn, touched, new_kinds)
+    _release_throttled(conn)
     return n_combined + n_unread

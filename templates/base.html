@@ -1152,8 +1152,9 @@
        caret size — so the toolbar reads as a single quiet row of
        coordinator controls rather than a chunky button next to a tiny
        refresh icon. */
-    .backfill-menu { margin: 0; }
-    .backfill-menu > summary {
+    .backfill-menu, .options-menu { margin: 0; }
+    .backfill-menu > summary,
+    .options-menu  > summary {
       display: inline-flex;
       align-items: center;
       padding: 0.15rem 0.55rem;
@@ -1161,13 +1162,19 @@
       line-height: 1.4;
       margin: 0;
     }
-    .backfill-menu > summary::after {
+    .backfill-menu > summary::after,
+    .options-menu  > summary::after {
       width: 0.7rem;
       height: 0.7rem;
       margin-inline-start: 0.35rem;
       background-size: contain;
     }
-    .backfill-menu > ul { font-size: 0.82rem; }
+    .backfill-menu > ul,
+    .options-menu  > ul { font-size: 0.82rem; }
+    /* Toggle row checkmark: hidden by default, revealed when .on is set
+       (server-rendered for initial state, htmx flips it on response). */
+    .options-toggle .check { visibility: hidden; margin-inline-end: 0.15rem; }
+    .options-toggle.on .check { visibility: visible; }
 
     /* Status dot — green idle, orange pulsing while updating, red on error.
        Hover for details. Replaces the old hx-indicator-only spinner. */

@@ -11,6 +11,22 @@
       <li><a href="#" hx-post="/backfetch?n=1000" hx-include="#filters" hx-target="#notifications-table" onclick="this.closest('details').open=false">Last 1000 (slow; enrichment trickles in)</a></li>
     </ul>
   </details>
+  {# Seed of a global-settings menu. Each toggle posts to /settings/* and
+     flips its own checkmark client-side (the change affects future polls,
+     not the current table — no swap needed). #}
+  <details class="dropdown options-menu">
+    <summary role="button" class="secondary outline">Options</summary>
+    <ul>
+      <li>
+        <a href="#" class="options-toggle{% if quiet_bystanders %} on{% endif %}"
+           hx-post="/settings/quiet_bystanders" hx-swap="none"
+           hx-on::after-request="if (event.detail.successful) this.classList.toggle('on')"
+           title="Bursts of comments / pushes on threads you only watch surface once, then keep their slot for ~30 min before bumping with the full burst. Threads you author, comment in, are assigned / mentioned in, or have tracked are exempt.">
+          <span class="check" aria-hidden="true">✓</span> Quiet bystander threads
+        </a>
+      </li>
+    </ul>
+  </details>
   <button class="refresh-icon-btn"
           hx-post="/refresh"
           hx-include="#filters"

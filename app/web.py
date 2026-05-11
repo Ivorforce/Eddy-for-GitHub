@@ -1511,6 +1511,30 @@ def _set_triage_mode(mode: str) -> str:
     return mode
 
 
+# Quiet-bystanders throttle — see github._apply_throttle. Default on; only
+# the explicit string 'off' disables it.
+def _get_quiet_bystanders() -> bool:
+    conn = db.connect()
+    try:
+        return (db.get_meta(conn, "quiet_bystanders") or "on").strip().lower() != "off"
+    finally:
+        conn.close()
+
+
+def _set_quiet_bystanders(on: bool) -> bool:
+    conn = db.connect()
+    try:
+        db.set_meta(conn, "quiet_bystanders", "on" if on else "off")
+        if not on:
+            # Flush in-flight windows so the change is visible immediately
+            # rather than waiting for each thread's window to expire.
+            github.drain_throttle_windows(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return on
+
+
 def _render_row(n: dict):
     """Wrap render_template('_row.html', ...) so every row swap carries
     the active triage_mode (read from the persisted setting)."""
@@ -1658,6 +1682,7 @@ def index():
         repo_names=repo_names,
         filters=f,
         triage_mode=_get_triage_mode(),
+        quiet_bystanders=_get_quiet_bystanders(),
         type_labels=TYPE_LABELS_LONG,
         action_labels=ACTION_FILTER_LABELS,
     )
@@ -1672,6 +1697,23 @@ def list_view():
         "_table.html", notifications=rows, error=None, filters=f,
         triage_mode=_get_triage_mode(),
     )
+
+
+@app.post("/settings/quiet_bystanders")
+def set_quiet_bystanders():
+    """Toggle the bystander-thread throttle (see github._apply_throttle).
+    Doesn't retroactively alter the current view — only affects how future
+    polls treat bursts — so it returns 204 and the dropdown row flips its
+    own checkmark client-side."""
+    requested = (request.values.get("on") or "").strip().lower()
+    if requested in ("1", "true", "on"):
+        new = True
+    elif requested in ("0", "false", "off"):
+        new = False
+    else:
+        new = not _get_quiet_bystanders()
+    _set_quiet_bystanders(new)
+    return ("", 204)
 
 
 @app.post("/settings/triage_mode")

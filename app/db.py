@@ -276,6 +276,19 @@ ALTER TABLE notifications ADD COLUMN effective_updated_at TEXT;
 UPDATE notifications SET effective_updated_at = updated_at;
 """
 
+# Bystander-thread throttle ("quiet bystanders"). When the meta toggle
+# 'quiet_bystanders' is on (default), a burst of comment/code activity on a
+# thread the user is only watching (not directed at, not authoring/commenting
+# in, not tracked, not archived) surfaces once — then `throttle_until` is set
+# to now+THROTTLE_WINDOW_SECONDS and further bumps inside the window get rolled
+# back so the row keeps its slot. When the window expires the next activity
+# bumps normally (or _release_throttled bumps once with the accumulated
+# "+N new comments" behind it). Sort-layer only — not touched by _apply_action,
+# never changes unread / action / baselines.
+SCHEMA_V26 = """
+ALTER TABLE notifications ADD COLUMN throttle_until INTEGER;
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -390,6 +403,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V25)
             _set_version(conn, 25)
             version = 25
+        if version < 26:
+            conn.executescript(SCHEMA_V26)
+            _set_version(conn, 26)
+            version = 26
     finally:
         conn.close()
 
