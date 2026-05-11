@@ -228,6 +228,10 @@ def _summarize_details(d: dict, subject_type: str) -> dict:
         out["deletions"] = d.get("deletions")
         out["changed_files"] = d.get("changed_files")
         out["mergeable_state"] = d.get("mergeable_state")
+        # Latest head commit — "when did the code last change", distinct from
+        # updatedAt (which also moves on comments / labels). {abbrev_oid,
+        # message, committed_at, author, total}. None until first enrichment.
+        out["last_commit"] = d.get("last_commit")
         out["requested_reviewers"] = [
             (r or {}).get("login") for r in (d.get("requested_reviewers") or []) if (r or {}).get("login")
         ]

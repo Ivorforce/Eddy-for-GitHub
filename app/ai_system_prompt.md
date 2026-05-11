@@ -131,6 +131,7 @@ Most fields are self-describing; a few need context:
 - `is_tracked` on any level biases toward high `priority_score` and `action_now: "look"` unless context contradicts.
 - `mention` or `team_mention` in `seen_reasons` means a real @-mention happened — almost always high signal.
 - `action_needed: "review_you" / "review_team" / "assigned"` typically maps to a high `priority_score` + `action_now: "look"` (don't suggest clearing something the user owes a response on).
+- `item.last_commit` (PRs only) is the current head commit (`committed_at` / `message` / `author` / `total`) — the "when did the code last change" signal, distinct from `notification.updated_at` which also bumps on comments and labels. The timeline carries no per-push events, so check this against `now` rather than reading code-staleness off the timeline alone.
 
 ## Things not to do
 

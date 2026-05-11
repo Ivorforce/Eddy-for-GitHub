@@ -422,6 +422,17 @@ query($owner: String!, $name: String!, $number: Int!) {
         }
       }
       labels(first: 20) { nodes { name color description } }
+      commits(last: 1) {
+        totalCount
+        nodes {
+          commit {
+            abbreviatedOid
+            messageHeadline
+            committedDate
+            author { name user { login } }
+          }
+        }
+      }
       reactionGroups { content reactors { totalCount } }
       comments(last: 100) {
         totalCount
@@ -631,6 +642,25 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         if (f or {}).get("path")
     ]
 
+    # Latest head commit — a cheap "when did the code last change" signal
+    # that's distinct from updatedAt (which also bumps on comments / labels /
+    # review requests). Kept in details_json (not a popped bonus key) so the
+    # AI context builder and the UI can read it without a dedicated column.
+    last_commit = None
+    commits_node = pr.get("commits") or {}
+    commit_nodes = commits_node.get("nodes") or []
+    if commit_nodes:
+        c = (commit_nodes[-1] or {}).get("commit") or {}
+        if c.get("committedDate"):
+            gh_author = c.get("author") or {}
+            last_commit = {
+                "abbrev_oid":   c.get("abbreviatedOid"),
+                "message":      c.get("messageHeadline") or "",
+                "committed_at": c.get("committedDate"),
+                "author":       (gh_author.get("user") or {}).get("login") or gh_author.get("name"),
+                "total":        commits_node.get("totalCount") or 0,
+            }
+
     # State: GraphQL OPEN/CLOSED/MERGED → REST 'open'/'closed'. _type_state
     # checks merged + draft *before* state, so a merged PR ends up correctly
     # classified regardless.
@@ -656,6 +686,7 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "deletions": pr.get("deletions"),
         "changed_files": pr.get("changedFiles"),
         "files": files,
+        "last_commit": last_commit,
         "comments": comment_total,
         "_comment_history": comment_history,
         "_reviews": rest_reviews,
