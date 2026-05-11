@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from flask import Flask, make_response, render_template, request
 
-from . import ai, db, github
+from . import ai, db, ghmd, github
 
 log = logging.getLogger(__name__)
 
@@ -722,7 +722,10 @@ _LIFECYCLE_LABEL = {
 }
 
 
-def _verdict_render_dict(payload: dict) -> dict:
+def _verdict_render_dict(
+    payload: dict, *, cur_repo: str | None = None,
+    tracked_people=frozenset(), notes_people: dict | None = None,
+) -> dict:
     """Display-ready bits of an ai_verdict event's payload, for rendering
     inside the timeline list. Distinct from _ai_verdict_dict, which shapes
     the *cached* verdict for the row pill (and adds stale logic that
@@ -742,8 +745,13 @@ def _verdict_render_dict(payload: dict) -> dict:
                 label, cls = _SIGNAL_LABELS[key]
                 signals.append({"key": key, "label": label, "cls": cls})
 
+    description = (payload.get("description") or "").strip()
     return {
-        "description":    (payload.get("description") or "").strip(),
+        "description":      description,
+        "description_html": ghmd.render(
+            description, cur_repo=cur_repo, interactive=True,
+            tracked_people=tracked_people, people_notes=notes_people,
+        ),
         "priority":       priority_bucket,
         "priority_score": priority_score,
         "signals":        signals,
@@ -948,14 +956,20 @@ def _coalesce_comments(events: list[dict]) -> list[dict]:
     return out
 
 
-def _format_event_for_render(row, now: int, user_login: str | None = None) -> dict:
+def _format_event_for_render(
+    row, now: int, user_login: str | None = None, *,
+    cur_repo: str | None = None,
+    tracked_people=frozenset(), notes_people: dict | None = None,
+) -> dict:
     """Convert one thread_events row into a display-ready dict for the
     popover timeline. Each kind gets an `actor` (display name shown in
     the row gutter) and either a `summary` string (one-liner kinds) or
     full payload fields (ai_verdict / user_chat) for the chat-bubble
     rendering. comment / review events also pick up `author_badge_class`
     so the template can render the same icon styling the Repo column
-    uses (self/member/first-time/generic)."""
+    uses (self/member/first-time/generic). user_chat / ai_verdict bodies
+    are run through ghmd for inline `code` / @mention / #ref rendering —
+    `cur_repo` (the thread's "owner/name") resolves bare #NN refs."""
     try:
         payload = json.loads(row["payload_json"])
     except (ValueError, TypeError):
@@ -1011,10 +1025,16 @@ def _format_event_for_render(row, now: int, user_login: str | None = None) -> di
         out["lifecycle_class"] = cls
     elif kind == "ai_verdict":
         out["actor"] = "AI"
-        out["verdict"] = _verdict_render_dict(payload)
+        out["verdict"] = _verdict_render_dict(
+            payload, cur_repo=cur_repo,
+            tracked_people=tracked_people, notes_people=notes_people,
+        )
     elif kind == "user_chat":
         out["actor"] = "You"
-        # body rendered as-is by the template
+        out["body_html"] = ghmd.render(
+            payload.get("body") or "", cur_repo=cur_repo, interactive=True,
+            tracked_people=tracked_people, people_notes=notes_people,
+        )
     return out
 
 
@@ -1025,7 +1045,10 @@ def _format_event_for_render(row, now: int, user_login: str | None = None) -> di
 _VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat")
 
 
-def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
+def _attach_timeline(
+    d: dict, conn: sqlite3.Connection, *,
+    tracked_people=frozenset(), notes_people: dict | None = None,
+) -> None:
     """Mutate `d` in place: attach the `timeline` list (for the popover) and
     `ai_uptodate` (drives the re-run button's enabled/green state). Called
     only in AI mode — the popover doesn't render in manual mode, so the
@@ -1041,7 +1064,13 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     ).fetchall()
     now = int(time.time())
     user_login = app.config.get("USER_LOGIN")
-    timeline = [_format_event_for_render(r, now, user_login=user_login) for r in rows]
+    timeline = [
+        _format_event_for_render(
+            r, now, user_login=user_login, cur_repo=d.get("repo"),
+            tracked_people=tracked_people, notes_people=notes_people,
+        )
+        for r in rows
+    ]
     timeline = _drop_close_after_merge(timeline)
     timeline = _coalesce_comments(timeline)
     timeline = _coalesce_visits(timeline)
@@ -1064,7 +1093,7 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
 
 def _ai_verdict_dict(
     verdict_json: str | None, at: int | None, model: str | None,
-    details_fetched_at: int | None,
+    details_fetched_at: int | None, cur_repo: str | None = None,
 ) -> dict | None:
     """Parse the cached verdict + derive UI flags. None if no pending verdict.
     Stale = the row's details were re-enriched after the verdict was made,
@@ -1115,6 +1144,10 @@ def _ai_verdict_dict(
         "priority_score":  priority_score,
         "priority":        priority_bucket,  # low/normal/high — drives CSS
         "description":     description,
+        # Non-interactive: the AI button's hover tooltip can't host clickable
+        # links (it dismisses on mouse-out), so refs/mentions there render as
+        # styled spans, not anchors. `code` still renders.
+        "description_html": ghmd.render(description, cur_repo=cur_repo, interactive=False),
         "signals":         signals,
         "model":           model or "",
         "at":              at,
@@ -1172,6 +1205,8 @@ def _row_to_dict(
     d["labels_extra"] = all_labels[3:]
     d["type_label"] = TYPE_LABELS.get(d["type"], d["type"])
     d["type_label_long"] = TYPE_LABELS_LONG.get(d["type"], d["type"])
+    # Issue/PR titles render `code` spans on github.com but nothing else.
+    d["title_html"] = ghmd.render_title(d["title"])
     # Discussion category (Q&A, Ideas, Show and tell, …) renders as a
     # separate pill in the meta row alongside labels. GraphQL exposes no
     # color for categories, so the pill stays neutral.
@@ -1211,6 +1246,7 @@ def _row_to_dict(
     # Cached AI verdict (None if Ask AI hasn't been run on this row).
     d["ai_verdict"] = _ai_verdict_dict(
         ai_verdict_json, ai_verdict_at, ai_verdict_model, details_fetched_at,
+        cur_repo=d["repo"],
     )
 
     return d
@@ -1236,7 +1272,7 @@ def _load_notifications():
         # in AI mode — skip the per-row thread_events query in manual mode.
         if _get_triage_mode() == "ai":
             for d in out:
-                _attach_timeline(d, conn)
+                _attach_timeline(d, conn, tracked_people=t_p, notes_people=n_p)
         return out
     finally:
         conn.close()
@@ -1416,7 +1452,7 @@ def _load_one(thread_id: str) -> dict | None:
         if not row:
             return None
         d = _row_to_dict(row, t_p, t_r, t_o, n_p, n_r, n_o)
-        _attach_timeline(d, conn)
+        _attach_timeline(d, conn, tracked_people=t_p, notes_people=n_p)
         return d
     finally:
         conn.close()
@@ -1962,14 +1998,21 @@ def ai_chat(thread_id: str):
             source="user",
             payload={"body": body},
         )
+        repo_row = conn.execute(
+            "SELECT repo FROM notifications WHERE id = ?", (thread_id,)
+        ).fetchone()
     finally:
         conn.close()
     # Render via the same partial the row template uses, so styling and
     # markup stay in one place. user_login isn't needed for user_chat
-    # events (no author badge applies; the actor is always "You").
+    # events (no author badge applies; the actor is always "You"). cur_repo
+    # + tracked-people context feed ghmd's inline #ref / @mention rendering.
     ev = _format_event_for_render(
         {"ts": ts, "kind": "user_chat", "source": "user",
          "payload_json": json.dumps({"body": body})},
         ts,
+        cur_repo=(repo_row["repo"] if repo_row else None),
+        tracked_people=_tracked_people(),
+        notes_people=_entity_notes("people", "login"),
     )
     return render_template("_timeline_event.html", ev=ev, thread_id=thread_id)

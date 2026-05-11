@@ -1208,6 +1208,25 @@
       transition: opacity 0.08s ease-out;
     }
     .custom-tooltip.shown { opacity: 1; }
+    .custom-tooltip .mention { color: #eaa54a; }
+
+    /* Inline GitHub-markdown bits (see app/ghmd.py): `code` spans in titles /
+       chat bubbles / the AI tooltip, plus #ref and @mention links. */
+    .item-title-text code,
+    .timeline-bubble-body code,
+    .custom-tooltip code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.88em;
+      color: #f0f0f2;  /* a touch brighter than body text — the grey pill bg dims it otherwise */
+      background: rgba(127, 127, 127, 0.18);
+      padding: 0.1em 0.3em;
+      border-radius: 3px;
+    }
+    .timeline-bubble-body a.gh-ref,
+    .timeline-bubble-body a.mention { text-decoration: none; }
+    .timeline-bubble-body a.gh-ref:hover,
+    .timeline-bubble-body a.mention:hover { text-decoration: underline; }
+    /* a.mention already inherits .entity-trigger / .is-tracked colouring. */
   </style>
   <script>
     // Global status indicator. HTMX request lifecycle drives loading/idle;
@@ -1344,6 +1363,11 @@
     // suppress the slow native tooltip), or an SVG with a <title> child
     // (also swapped, since SVG <title> renders a native tooltip too).
     const resolveTooltipTrigger = (eventTarget) => {
+      // data-tip-html: a small pre-rendered HTML fragment (inline `code`,
+      // shortened refs, @mentions). Like data-tip but the tooltip gets
+      // innerHTML, not textContent. No native tooltip to suppress.
+      const htmlTipped = eventTarget.closest("[data-tip-html]");
+      if (htmlTipped) return { target: htmlTipped, html: htmlTipped.getAttribute("data-tip-html"), text: null, svgTitleNode: null, suppressNative: false };
       const tipped = eventTarget.closest("[data-tip]");
       if (tipped) return { target: tipped, text: tipped.getAttribute("data-tip"), svgTitleNode: null, suppressNative: false };
       const titled = eventTarget.closest("[title]");
@@ -1360,13 +1384,14 @@
       const trig = resolveTooltipTrigger(e.target);
       if (!trig || trig.target === tooltipTarget) return;
       hideTooltip();
-      const { target, text, svgTitleNode, suppressNative } = trig;
-      if (!text) return;
+      const { target, text, html, svgTitleNode, suppressNative } = trig;
+      if (!text && !html) return;
       // When the tooltip text just duplicates the element's visible text,
       // it's a truncation fallback — only useful when the text is actually
       // clipped. For [title] sources we still stash so the browser doesn't
       // show its native tooltip; hideTooltip restores on mouseleave.
-      const suppressDuplicate = !svgTitleNode
+      // (data-tip-html is rich content, never a duplicate-of-visible-text.)
+      const suppressDuplicate = !html && !svgTitleNode
         && text.trim() === target.textContent.trim()
         && !isTextTruncated(target);
       tooltipTarget = target;
@@ -1380,7 +1405,7 @@
       if (suppressDuplicate) return;
       tooltipTimer = setTimeout(() => {
         const tip = ensureTooltip();
-        tip.textContent = text;
+        if (html) tip.innerHTML = html; else tip.textContent = text;
         // Park offscreen first so we can measure without painting at a
         // wrong location. Then position correctly and reveal via .shown.
         tip.style.left = "-10000px";

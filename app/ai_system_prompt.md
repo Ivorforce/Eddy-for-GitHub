@@ -82,6 +82,7 @@ Rules:
 - Don't address the user ("you", "your"). Don't paraphrase preferences. If the description can't stand without referring to the user, write `"Not relevant."` and stop.
 - Don't repeat the verdict ("noise", "no action needed") — `action_now` already conveys it.
 - Pick one reason, not three. If two facts come to mind, take the more discriminating.
+- You can use `` `code` ``, `@mention`, and `#123` (or `repo#123` / `owner/repo#123`) syntax — it renders the way it does on github.com. Use it where it reads naturally; don't force it.
 
 Examples:
 

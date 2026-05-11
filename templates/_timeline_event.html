@@ -23,7 +23,7 @@
         <span class="ai-verdict-priority-tag" style="--imp: {{ '%.3f' % ev.verdict.priority_score }}">{{ ev.verdict.priority }} · {{ '%.2f' % ev.verdict.priority_score }}</span>
         <span class="timeline-age">{{ ev.age_text }}</span>
       </div>
-      {% if ev.verdict.description %}<div class="timeline-bubble-body">{{ ev.verdict.description }}</div>{% endif %}
+      {% if ev.verdict.description %}<div class="timeline-bubble-body">{{ ev.verdict.description_html }}</div>{% endif %}
       {% if ev.verdict.signals %}
       <div class="timeline-signals">
         {% for s in ev.verdict.signals %}
@@ -39,7 +39,7 @@
         <span class="timeline-actor">You</span>
         <span class="timeline-age">{{ ev.age_text }}</span>
       </div>
-      <div class="timeline-bubble-body">{{ ev.payload.body }}</div>
+      <div class="timeline-bubble-body">{{ ev.body_html }}</div>
     </div>
   {% elif ev.kind == 'comment_group' %}
     <div class="timeline-line">

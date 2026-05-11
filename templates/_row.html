@@ -114,9 +114,9 @@
       <a class="item-title{% if n.is_tracked %} is-tracked{% endif %}"
          href="{{ click_url }}" target="_blank" rel="noopener"
          title="{{ n.title }}"
-         onclick="htmx.ajax('POST', '/visit/{{ n.id }}', {target: this.closest('tr'), swap: 'outerHTML', source: '#filters'})"><span class="item-title-text">{{ n.title }}</span></a>
+         onclick="htmx.ajax('POST', '/visit/{{ n.id }}', {target: this.closest('tr'), swap: 'outerHTML', source: '#filters'})"><span class="item-title-text">{{ n.title_html }}</span></a>
     {% else %}
-      <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}" title="{{ n.title }}"><span class="item-title-text">{{ n.title }}</span></span>
+      <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}" title="{{ n.title }}"><span class="item-title-text">{{ n.title_html }}</span></span>
     {% endif %}
     <div class="meta-row">
       <span class="type-pill state-{{ n.type_state }}"
@@ -200,7 +200,7 @@
         <button type="button" class="ai-verdict-main"
                 popovertarget="pop-ai-{{ n.id }}"
                 style="anchor-name: --pop-ai-{{ n.id }}"
-                {% if v %}title="{{ v.description }}"{% endif %}><svg class="ai-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>{% if v %}{{ v.pill_text }}{% else %}unassessed{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
+                {% if v and v.description %}data-tip-html="{{ v.description_html|forceescape }}" aria-label="{{ v.description }}"{% endif %}><svg class="ai-pill-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>{% if v %}{{ v.pill_text }}{% else %}unassessed{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
                 {% if n.ai_uptodate %}
                 disabled
                 aria-disabled="true"
