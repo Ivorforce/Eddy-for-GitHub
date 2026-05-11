@@ -780,6 +780,26 @@ def _coalesce_visits(events: list[dict]) -> list[dict]:
     return out
 
 
+def _drop_close_after_merge(events: list[dict]) -> list[dict]:
+    """A merged PR emits both a `merged` and a `closed` lifecycle event —
+    GitHub closes the PR as part of the merge. The `closed` line carries
+    no new information then (merge always closes), so drop it when it
+    immediately follows the `merged` line. Stand-alone `closed` events —
+    PRs closed without merging, issues closed — are untouched."""
+    out: list[dict] = []
+    for ev in events:
+        if (
+            ev.get("kind") == "lifecycle"
+            and (ev.get("payload") or {}).get("action") == "closed"
+            and out
+            and out[-1].get("kind") == "lifecycle"
+            and (out[-1].get("payload") or {}).get("action") == "merged"
+        ):
+            continue
+        out.append(ev)
+    return out
+
+
 # Dismissal-style user actions: row-state changes via the Ignore / Done / Mute
 # buttons (or their reverts). Streaks of these with no other event in between
 # represent user oscillation and collapse to just the latest — `visited` /
@@ -1021,6 +1041,7 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     now = int(time.time())
     user_login = app.config.get("USER_LOGIN")
     timeline = [_format_event_for_render(r, now, user_login=user_login) for r in rows]
+    timeline = _drop_close_after_merge(timeline)
     timeline = _coalesce_comments(timeline)
     timeline = _coalesce_visits(timeline)
     timeline = _coalesce_user_actions(timeline)
