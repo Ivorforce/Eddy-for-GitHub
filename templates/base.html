@@ -850,35 +850,6 @@
       text-shadow: 0 0 2px var(--pico-background-color);
     }
 
-    /* Mode toggle in the Relevance column header. Single brain-icon
-       button: muted in manual mode, purple-tinted in AI mode. Click
-       posts to /settings/triage_mode (see _table.html); the response
-       is the re-rendered table. */
-    .col-header-with-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-    }
-    .mode-toggle-btn {
-      background: none;
-      border: none;
-      padding: 0.15rem 0.2rem;
-      margin: 0;
-      cursor: pointer;
-      color: var(--pico-muted-color);
-      line-height: 1;
-      border-radius: 0.25rem;
-      width: auto;
-    }
-    .mode-toggle-btn svg { width: 0.95rem; height: 0.95rem; vertical-align: -0.18em; }
-    .mode-toggle-btn:hover { color: var(--pico-color); background: rgba(140, 149, 159, 0.18); }
-    .mode-toggle-btn.active { color: #8957e5; }
-    .mode-toggle-btn.active:hover { color: #8957e5; background: rgba(137, 87, 229, 0.14); }
-    .mode-toggle-btn:focus-visible {
-      outline: 2px solid #8957e5;
-      outline-offset: 1px;
-    }
-
     /* AI verdict detail popover — extends action-popover with verdict-
        specific blocks (summary, rationale, action list, buttons).
        white-space override is needed because the popover descends from

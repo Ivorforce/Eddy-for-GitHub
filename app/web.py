@@ -1719,8 +1719,9 @@ def set_quiet_bystanders():
 @app.post("/settings/triage_mode")
 def set_triage_mode():
     """Persist the Relevance-column mode (manual vs ai) and re-render the
-    table so the brain button + per-row Relevance cells reflect the change.
-    Body field 'mode' is optional — when omitted, flip the current value."""
+    table so the per-row Relevance cells reflect the change. The toggle row
+    in the toolbar's Options menu flips its own checkmark client-side. Body
+    field 'mode' is optional — when omitted, flip the current value."""
     requested = (request.values.get("mode") or "").strip()
     new_mode = requested if requested in ("manual", "ai") else (
         "manual" if _get_triage_mode() == "ai" else "ai"

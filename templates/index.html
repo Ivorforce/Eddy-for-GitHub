@@ -17,6 +17,18 @@
   <details class="dropdown options-menu">
     <summary role="button" class="secondary outline">Options</summary>
     <ul>
+      {# triage_mode swap re-renders the table (Relevance column content
+         differs between modes); the row also flips its own checkmark on
+         success. Endpoint with no `mode` param toggles the current value. #}
+      <li>
+        <a href="#" class="options-toggle{% if triage_mode == 'ai' %} on{% endif %}"
+           hx-post="/settings/triage_mode" hx-target="#notifications-table"
+           hx-include="#filters"
+           hx-on::after-request="if (event.detail.successful) this.classList.toggle('on')"
+           title="AI triage mode: the Relevance column shows the AI's per-thread verdict (look / ignore / mute / archive) instead of the rule-based activity summary.">
+          <span class="check" aria-hidden="true">✓</span> AI triage mode
+        </a>
+      </li>
       <li>
         <a href="#" class="options-toggle{% if quiet_bystanders %} on{% endif %}"
            hx-post="/settings/quiet_bystanders" hx-swap="none"
