@@ -1319,11 +1319,11 @@
       padding: 0.1em 0.3em;
       border-radius: 3px;
     }
-    .timeline-bubble-body a.gh-ref,
-    .timeline-bubble-body a.mention { text-decoration: none; }
-    .timeline-bubble-body a.gh-ref:hover,
-    .timeline-bubble-body a.mention:hover { text-decoration: underline; }
-    /* a.mention already inherits .entity-trigger / .is-tracked colouring. */
+    .timeline-bubble-body a.gh-ref { text-decoration: none; }
+    .timeline-bubble-body a.gh-ref:hover { text-decoration: underline; }
+    /* @mentions: GitHub-style — always underlined, a touch bold.
+       a.mention also inherits .entity-trigger / .is-tracked colouring. */
+    .mention { font-weight: 500; text-decoration: underline; }
   </style>
   <script>
     // Global status indicator. HTMX request lifecycle drives loading/idle;
