@@ -25,6 +25,7 @@ When uncertain: prefer `look` over `ignore`, `ignore` over `archive`. Reach for 
 - **`snooze_days`** — only with `action_now: "snooze"`: your estimate of how many days (1–90) until the thread is worth another look. Omit otherwise.
 - **`set_tracked`** — `track` (rare; only when preferences say to or the thread is unusually important), `untrack` (rare), `leave` (almost always).
 - **`priority_score`** — 0.0–1.0. See **Priority** below.
+- **`subscription_changes`** — list of forward-looking `mute_<kind>` / `unmute_<kind>` tweaks (often empty). See **Subscription tweaks** below. Only present in the schema when the thread can produce filterable activity.
 - **`description`** — see **Brevity** below.
 
 ## Priority
@@ -41,6 +42,14 @@ Six named bands give you and the user a shared vocabulary; pick a value inside t
 - **0.85–1.0** — `urgent`: drop other work. Time-sensitive direct ask, security alert, regression in a tracked area.
 
 The user can set priority by hand (a `priority_change` timeline event — see **Timeline**). Respect it, weighted by *when* it was made: the most recent thing on the thread → near-authoritative (like a terse `user_chat`); GitHub activity since → grounds to revisit (they judged an older state). A change away from your last `priority_score` is calibration feedback — move toward their level unless newer evidence pulls back.
+
+## Subscription tweaks
+
+`subscription_changes` is a list of `mute_<kind>` / `unmute_<kind>` tokens — forward-looking adjustments to which activity kinds notify the user *on this thread*, without unsubscribing. **The default is an empty list.** It's a separate axis from `action_now`: `action_now` handles *this* delivery, `subscription_changes` quiets (or resumes) *future* ones of a given kind. They pair naturally — e.g. `action_now: "ignore"` + `["mute_code"]` = "mark this read, and stop pinging me about pushes here going forward".
+
+Low-stakes: a mute here doesn't hide the thread or unsubscribe — it just stops one activity kind from re-surfacing it. So it's cheap to suggest *when there's a clear shape to it*: the user is plainly waiting on one kind of event (a review, a merge, comments) and the others are just noise on this particular thread — "waiting on a teammate's review of this PR, the rebase pushes are noise" → `["mute_code"]`. Don't reach for it speculatively; most threads warrant `[]`. And don't suggest the obvious-to-everyone (`mute_code` on every PR) — only when *this* thread's situation makes it apt.
+
+The token enum reflects the thread's current state: a kind that's already muted shows as `unmute_<kind>` (suggest it when that kind has become relevant again — e.g. the user *now* needs to see reviews on a thread where they'd muted them), a kind that isn't shows as `mute_<kind>`. `notification.muted_kinds` lists what's currently muted. The user applies these themselves (nothing auto-applies); a later judgment sees the resulting `muted_kinds` plus your prior verdict, so you can tell whether they took the suggestion and recalibrate — drop a `mute_X` you keep suggesting that they keep not taking.
 
 ## Brevity
 
@@ -103,6 +112,7 @@ The user message includes `invocation_mode`, which tells you why this judgment i
 Most fields are self-describing; a few need context:
 
 - `note_user` on author / repo / org is *deliberate user-authored guidance* and overrides surface-level signals. A note of "Renovate bot, mostly noise" against a routine Renovate PR is strong evidence for `mark_read` or `mute`. (Per-thread guidance comes via `user_chat` timeline events, not a note.)
+- `notification.muted_kinds` is the set of activity kinds the user has already silenced on this thread (see **Subscription tweaks**). Don't re-suggest a `mute_<kind>` for one that's already there; if it's listed, the only relevant move for that kind is `unmute_<kind>` (and only if it's become relevant again).
 - `is_tracked` on any level biases toward high `priority_score` and `action_now: "look"` unless context contradicts.
 - `mention` or `team_mention` in `seen_reasons` means a real @-mention happened — almost always high signal.
 - `action_needed: "review_you" / "review_team" / "assigned"` typically maps to a high `priority_score` + `action_now: "look"` (don't suggest clearing something the user owes a response on).
@@ -111,5 +121,5 @@ Most fields are self-describing; a few need context:
 ## Things not to do
 
 - Do not output text outside the `judge_thread` tool call.
-- Do not propose actions outside `action_now` / `set_tracked`. You can't edit notes on people, repos, or orgs, and you can't fetch additional data — judge with what's in the input.
+- Do not propose actions outside `action_now` / `set_tracked` / `subscription_changes`. You can't edit notes on people, repos, or orgs, and you can't fetch additional data — judge with what's in the input.
 - Do not be hedgy. "Probably noise but maybe not" is unhelpful. If you genuinely can't tell, that's a `look` with a one-line description saying so.

@@ -336,9 +336,15 @@
     {% set is_ignored_active = (not n.unread) and (not n.ignored) and (n.action not in ['done', 'snoozed']) %}
     {% set is_done_active    = (n.action == 'done') and (not n.ignored) %}
     {% set is_muted_active   = (n.action == 'done') and n.ignored %}
+    {# AI mode: a purple ring marks the action button matching the verdict's
+       action_now / set_tracked, but only while it isn't already in effect (so
+       it always reads "do this", never "undo this"). action_pending /
+       track_pending are computed in _row_to_dict; 'look' has no button. #}
+    {% set ai_act   = n.ai_verdict.action_pending if (triage_mode == 'ai' and n.ai_verdict) else None %}
+    {% set ai_track = n.ai_verdict.track_pending  if (triage_mode == 'ai' and n.ai_verdict) else None %}
     <div class="action-group">
       <button type="button"
-              class="action-segment seg-ignore{% if is_ignored_active %} active{% endif %}"
+              class="action-segment seg-ignore{% if is_ignored_active %} active{% endif %}{% if ai_act == 'ignore' %} ai-suggests{% endif %}"
               hx-post="/set/{{ n.id }}/ignored"
               hx-target="closest tr"
               hx-swap="outerHTML"
@@ -346,7 +352,7 @@
               aria-label="Ignore"
               title="Ignore — mark read, keep visible. Click again to mark unread (local only — GitHub API has no unread)."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></button>
       <button type="button"
-              class="action-segment seg-done{% if is_done_active %} active{% endif %}"
+              class="action-segment seg-done{% if is_done_active %} active{% endif %}{% if ai_act == 'archive' %} ai-suggests{% endif %}"
               hx-post="/set/{{ n.id }}/done"
               hx-target="closest tr"
               hx-swap="outerHTML"
@@ -354,7 +360,7 @@
               aria-label="Done"
               title="Done — archive on GitHub. Hides from view; new activity resurfaces it. Click again (with Show archived on) to revert locally."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/></svg></button>
       <button type="button"
-              class="action-segment seg-mute{% if is_muted_active %} active{% endif %}"
+              class="action-segment seg-mute{% if is_muted_active %} active{% endif %}{% if ai_act == 'mute' %} ai-suggests{% endif %}"
               hx-post="/set/{{ n.id }}/muted"
               hx-target="closest tr"
               hx-swap="outerHTML"
@@ -363,25 +369,38 @@
               title="Mute — archive AND unsubscribe. Won't resurface from new activity. Click again (with Show archived on) to resubscribe and revert."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
       {# ▾ — per-kind mute: silence chosen activity types on this thread without
          unsubscribing. A re-delivery that's all-muted activity gets absorbed
-         (re-applies prior state, keeps the sort slot). Tinted when any kind is
-         muted — distinct from the red full-mute fill on the segment itself.
-         Only shown when the type can actually produce filterable activity. #}
+         (re-applies prior state, keeps the sort slot). Amber `has-muted` =
+         the user has muted something; purple `ai-suggests` = the AI has an
+         unapplied subscription suggestion here (clears once it's applied — so
+         the purple never reads as an ambiguous "toggle this"). AI cues only in
+         AI mode. Caret only shown when the type produces filterable activity. #}
+      {% set sub_sug = triage_mode == 'ai' and n.ai_verdict and n.ai_verdict.has_subscription_suggestion %}
+      {% set sub_pending = sub_sug and n.ai_verdict.subscription_pending %}
       {% if n.mute_kind_options %}
       <button type="button" id="mk-caret-{{ n.id }}"
-              class="action-segment seg-mute-caret{% if n.muted_kinds %} has-muted{% endif %}"
+              class="action-segment seg-mute-caret{% if n.muted_kinds %} has-muted{% endif %}{% if sub_pending %} ai-suggests{% endif %}"
               popovertarget="pop-mutekinds-{{ n.id }}"
               style="anchor-name: --pop-mutekinds-{{ n.id }}"
               aria-label="Mute activity kinds"
-              title="{% if n.muted_kinds %}Muting {{ n.muted_kinds | join(', ') }} on this thread{% else %}Mute specific activity kinds on this thread{% endif %}">▾</button>
+              title="{% if sub_pending %}AI suggests: {{ n.ai_verdict.subscription_summary }}{% elif n.muted_kinds %}Muting {{ n.muted_kinds | join(', ') }} on this thread{% else %}Mute specific activity kinds on this thread{% endif %}">▾</button>
       {% endif %}
     </div>
     {% if n.mute_kind_options %}
     <div class="snooze-pop mutekind-pop" popover id="pop-mutekinds-{{ n.id }}"
          style="position-anchor: --pop-mutekinds-{{ n.id }}">
       <div class="mutekind-title">Mute updates</div>
+      {% if sub_sug %}
+      <button type="button"
+              class="mutekind-apply{% if not n.ai_verdict.subscription_pending %} done{% endif %}"
+              hx-post="/ai/{{ n.id }}/apply-mute-suggestion"
+              hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters"
+              {% if not n.ai_verdict.subscription_pending %}disabled{% endif %}
+              title="{% if n.ai_verdict.subscription_pending %}Apply the AI's suggestion{% else %}AI's suggestion — applied{% endif %}">✦ {{ n.ai_verdict.subscription_summary }}</button>
+      {% endif %}
       {% for key, label in n.mute_kind_options %}
       <button type="button" name="kind" value="{{ key }}"
-              class="mutekind-opt{% if key in n.muted_kinds %} on{% endif %}"
+              class="mutekind-opt{% if key in n.muted_kinds %} on{% endif %}{% if sub_sug and key in n.ai_verdict.pending_mute %} ai-mute{% endif %}{% if sub_sug and key in n.ai_verdict.pending_unmute %} ai-unmute{% endif %}"
+              {% if sub_sug and key in n.ai_verdict.mute_suggested %}data-ai-suggest="mute"{% elif sub_sug and key in n.ai_verdict.unmute_suggested %}data-ai-suggest="unmute"{% endif %}
               hx-post="/set/{{ n.id }}/mute-kinds" hx-swap="none"
               hx-on::after-request="if (event.detail.successful) muteKindToggled(this)"><span class="mk-lbl">{{ label }}</span></button>
       {% endfor %}
@@ -392,7 +411,7 @@
          a toggle (filled tint when on), unlike Snooze which is a one-shot
          action that opens a duration menu. #}
       <button type="button"
-              class="row2-btn track-btn{% if n.is_tracked %} active{% endif %}"
+              class="row2-btn track-btn{% if n.is_tracked %} active{% endif %}{% if ai_track %} ai-suggests{% endif %}"
               hx-post="/toggle/{{ n.id }}/track"
               hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters"
               aria-label="{{ 'Untrack' if n.is_tracked else 'Track' }}"
@@ -408,7 +427,7 @@
       {# Native popover (no Pico <details> styling to fight) — anchored to the
          trigger like the AI-pill popover. Clicking a duration posts and the
          whole <tr> (popover included) is swapped away. #}
-      <button type="button" class="row2-btn snooze-btn"
+      <button type="button" class="row2-btn snooze-btn{% if ai_act == 'snooze' %} ai-suggests{% endif %}"
               popovertarget="pop-snooze-{{ n.id }}"
               style="anchor-name: --pop-snooze-{{ n.id }}"
               aria-label="Snooze" title="Snooze — hide until N days pass (or new activity, whichever first)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/></svg><span class="disclosure" aria-hidden="true">▾</span></button>

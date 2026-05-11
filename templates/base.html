@@ -542,6 +542,21 @@
       background: rgba(191, 135, 0, 0.18);
       color: #d29922;   /* same amber as the note / partial-state accents */
     }
+    /* Purple dotted inset ring — the AI *suggests* this action / subscription
+       change and the user hasn't done it yet. Dashed (not solid) so it reads
+       as a hint, not a state. Goes on whichever Actions-column control matches
+       the verdict (Ignore / Done / Mute / Snooze / Track / the ▾ caret) and
+       composes with the control's own state styling (e.g. amber has-muted +
+       ring). Cleared once it's in effect, so it always reads "act on this",
+       never "undo this" or "this is special". outline (not box-shadow) to get
+       the dotted style; negative offset tucks it inside the button edge so
+       overflow:hidden on .action-group / neighbouring segment borders don't
+       eat it. */
+    td.actions .action-segment.ai-suggests,
+    td.actions .row2-btn.ai-suggests {
+      outline: 1.5px dashed rgba(137, 87, 229, 0.85);
+      outline-offset: -2px;
+    }
     /* Inline ▾ after an icon — signals "opens a menu" on buttons that aren't
        part of a segmented control (Snooze). Same glyph as the Mute caret. */
     td.actions .row2-btn .disclosure {
@@ -571,6 +586,33 @@
        .mk-lbl so the strike line doesn't run through it. */
     .mutekind-pop .mutekind-opt.on::before { content: "✕"; }
     .mutekind-pop .mutekind-opt.on .mk-lbl { text-decoration: line-through; }
+    /* Purple dashed ring — this option still mismatches the AI's suggestion
+       (a suggested mute not yet applied, or a suggested unmute that still is).
+       Dashed = hint, not state; goes away on click once state matches. AI mode
+       only. */
+    .mutekind-pop .mutekind-opt.ai-mute,
+    .mutekind-pop .mutekind-opt.ai-unmute {
+      outline: 1.5px dashed rgba(137, 87, 229, 0.7);
+      outline-offset: -2px;
+    }
+    /* ✦ apply-the-AI's-subscription-suggestion row (inherits .snooze-pop
+       button layout). Purple while there's something to apply; greyed once
+       it's done (the JS flips .done + disabled in lockstep with the options). */
+    .mutekind-pop .mutekind-apply {
+      color: #8957e5;
+      font-weight: 600;
+      border-bottom: 1px solid var(--pico-muted-border-color);
+      margin-bottom: 0.1rem;
+      padding-bottom: 0.25rem;
+    }
+    .mutekind-pop .mutekind-apply:hover { background: rgba(137, 87, 229, 0.14); }
+    .mutekind-pop .mutekind-apply.done,
+    .mutekind-pop .mutekind-apply:disabled {
+      color: var(--pico-muted-color);
+      font-weight: normal;
+      cursor: default;
+    }
+    .mutekind-pop .mutekind-apply:disabled:hover { background: none; }
 
     /* AI verdict pill. Lives in the Relevance column when triage mode =
        AI. Full-width strip stacked directly above the priority picker so
@@ -1839,17 +1881,30 @@
     };
 
     // Per-kind mute toggle. The POST is hx-swap="none" (the row's rendering
-    // doesn't depend on muted_kinds beyond the ▾ caret tint), so flip the
-    // clicked option and re-derive the caret marker client-side — keeps the
-    // menu open so several kinds can be toggled in one go.
+    // depends on muted_kinds only via the ▾ caret tint and the in-menu cues),
+    // so reconcile those client-side and keep the menu open for several toggles.
     window.muteKindToggled = function (btn) {
       btn.classList.toggle("on");
+      const on = btn.classList.contains("on");
+      // This option's purple cue means "still mismatches the AI's suggestion":
+      // a suggested mute that isn't applied, or a suggested unmute that is.
+      const want = btn.dataset.aiSuggest;  // "mute" | "unmute" | undefined
+      if (want) {
+        btn.classList.toggle("ai-mute",   want === "mute"   && !on);
+        btn.classList.toggle("ai-unmute", want === "unmute" &&  on);
+      }
       const pop = btn.closest(".mutekind-pop");
       if (!pop) return;
-      const anyOn = !!pop.querySelector(".mutekind-opt.on");
       const id = pop.id.replace(/^pop-mutekinds-/, "");
       const caret = document.getElementById("mk-caret-" + id);
-      if (caret) caret.classList.toggle("has-muted", anyOn);
+      if (caret) caret.classList.toggle("has-muted", !!pop.querySelector(".mutekind-opt.on"));
+      const anyPending = !!pop.querySelector(".mutekind-opt.ai-mute, .mutekind-opt.ai-unmute");
+      if (caret) caret.classList.toggle("ai-suggests", anyPending);
+      const apply = pop.querySelector(".mutekind-apply");
+      if (apply) {
+        apply.disabled = !anyPending;
+        apply.classList.toggle("done", !anyPending);
+      }
     };
 
     // Preset tab active-state detection. Normalize both the live URL and

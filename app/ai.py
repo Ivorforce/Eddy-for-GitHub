@@ -21,6 +21,7 @@ automatically once the prefix qualifies. See ai_calls.cache_read_tokens.
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -31,7 +32,7 @@ from pathlib import Path
 
 import anthropic
 
-from . import db
+from . import db, github
 
 log = logging.getLogger(__name__)
 
@@ -122,6 +123,38 @@ TOOL_DEF: dict = {
         "required": ["action_now", "set_tracked", "priority_score", "description"],
     },
 }
+
+
+def _build_tool_def(notif_type: str, muted_kinds) -> dict:
+    """judge_thread, with the subscription_changes enum tailored to this
+    thread: for each kind that fires on this notification type, offer
+    `mute_<kind>` if it's currently un-muted on the thread, else
+    `unmute_<kind>` — so the model can't emit a no-op. Omitted entirely for
+    types that produce no filterable activity (Release, CheckSuite, …)."""
+    applicable = github.MUTE_KINDS_BY_TYPE.get(notif_type, ())
+    if not applicable:
+        return TOOL_DEF
+    muted = set(muted_kinds or [])
+    tokens = [
+        (f"unmute_{k}" if k in muted else f"mute_{k}")
+        for k in github.MUTE_KINDS if k in applicable
+    ]
+    schema = copy.deepcopy(TOOL_DEF)
+    schema["input_schema"]["properties"]["subscription_changes"] = {
+        "type": "array",
+        "items": {"type": "string", "enum": tokens},
+        "description": (
+            "Forward-looking subscription tweaks for this thread — quiet (or resume) "
+            "individual activity kinds without unsubscribing. Empty list = no change, "
+            "which is the common case: reserve this for a clear 'the user is waiting on "
+            "X here, Y is just noise' situation. The tokens reflect what's currently "
+            "(un)muted on this thread; `mute_<kind>` stops those notifications going "
+            "forward, `unmute_<kind>` resumes them. Composes with action_now (e.g. "
+            "'ignore' this delivery AND mute_code so future pushes don't keep returning). "
+            "See system prompt §Subscription tweaks."
+        ),
+    }
+    return schema
 
 
 # ---- Prompt assembly ----------------------------------------------------
@@ -276,7 +309,7 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
         """
         SELECT id, repo, type, title, reason, html_url, link_url,
                updated_at, last_read_at, unread, ignored, action,
-               is_tracked,
+               is_tracked, muted_kinds,
                details_json, seen_reasons,
                baseline_comments, baseline_review_state, pr_review_state,
                unique_commenters, unique_reviewers, pr_reactions_json
@@ -379,6 +412,14 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
         if v.get("is_tracked") or v.get("note_user")
     }
 
+    muted_kinds: list[str] = []
+    if row["muted_kinds"]:
+        try:
+            stored = set(json.loads(row["muted_kinds"]))
+            muted_kinds = [k for k in github.MUTE_KINDS if k in stored]
+        except (ValueError, TypeError):
+            pass
+
     notification = {
         "id":            row["id"],
         "repo":          repo,
@@ -392,6 +433,10 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
         "ignored":       bool(row["ignored"]),
         "action":        row["action"],
         "is_tracked":    bool(row["is_tracked"]),
+        # Kinds the user has already silenced on this thread — lets the AI
+        # avoid re-suggesting an existing mute, or propose unmuting one that's
+        # become relevant. Omitted when empty.
+        "muted_kinds":   muted_kinds or None,
     }
     notification = {k: v for k, v in notification.items() if v not in (None, "", False)}
 
@@ -568,6 +613,12 @@ def judge(
         raise AIError(f"Thread {thread_id} not found")
     ctx["invocation_mode"] = invocation_mode
 
+    # Tool schema is built per-thread so subscription_changes only offers the
+    # kinds that fire on this type, in the right (mute vs unmute) direction.
+    tool_def = _build_tool_def(
+        ctx["notification"]["type"], ctx["notification"].get("muted_kinds")
+    )
+
     system_prompt = _read_system_prompt()
     identity = _identity_block(user_login, user_teams)
     if identity:
@@ -593,7 +644,7 @@ def judge(
         # to audit individual calls.
         "system": [system_prompt, prefs],
         "user_message": user_msg,
-        "tools": [TOOL_DEF],
+        "tools": [tool_def],
     }
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -617,7 +668,7 @@ def judge(
                 {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}},
                 {"type": "text", "text": prefs, "cache_control": {"type": "ephemeral"}},
             ],
-            tools=[TOOL_DEF],
+            tools=[tool_def],
             messages=[{"role": "user", "content": user_msg}],
         )
     except anthropic.APIError as e:

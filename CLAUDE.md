@@ -37,14 +37,18 @@ Verdicts are advisory only: the pill / priority color shape *display*, but no ro
 
 ```python
 judge_thread({
-    action_now:       "look" | "ignore" | "mute" | "archive",
-    set_tracked:      "track" | "untrack" | "leave",
-    priority_score:   float ∈ [0, 1],   # bucketed to low/normal/high for color
-    description:      str,               # what the row doesn't already show
+    action_now:           "look" | "ignore" | "mute" | "archive" | "snooze",
+    snooze_days:          int,                  # only with action_now == "snooze"
+    set_tracked:          "track" | "untrack" | "leave",
+    priority_score:       float ∈ [0, 1],       # bucketed to low/normal/high for color
+    subscription_changes: ["mute_<kind>" | "unmute_<kind>", ...],  # usually []; per-thread mute_kinds tweaks
+    description:          str,                  # what the row doesn't already show
 })
 ```
 
-`action_now` is a suggestion for what the user should do — `look` (open the link), `ignore` (mark read without engaging), `mute` (silence further updates), `archive` (nothing left to do). Nothing auto-applies. The verdict cache (`notifications.ai_verdict_*`) is never auto-cleared — Re-ask overwrites it (and `_save_verdict` keeps the prior verdict in `thread_events` for the next judgment to see).
+`action_now` is a suggestion for what the user should do — `look` (open the link), `ignore` (mark read without engaging), `mute` (silence further updates), `archive` (nothing left to do), `snooze` (hide until ~`snooze_days` out). `subscription_changes` is a forward-looking, advisory delta on the thread's `muted_kinds` (which the AI now sees in its input); the per-thread tool schema only offers the kinds that fire on that type, in the right mute/unmute direction. Nothing auto-applies. The verdict cache (`notifications.ai_verdict_*`) is never auto-cleared — Re-ask overwrites it (and `_save_verdict` keeps the prior verdict in `thread_events` for the next judgment to see).
+
+In **AI mode**, the verdict's suggestions show as purple inset rings on the matching Actions-column controls — `action_now` → the Ignore / Done / Mute / Snooze button, `set_tracked` → the Track button, an unapplied `subscription_changes` → the ▾ caret (plus the affected option(s) inside its menu, plus an "✦ apply suggestion" row that bulk-applies via `POST /ai/<id>/apply-mute-suggestion`). Every ring clears once that suggestion is in effect, so the purple only ever means "act on this", never "undo this" or "this is special" (`look` has no button, so it rings nothing). Computed in `_row_to_dict` as `action_pending` / `track_pending` / the `pending_*` lists on the verdict dict; manual mode shows none of it.
 
 **`thread_events` table (SCHEMA_V20):** chronological per-thread log keyed by `(thread_id, kind, external_id)` where present. The unique partial index makes re-fetched comments / reviews idempotent — same GitHub `databaseId` UPDATEs the payload (catches body edits) instead of appending. Event kinds:
 

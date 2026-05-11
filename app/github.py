@@ -1291,6 +1291,20 @@ def _accumulate_seen_reason(
     )
 
 
+# Per-thread notification-kind filter taxonomy. MUTE_KINDS is the full set of
+# filterable activity kinds (the keys in notifications.muted_kinds JSON);
+# MUTE_KINDS_BY_TYPE maps a notification's `type` to the subset _enrich can
+# actually emit events for on it (an empty subset → the row has no filter UI,
+# and the AI gets no subscription tokens). Lives here because _enrich is what
+# produces these kinds; web.py (UI labels) and ai.py (verdict tokens) import
+# them.
+MUTE_KINDS = ("comment", "review", "code", "lifecycle")
+MUTE_KINDS_BY_TYPE = {
+    "PullRequest": ("comment", "review", "code", "lifecycle"),
+    "Issue":       ("comment", "lifecycle"),
+    "Discussion":  ("comment", "lifecycle"),
+}
+
 # Notification `reason` values that mean "this is aimed at you" rather than a
 # watch side effect — a re-delivery carrying one of these surfaces even if its
 # activity kind is muted on the thread.

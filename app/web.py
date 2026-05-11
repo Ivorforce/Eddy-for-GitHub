@@ -135,24 +135,19 @@ _ROW_COLS = (
     "ai_verdict_json, ai_verdict_at, ai_verdict_model"
 )
 
-# Per-thread notification-kind filter. MUTE_KIND_UI is the (key, label) list
-# in display order; labels are spelled out (no tooltips — a tooltip inside the
-# [popover] menu renders behind it). _MUTE_KINDS_BY_TYPE limits a row's ▾ menu
-# to the kinds _enrich can actually emit events for on that type (empty subset
-# → no caret). MUTE_KINDS is just the flat key list (the JSON in
-# notifications.muted_kinds is a subset of it).
+# Per-thread notification-kind filter. The taxonomy (MUTE_KINDS, which type
+# produces which) lives in github.py — _enrich is what emits the events; here
+# we just add the display labels. Labels are spelled out (no tooltips — a
+# tooltip inside the [popover] menu renders behind it).
+MUTE_KINDS = github.MUTE_KINDS
+_MUTE_KINDS_BY_TYPE = github.MUTE_KINDS_BY_TYPE
 MUTE_KIND_UI = (
     ("comment",   "Comments"),
     ("review",    "Reviews"),
     ("code",      "Code pushes"),
     ("lifecycle", "State changes"),
 )
-MUTE_KINDS = tuple(k for k, _ in MUTE_KIND_UI)
-_MUTE_KINDS_BY_TYPE = {
-    "PullRequest": ("comment", "review", "code", "lifecycle"),
-    "Issue":       ("comment", "lifecycle"),
-    "Discussion":  ("comment", "lifecycle"),
-}
+_MUTE_KIND_LABEL = dict(MUTE_KIND_UI)
 
 
 def _mute_kind_options(notif_type: str) -> list[tuple[str, str]]:
@@ -1189,6 +1184,27 @@ def _ai_verdict_dict(
 
     description = (verdict.get("description") or "").strip()
 
+    # subscription_changes: list of mute_<kind> / unmute_<kind> tokens. Split
+    # into per-direction kind lists (ordered by MUTE_KINDS, deduped); the
+    # type-restriction + "is this still pending" computation happens in
+    # _row_to_dict, which has the row's type and current muted_kinds.
+    mute_suggested: list[str] = []
+    unmute_suggested: list[str] = []
+    sc = verdict.get("subscription_changes")
+    if isinstance(sc, list):
+        for tok in sc:
+            if not isinstance(tok, str):
+                continue
+            verb, _, kind = tok.partition("_")
+            if kind not in MUTE_KINDS:
+                continue
+            if verb == "mute":
+                mute_suggested.append(kind)
+            elif verb == "unmute":
+                unmute_suggested.append(kind)
+    mute_suggested = [k for k in MUTE_KINDS if k in mute_suggested]
+    unmute_suggested = [k for k in MUTE_KINDS if k in unmute_suggested]
+
     return {
         "verdict":         verdict,
         "action_now":      action_now,
@@ -1197,6 +1213,10 @@ def _ai_verdict_dict(
         "priority_level":  priority_level,
         "priority_score":  priority_score,
         "description":     description,
+        # Subscription suggestion — refined (type-restricted, pending flags,
+        # summary string) in _row_to_dict.
+        "mute_suggested":   mute_suggested,
+        "unmute_suggested": unmute_suggested,
         # Non-interactive: the AI button's hover tooltip can't host clickable
         # links (it dismisses on mouse-out), so refs/mentions there render as
         # styled spans, not anchors. `code` still renders.
@@ -1313,6 +1333,50 @@ def _row_to_dict(
         ai_verdict_json, ai_verdict_at, ai_verdict_model, details_fetched_at,
         cur_repo=d["repo"],
     )
+    # Refine the verdict's subscription suggestion against this row's reality:
+    # restrict to the kinds that apply to its type, work out which suggested
+    # changes are still *pending* (not yet matched by muted_kinds), and build a
+    # human summary for the caret tooltip / apply button. The UI only flags a
+    # suggestion while it mismatches — once the user has applied it, the
+    # purple cues clear (so they never read as an ambiguous "toggle this").
+    if d["ai_verdict"]:
+        av = d["ai_verdict"]
+        applicable = {k for k, _ in d["mute_kind_options"]}
+        muted_now = set(d["muted_kinds"])
+        ms = [k for k in av["mute_suggested"] if k in applicable]
+        us = [k for k in av["unmute_suggested"] if k in applicable]
+        pending_mute = [k for k in ms if k not in muted_now]
+        pending_unmute = [k for k in us if k in muted_now]
+        av["mute_suggested"] = ms
+        av["unmute_suggested"] = us
+        av["pending_mute"] = pending_mute
+        av["pending_unmute"] = pending_unmute
+        av["has_subscription_suggestion"] = bool(ms or us)
+        av["subscription_pending"] = bool(pending_mute or pending_unmute)
+        av["subscription_summary"] = ", ".join(
+            [f"mute {_MUTE_KIND_LABEL.get(k, k).lower()}" for k in ms]
+            + [f"unmute {_MUTE_KIND_LABEL.get(k, k).lower()}" for k in us]
+        )
+
+        # action_now / set_tracked surface as a purple ring on the matching
+        # Actions-column button — but only while the suggestion isn't already
+        # in effect (so the ring always reads "do this", never "undo this").
+        # `look` has no button (its affordance is the title link), so it never
+        # rings anything.
+        action = av["action_now"]
+        action_in_effect = {
+            "ignore":  (not d["unread"]) and (not d["ignored"])
+                       and d["action"] not in ("done", "snoozed"),
+            "archive": d["action"] == "done" and not d["ignored"],
+            "mute":    d["action"] == "done" and bool(d["ignored"]),
+            "snooze":  bool(d.get("snooze_until")),
+        }.get(action, True)  # 'look' / unknown → treat as "nothing to ring"
+        av["action_pending"] = action if not action_in_effect else None
+        st = av["set_tracked"]
+        track_in_effect = (st == "track" and bool(d["is_tracked"])) \
+            or (st == "untrack" and not d["is_tracked"]) \
+            or st not in ("track", "untrack")
+        av["track_pending"] = st if not track_in_effect else None
 
     # Effective priority — a 0..1 float. The user's hand-pin wins (it only
     # persists until the next verdict, which clears priority_user — see
@@ -2029,7 +2093,13 @@ def set_mute_kinds(thread_id: str):
         return ("", 400)  # not an applicable kind for this notification type
     current = set(n.get("muted_kinds") or [])
     current.symmetric_difference_update({kind})
-    stored = [k for k in MUTE_KINDS if k in current]
+    _write_muted_kinds(thread_id, current)
+    return _render_row(_load_one(thread_id))
+
+
+def _write_muted_kinds(thread_id: str, kinds) -> None:
+    """Persist a thread's muted_kinds set (NULL when empty), MUTE_KINDS order."""
+    stored = [k for k in MUTE_KINDS if k in set(kinds)]
     conn = db.connect()
     try:
         conn.execute(
@@ -2038,6 +2108,26 @@ def set_mute_kinds(thread_id: str):
         )
     finally:
         conn.close()
+
+
+@app.post("/ai/<thread_id>/apply-mute-suggestion")
+def apply_mute_suggestion(thread_id: str):
+    """Apply the cached verdict's whole subscription suggestion in one click —
+    mute the suggested-mute kinds, unmute the suggested-unmute ones. Idempotent
+    (re-applying when nothing's left to do is a no-op). User-initiated, like
+    the per-kind toggles; no GitHub call. 404 if the thread's gone, 400 if
+    there's no verdict to apply."""
+    n = _load_one(thread_id)
+    if not n:
+        return ("", 404)
+    av = n.get("ai_verdict")
+    if not av or not av.get("has_subscription_suggestion"):
+        return ("", 400)
+    applicable = {k for k, _ in _mute_kind_options(n["type"])}
+    muted = set(n.get("muted_kinds") or [])
+    muted |= {k for k in av.get("mute_suggested", []) if k in applicable}
+    muted -= set(av.get("unmute_suggested", []))
+    _write_muted_kinds(thread_id, muted)
     return _render_row(_load_one(thread_id))
 
 
