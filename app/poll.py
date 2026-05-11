@@ -12,28 +12,39 @@ log = logging.getLogger(__name__)
 DEFAULT_INTERVAL = 300  # 5 minutes
 
 
-def _wake_snoozed(conn) -> int:
+def _wake_snoozed(conn, token: str) -> int:
     """Resurface snoozed threads whose wake time has passed: clear the snooze,
-    bring them back to the inbox marked unread (a real reminder), and log a
-    `woken` user_action so the timeline records why it returned. Returns the
-    number of threads woken."""
+    bring them back to the inbox marked unread (a real reminder), re-subscribe
+    if it was a quiet snooze (`ignored`), and log a `woken` user_action so the
+    timeline records why it returned. A re-subscribe that fails leaves the row
+    snoozed-with-an-expired-timer so the next poll retries. Returns the number
+    of threads woken."""
     now = int(time.time())
     rows = conn.execute(
-        "SELECT id FROM notifications "
+        "SELECT id, ignored FROM notifications "
         "WHERE action = 'snoozed' AND snooze_until IS NOT NULL AND snooze_until <= ?",
         (now,),
     ).fetchall()
+    woke = 0
     for r in rows:
+        if r["ignored"]:
+            try:
+                github.set_subscribed(token, r["id"])
+            except Exception:
+                log.warning("snooze wake: re-subscribe failed for %s; will retry", r["id"])
+                continue
         conn.execute(
             "UPDATE notifications SET action = 'woken', actioned_at = ?, "
-            "action_source = 'github', snooze_until = NULL, unread = 1 WHERE id = ?",
+            "action_source = 'github', snooze_until = NULL, unread = 1, ignored = 0 "
+            "WHERE id = ?",
             (now, r["id"]),
         )
         db.write_thread_event(
-            conn, thread_id=r["id"], ts=now,
-            kind="user_action", source="github", payload={"action": "woken"},
+            conn, thread_id=r["id"], ts=now, kind="user_action", source="github",
+            payload={"action": "woken", **({"quiet": True} if r["ignored"] else {})},
         )
-    return len(rows)
+        woke += 1
+    return woke
 
 
 def run_loop(stop: threading.Event, token: str, interval: int = DEFAULT_INTERVAL) -> None:
@@ -54,7 +65,7 @@ def run_loop(stop: threading.Event, token: str, interval: int = DEFAULT_INTERVAL
                 n = github.poll_once(conn, token, force_full=force_full)
                 if n >= 0:
                     log.info("poll: %d notifications", n)
-                woke = _wake_snoozed(conn)
+                woke = _wake_snoozed(conn, token)
                 if woke:
                     log.info("snooze: woke %d thread(s)", woke)
             finally:

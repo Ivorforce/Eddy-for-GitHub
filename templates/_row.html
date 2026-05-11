@@ -424,11 +424,11 @@
               title="{{ 'Tracked — click to untrack' if n.is_tracked else 'Track this thread' }}"><svg class="track-icon" viewBox="0 0 24 24" {% if n.is_tracked %}fill="currentColor"{% else %}fill="none"{% endif %} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg></button>
       {% if n.snooze_until %}
       <button type="button"
-              class="row2-btn snooze-btn active"
+              class="row2-btn snooze-btn active{% if n.snooze_quiet %} quiet{% endif %}"
               hx-post="/set/{{ n.id }}/snooze"
               hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters"
               aria-label="Wake from snooze"
-              title="Snoozed — wakes in {{ n.snooze_wakes_in }}; click to wake now"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/></svg><span class="snooze-left">{{ n.snooze_wakes_in }}</span></button>
+              title="{% if n.snooze_quiet %}Snoozed quietly (unsubscribed) — wakes &amp; re-subscribes in {{ n.snooze_wakes_in }}; click to wake now{% else %}Snoozed — wakes in {{ n.snooze_wakes_in }}; click to wake now{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/></svg><span class="snooze-left">{{ n.snooze_wakes_in }}</span></button>
       {% else %}
       {# Native popover (no Pico <details> styling to fight) — anchored to the
          trigger like the AI-pill popover. Clicking a duration posts and the
@@ -437,17 +437,24 @@
               popovertarget="pop-snooze-{{ n.id }}"
               style="anchor-name: --pop-snooze-{{ n.id }}"
               aria-label="Snooze" title="Snooze — hide until N days pass (or new activity, whichever first)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/></svg><span class="disclosure" aria-hidden="true">▾</span></button>
+      {# `hx-vals js:` reads the checkbox at click time so all durations honour
+         it without per-button state. `quiet` ⇒ also unsubscribe for the
+         duration (resubscribe on wake) — see set_snooze. #}
       <div class="snooze-pop" popover id="pop-snooze-{{ n.id }}"
            style="position-anchor: --pop-snooze-{{ n.id }}">
+        {% set qv = 'js:{quiet: document.getElementById("snzq-' ~ n.id ~ '").classList.contains("on")}' %}
         {% if n.ai_verdict and n.ai_verdict.snooze_days %}
-        <button type="button" class="snooze-ai" hx-post="/set/{{ n.id }}/snooze?days={{ n.ai_verdict.snooze_days }}" hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters" title="AI's suggestion">~{{ n.ai_verdict.snooze_days }}d · AI</button>
+        <button type="button" class="snooze-ai" hx-post="/set/{{ n.id }}/snooze?days={{ n.ai_verdict.snooze_days }}" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters" title="AI's suggestion">~{{ n.ai_verdict.snooze_days }}d · AI</button>
         {% endif %}
-        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=1"  hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 day</button>
-        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=3"  hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">3 days</button>
-        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=7"  hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 week</button>
-        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=14" hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">2 weeks</button>
-        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=30" hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 month</button>
-        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=60" hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">2 months</button>
+        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=1"  hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 day</button>
+        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=3"  hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">3 days</button>
+        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=7"  hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 week</button>
+        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=14" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">2 weeks</button>
+        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=30" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 month</button>
+        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=60" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">2 months</button>
+        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=180" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">6 months</button>
+        <button type="button" hx-post="/set/{{ n.id }}/snooze?days=365" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">12 months</button>
+        <button type="button" class="snooze-quiet-opt" id="snzq-{{ n.id }}" onclick="this.classList.toggle('on')" title="Unsubscribe on GitHub for the duration; resubscribe on wake"><span class="check" aria-hidden="true">✓</span>unsubscribe while snoozed</button>
       </div>
       {% endif %}
     </div>

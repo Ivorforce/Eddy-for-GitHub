@@ -485,6 +485,9 @@
       background: rgba(191, 135, 0, 0.26);
       color: var(--pico-color);
     }
+    /* Quiet snooze (also unsubscribed) — muted grey, not amber: it's not a
+       live timer waiting on activity, just a parked thread. */
+    td.actions .snooze-btn.active.quiet { background: rgba(140, 149, 159, 0.24); }
 
     /* Snooze duration menu — a native [popover] anchored to its trigger
        (no Pico <details> box to override). Sized like a compact menu. */
@@ -529,6 +532,19 @@
       padding-bottom: 0.25rem;
       border-bottom: 1px solid var(--pico-muted-border-color);
     }
+    /* "unsubscribe while snoozed" — a ✓-toggle row like the Options menu's:
+       muted label, white when on; the duration buttons read its .on class. */
+    .snooze-pop .snooze-quiet-opt {
+      margin-top: 0.15rem;
+      padding-top: 0.3rem;
+      border-top: 1px solid var(--pico-muted-border-color);
+      font-size: 0.7rem;
+      color: var(--pico-muted-color);
+      white-space: nowrap;
+    }
+    .snooze-pop .snooze-quiet-opt .check { visibility: hidden; margin-inline-end: 0.15rem; }
+    .snooze-pop .snooze-quiet-opt.on { color: var(--pico-color); }
+    .snooze-pop .snooze-quiet-opt.on .check { visibility: visible; }
 
     /* ▾ caret after the Mute segment — opens the per-kind mute menu. Narrower
        than the icon segments; the amber `has-muted` tint marks "some kind is

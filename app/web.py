@@ -1411,6 +1411,9 @@ def _row_to_dict(
     # short "wakes in 3d" label for the in-row snoozed-state button.
     su = d.get("snooze_until")
     d["snooze_wakes_in"] = _short_duration(su - int(time.time())) if su else None
+    # Quiet snooze (also unsubscribed for the duration) — `ignored` is the
+    # discriminator; the row button reads/labels differently.
+    d["snooze_quiet"] = bool(su) and bool(d["ignored"])
 
     return d
 
@@ -1996,43 +1999,57 @@ def set_muted(thread_id: str):
 
 
 # Fixed durations offered by the picker dropdown (the route accepts any
-# 1..90, so the AI's `snooze_days` estimate can be posted as a shortcut).
-SNOOZE_PICKER_DAYS = (1, 3, 7, 14, 30, 60)
+# 1..366, so the AI's `snooze_days` estimate can be posted as a shortcut).
+SNOOZE_PICKER_DAYS = (1, 3, 7, 14, 30, 60, 180, 365)
 
 
 @app.post("/set/<thread_id>/snooze")
 def set_snooze(thread_id: str):
     """Snooze a thread: archive it on GitHub (like Done) and set a wake
-    timer. The poll loop resurfaces it (unread again) when the timer passes,
-    or new GitHub activity resurfaces it sooner — whichever comes first.
-    POST `?days=N` (1..90) to snooze; POST with no `days` (the "wake now"
-    click on an already-snoozed row) to clear it."""
+    timer; the poll loop resurfaces it (unread again) when the timer passes.
+    POST `?days=N` (1..366) to snooze. Plain snooze stays subscribed, so new
+    GitHub activity can resurface it before the timer. Add `&quiet=1` to
+    *also* unsubscribe (`ignored=1`) for the duration — for a busy thread
+    you want a periodic digest of, not a live feed — in which case nothing
+    resurfaces it early and the wake re-subscribes. POST with no `days` (the
+    "wake now" click on a snoozed row) clears it, re-subscribing if it was
+    a quiet snooze."""
     token = app.config["GITHUB_TOKEN"]
     n = _load_one(thread_id)
     if not n:
         return ("", 404)
     days_raw = (request.values.get("days") or "").strip()
     if not days_raw:
-        # Wake now — un-snooze and bring it back unread (the snooze cleared
-        # unread when it fired; restore it the way a timer wake would).
-        _apply_action(thread_id, "unsnoozed", unread=1)
+        # Wake now — un-snooze, bring it back unread (the snooze cleared
+        # unread when it fired; restore it the way a timer wake would), and
+        # re-subscribe if this was a quiet snooze.
+        if n["action"] == "snoozed" and n["ignored"]:
+            github.set_subscribed(token, thread_id)
+        _apply_action(thread_id, "unsnoozed", unread=1, ignored=0)
         return _render_row(_load_one(thread_id))
     try:
         days = int(days_raw)
     except ValueError:
         return ("", 400)
-    if not 1 <= days <= 90:
+    if not 1 <= days <= 366:
         return ("", 400)
-    # Mirror Done's GitHub side-effect: archive (unless already archived as
-    # done/snoozed), and stay subscribed so new activity can still resurface it.
+    quiet = (request.values.get("quiet") or "").strip().lower() in ("1", "true", "on")
+    # Mirror Done's GitHub side-effect: archive unless already archived as
+    # done/snoozed. Then sync the subscription to the snooze flavour — quiet
+    # unsubscribes (like Mute), plain stays/returns subscribed.
     if n["action"] not in ("done", "snoozed"):
         github.mark_done(token, thread_id)
-    if n["ignored"]:
+    if quiet and not n["ignored"]:
+        github.set_ignored(token, thread_id)
+    elif not quiet and n["ignored"]:
         github.set_subscribed(token, thread_id)
     until = int(time.time()) + days * 86400
+    payload = {"until": until}
+    if quiet:
+        payload["quiet"] = True
     _apply_action(
-        thread_id, "snoozed", unread=0, ignored=0,
-        snooze_until=until, event_payload={"until": until},
+        thread_id, "snoozed", unread=0, ignored=(1 if quiet else 0),
+        snooze_until=until, event_payload=payload,
     )
     return _archive_response(thread_id)
 
