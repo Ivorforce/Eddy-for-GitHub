@@ -599,6 +599,67 @@
       50%      { opacity: 0.85; }
     }
 
+    /* Priority control — segmented low / normal / high / urgent the user
+       can pin in the Relevance column (re-click the active one to clear
+       back to "auto"). The active segment fills with a tint pulled from
+       the same oklch ramp as the verdict pill, at that level's score, so
+       the control echoes the row gradient. A user pin is solid; when the
+       highlight is only mirroring the AI verdict's bucket (priority_user
+       unset, .from-ai) it's faint with a dotted outline — "the AI's call,
+       not something you set". */
+    .priority-group {
+      display: inline-flex;
+      max-width: 100%;
+      margin: 0.3rem 0 0;
+      background: rgba(140, 149, 159, 0.08);
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.4rem;
+      overflow: hidden;
+    }
+    .priority-segment {
+      background: none;
+      border: none;
+      margin: 0;
+      padding: 0.06rem 0.4rem;
+      cursor: pointer;
+      line-height: 1.45;
+      font-size: 0.6rem;
+      font-weight: 500;
+      color: var(--pico-muted-color);
+      white-space: nowrap;
+    }
+    .priority-segment + .priority-segment {
+      border-left: 1px solid var(--pico-muted-border-color);
+    }
+    .priority-segment:hover {
+      background: rgba(140, 149, 159, 0.18);
+      color: var(--pico-color);
+    }
+    .priority-segment.active {
+      --imp-e: pow(var(--imp), 1.4);
+      --hue: calc(165 - pow(var(--imp), 2.5) * 115);
+      color: var(--pico-color);
+      font-weight: 600;
+      background: oklch(
+        calc(0.42 + var(--imp-e) * 0.18)
+        calc(var(--imp-e) * 0.17)
+        var(--hue)
+        / calc(0.30 + var(--imp-e) * 0.55));
+    }
+    .priority-segment.seg-low.active    { --imp: 0.25; }
+    .priority-segment.seg-normal.active { --imp: 0.5; }
+    .priority-segment.seg-high.active   { --imp: 0.75; }
+    .priority-segment.seg-urgent.active { --imp: 0.95; }
+    .priority-segment.active.from-ai {
+      background: oklch(
+        calc(0.42 + var(--imp-e) * 0.18)
+        calc(var(--imp-e) * 0.17)
+        var(--hue)
+        / calc(0.12 + var(--imp-e) * 0.22));
+      outline: 1px dotted var(--pico-muted-border-color);
+      outline-offset: -2px;
+    }
+
     /* Signal row — small pills below the verdict explaining what the AI
        decided is making this thread relevant. Replaces the manual-mode
        prose subhead in AI mode. Color classes reuse status-pill variants

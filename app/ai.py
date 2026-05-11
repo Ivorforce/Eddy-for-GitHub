@@ -532,10 +532,15 @@ def _log_call(
 def _save_verdict(
     conn: sqlite3.Connection, thread_id: str, verdict: dict, model: str
 ) -> None:
+    # A fresh verdict reclaims the displayed priority: clear any hand-set
+    # priority_user. The user's choice isn't lost — it survives as a
+    # priority_change event in the timeline, which this judgment already
+    # saw and folded into priority_score. The user can re-pin afterwards.
     conn.execute(
         """
         UPDATE notifications
-           SET ai_verdict_json = ?, ai_verdict_at = ?, ai_verdict_model = ?
+           SET ai_verdict_json = ?, ai_verdict_at = ?, ai_verdict_model = ?,
+               priority_user = NULL
          WHERE id = ?
         """,
         (json.dumps(verdict, ensure_ascii=False), int(time.time()), model, thread_id),

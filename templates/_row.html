@@ -192,7 +192,7 @@
          own row actions. Signal pills below mirror what the AI flagged. #}
       {% set v = n.ai_verdict %}
       <span class="ai-verdict-pill-group{% if v and not n.ai_uptodate %} outdated{% endif %}"
-            {% if v %}style="--imp: {{ '%.3f' % v.priority_score }}"{% endif %}>
+            {% if n.priority_score is not none %}style="--imp: {{ '%.3f' % n.priority_score }}"{% endif %}>
         {# popovertarget (native) instead of data-popover-target (JS) so the
            browser's built-in toggle handles repeat clicks correctly. The
            JS path always-reopens because light-dismiss on pointerdown
@@ -264,6 +264,23 @@
                     title="Empty: (re-)assess based on current state. With text: send your message and the AI replies (Ctrl+Enter)."><span class="rejudge-label">↻ Re-ask</span></button>
           </div>
         </form>
+      </div>
+      {# Priority control — pick a level (low / normal / high / urgent);
+         re-click the active one to clear back to "auto" (fall back to the
+         AI's score, or neutral). When the highlighted segment is mirroring
+         the AI verdict's bucket rather than a user pin it's marked
+         `.from-ai`. Posting re-renders the whole row so the pill gradient
+         and the highlight move together. #}
+      <div class="priority-group" role="group" aria-label="Set priority">
+        {% for lv in ['low', 'normal', 'high', 'urgent'] %}
+        <button type="button" name="level" value="{{ lv }}"
+                class="priority-segment seg-{{ lv }}{% if n.priority_level == lv %} active{% if n.priority_from_ai %} from-ai{% endif %}{% endif %}"
+                hx-post="/set/{{ n.id }}/priority"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                hx-include="#filters"
+                title="{% if n.priority_level == lv and n.priority_from_ai %}Priority {{ lv }} — the AI's call; click to pin it{% elif n.priority_level == lv %}Priority {{ lv }} — click to clear (back to auto){% else %}Set priority: {{ lv }}{% endif %}">{{ lv|capitalize }}</button>
+        {% endfor %}
       </div>
       {% if v and v.signals %}
       <div class="signal-row">

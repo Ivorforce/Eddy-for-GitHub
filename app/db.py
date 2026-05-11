@@ -187,8 +187,9 @@ CREATE INDEX IF NOT EXISTS idx_ai_calls_thread     ON ai_calls(thread_id);
 #                 timeline ordering shown to both AI and user.
 #   inserted_at — when WE wrote the row. Distinct from ts because GitHub
 #                 events get backdated to their createdAt.
-#   kind        — 'comment' | 'review' | 'ai_verdict' | 'user_action' |
-#                 'user_chat' (room to grow: 'ai_recap', 'static_changed').
+#   kind        — 'comment' | 'review' | 'lifecycle' | 'ai_verdict' |
+#                 'user_action' | 'user_chat' | 'priority_change' (room to
+#                 grow: 'ai_recap', 'static_changed').
 #   source      — 'github' | 'user' | 'ai'.
 #   external_id — stable dedup key when meaningful: GitHub comment / review
 #                 databaseId, ai_calls.id. NULL for user_action / user_chat
@@ -226,6 +227,15 @@ ALTER TABLE notifications DROP COLUMN note_ai;
 ALTER TABLE people        DROP COLUMN note_ai;
 ALTER TABLE repos         DROP COLUMN note_ai;
 ALTER TABLE orgs          DROP COLUMN note_ai;
+"""
+
+# User-set priority: 'low' | 'normal' | 'high' | 'urgent', NULL = unset
+# ("auto" — fall back to the AI verdict's priority_score, or neutral). The
+# user owns the displayed priority until the next AI verdict, which clears
+# this column (the user's choice survives as a priority_change timeline
+# event the next judgment reads as calibration).
+SCHEMA_V22 = """
+ALTER TABLE notifications ADD COLUMN priority_user TEXT;
 """
 
 
@@ -326,6 +336,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V21)
             _set_version(conn, 21)
             version = 21
+        if version < 22:
+            conn.executescript(SCHEMA_V22)
+            _set_version(conn, 22)
+            version = 22
     finally:
         conn.close()
 

@@ -130,7 +130,7 @@ _ROW_COLS = (
     "seen_reasons, baseline_comments, "
     "pr_reactions_json, unique_commenters, unique_reviewers, "
     "pr_review_state, baseline_review_state, "
-    "note_user, is_tracked, "
+    "note_user, is_tracked, priority_user, "
     "ai_verdict_json, ai_verdict_at, ai_verdict_model"
 )
 
@@ -163,6 +163,29 @@ def _priority_bucket(score: float) -> str:
     if score < 0.67:
         return "normal"
     return "high"
+
+
+# User-settable priority levels (the segmented control in the Relevance
+# column) and their representative scores on the AI's 0..1 scale. The level
+# the user picks is what's stored / shown in the timeline; the score is what
+# the --imp gradient and the AI see. Anchored loosely to ai_system_prompt.md
+# §Priority: low ≈ "skip on a busy day", normal ≈ "this week", high ≈ "soon
+# / today", urgent ≈ "drop other work".
+PRIORITY_LEVELS = ("low", "normal", "high", "urgent")
+_PRIORITY_LEVEL_SCORE = {"low": 0.25, "normal": 0.5, "high": 0.75, "urgent": 0.95}
+
+
+def _score_to_priority_level(score: float) -> str:
+    """Bucket an AI priority_score into the 4-level vocabulary — drives which
+    segment of the priority control is highlighted when the displayed
+    priority comes from the verdict rather than a user pin."""
+    if score >= 0.9:
+        return "urgent"
+    if score >= 0.66:
+        return "high"
+    if score >= 0.33:
+        return "normal"
+    return "low"
 
 
 # Vocabulary of "relevant signals" the AI can flag, mapped to display
@@ -1035,6 +1058,13 @@ def _format_event_for_render(
             payload.get("body") or "", cur_repo=cur_repo, interactive=True,
             tracked_people=tracked_people, people_notes=notes_people,
         )
+    elif kind == "priority_change":
+        out["actor"] = "You"
+        to_level = payload.get("to")
+        if to_level in PRIORITY_LEVELS:
+            out["summary"] = f"set priority → {to_level.capitalize()}"
+        else:
+            out["summary"] = "cleared priority (auto)"
     return out
 
 
@@ -1248,6 +1278,29 @@ def _row_to_dict(
         ai_verdict_json, ai_verdict_at, ai_verdict_model, details_fetched_at,
         cur_repo=d["repo"],
     )
+
+    # Effective priority: the user's hand-set level wins (it only persists
+    # until the next verdict, which clears priority_user — see ai._save_verdict);
+    # otherwise fall back to the cached verdict's score. priority_level drives
+    # which segment of the control is highlighted; priority_score drives the
+    # --imp gradient on the pill; priority_from_ai = the highlight is the AI's
+    # suggestion, not a user pin.
+    priority_user = d.get("priority_user")
+    if priority_user not in PRIORITY_LEVELS:
+        priority_user = None
+    d["priority_user"] = priority_user
+    if priority_user:
+        d["priority_level"] = priority_user
+        d["priority_score"] = _PRIORITY_LEVEL_SCORE[priority_user]
+        d["priority_from_ai"] = False
+    elif d["ai_verdict"]:
+        d["priority_level"] = _score_to_priority_level(d["ai_verdict"]["priority_score"])
+        d["priority_score"] = d["ai_verdict"]["priority_score"]
+        d["priority_from_ai"] = True
+    else:
+        d["priority_level"] = None
+        d["priority_score"] = None
+        d["priority_from_ai"] = False
 
     return d
 
@@ -1754,6 +1807,89 @@ def set_muted(thread_id: str):
     # the AI timeline gets 'muted' to preserve the stronger-than-Done signal.
     _apply_action(thread_id, "done", log_action="muted", unread=0, ignored=1)
     return _archive_response(thread_id)
+
+
+def _log_priority_change(
+    conn: sqlite3.Connection,
+    thread_id: str,
+    from_level: str | None,
+    to_level: str | None,
+) -> None:
+    """Append a `priority_change` event to the thread timeline, coalescing
+    with an immediately-prior one: if the latest event on this thread is
+    already a `priority_change` (no GitHub / AI / other activity in between),
+    update it in place rather than stacking a second entry — and if the net
+    effect round-trips back to that run's starting point, drop it entirely.
+    Keeps `from` pinned to the value before the first change of the run."""
+    if from_level == to_level:
+        return
+    now = int(time.time())
+    last = conn.execute(
+        "SELECT id, kind, payload_json FROM thread_events "
+        "WHERE thread_id = ? ORDER BY ts DESC, id DESC LIMIT 1",
+        (thread_id,),
+    ).fetchone()
+    if last and last["kind"] == "priority_change":
+        try:
+            prev = json.loads(last["payload_json"])
+        except (ValueError, TypeError):
+            prev = {}
+        origin = prev.get("from")
+        if to_level == origin:
+            conn.execute("DELETE FROM thread_events WHERE id = ?", (last["id"],))
+            return
+        conn.execute(
+            "UPDATE thread_events SET payload_json = ?, ts = ? WHERE id = ?",
+            (
+                json.dumps(
+                    {"from": origin, "to": to_level,
+                     "score": _PRIORITY_LEVEL_SCORE.get(to_level)},
+                    ensure_ascii=False,
+                ),
+                now,
+                last["id"],
+            ),
+        )
+        return
+    db.write_thread_event(
+        conn,
+        thread_id=thread_id,
+        ts=now,
+        kind="priority_change",
+        source="user",
+        payload={"from": from_level, "to": to_level,
+                 "score": _PRIORITY_LEVEL_SCORE.get(to_level)},
+    )
+
+
+@app.post("/set/<thread_id>/priority")
+def set_priority(thread_id: str):
+    """Set the user's hand-picked priority level (low / normal / high /
+    urgent). Posting the currently-active level clears it back to "auto"
+    (NULL → fall back to the AI verdict's score, or neutral) — same
+    toggle-to-deselect behaviour as the dismissal buttons. Logs a coalesced
+    `priority_change` timeline event so the next AI judgment reads it as
+    calibration; doesn't invalidate the verdict (the re-assess button stays
+    as it was — a manual priority tweak isn't new context)."""
+    n = _load_one(thread_id)
+    if not n:
+        return ("", 404)
+    requested = (request.values.get("level") or "").strip()
+    current = n["priority_user"]
+    new_level = (
+        None if requested not in PRIORITY_LEVELS or requested == current
+        else requested
+    )
+    conn = db.connect()
+    try:
+        conn.execute(
+            "UPDATE notifications SET priority_user = ? WHERE id = ?",
+            (new_level, thread_id),
+        )
+        _log_priority_change(conn, thread_id, current, new_level)
+    finally:
+        conn.close()
+    return _render_row(_load_one(thread_id))
 
 
 @app.post("/toggle/<thread_id>/track")
