@@ -494,17 +494,19 @@
     }
 
     /* AI verdict pill. Lives in the Relevance column when triage mode =
-       AI. Single button opens the detail popover; the pill is advisory
-       (display only, no auto-apply). Priority drives the container's
-       tint; the brain glyph keeps its purple identity across all tints. */
-    /* --imp is set inline from priority_score (0..1). bg / border are
-       built from oklch() so the color slides grey → weak green →
-       weak gold → strong orange-gold along a single hue arc as
-       importance climbs. Chroma + alpha use pow(imp, 1.4) so mid scores
-       (0.5–0.6) stay near-neutral; the hue itself uses pow(imp, 2.5)
-       so green holds through ~0.7 and the swing toward orange is
-       compressed into the top of the range. Font weight on the pill's
-       main label scales with the same eased ramp. */
+       AI. Split: left half = the AI's current take (opens the popover),
+       right half = the assess / re-assess trigger. Priority drives the
+       container's tint; the brain glyph keeps its purple identity across
+       all tints. The pill is advisory — nothing auto-applies. */
+    /* --imp is set inline from priority_score (0..1); unset (= 0, the
+       "unassessed" state) renders grey. bg / border are built from
+       oklch() so the color slides grey → weak green → weak gold → strong
+       orange-gold along a single hue arc as importance climbs. Chroma +
+       alpha use pow(imp, 1.4) so mid scores (0.5–0.6) stay near-neutral;
+       the hue itself uses pow(imp, 2.5) so green holds through ~0.7 and
+       the swing toward orange is compressed into the top of the range.
+       Font weight on the pill's main label scales with the same eased
+       ramp. */
     .ai-verdict-pill-group {
       --imp: 0;
       --imp-e: pow(var(--imp), 1.4);
@@ -531,31 +533,50 @@
       color: #fff;  /* full white regardless of priority tint */
       font-weight: calc(550 + var(--imp-e) * 150);
     }
-    /* Stale: judgment predates a re-poll. Dashed border signals
-       "verdict's source data is no longer current". */
-    .ai-verdict-pill-group.stale {
+    /* Outdated: a verdict exists but new activity (or a re-poll) landed
+       after it. Dashed border signals "this take is behind the thread". */
+    .ai-verdict-pill-group.outdated {
       border-style: dashed;
       opacity: 0.85;
     }
-    .ai-verdict-main {
-      flex: 1;
-      min-width: 0; /* lets ellipsis trigger when label is long */
-      padding: 0.14rem 0.5rem;
+    .ai-verdict-main,
+    .ai-verdict-rerun {
       background: none;
       border: none;
       margin: 0;
       cursor: pointer;
-      text-align: center;
-      letter-spacing: 0.01em;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
       font-size: 0.66rem;
       font-weight: 600;
       line-height: 1.4;
       color: var(--pico-color);
     }
-    .ai-verdict-main:hover { background: rgba(255, 255, 255, 0.18); }
+    .ai-verdict-main {
+      flex: 1;
+      min-width: 0; /* lets ellipsis trigger when label is long */
+      padding: 0.14rem 0.5rem;
+      text-align: center;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-right: 1px solid rgba(140, 149, 159, 0.45);
+    }
+    .ai-verdict-rerun {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.14rem 0.4rem;
+      color: #8957e5;  /* purple "run the AI" affordance */
+    }
+    .ai-verdict-rerun svg { width: 0.82rem; height: 0.82rem; }
+    .ai-verdict-rerun.current,
+    .ai-verdict-rerun:disabled {
+      cursor: default;
+      opacity: 1;                       /* override Pico's disabled-button dimming */
+      color: var(--pico-muted-color);   /* greyed — assessment is current, nothing to do */
+    }
+    .ai-verdict-main:hover,
+    .ai-verdict-rerun:not(.current):hover { background: rgba(255, 255, 255, 0.18); }
     /* Brain glyph in the pill main area — kept purple even on tinted pills. */
     .ai-verdict-pill-group .ai-pill-icon {
       width: 0.85em;
@@ -566,34 +587,9 @@
       flex-shrink: 0;
     }
 
-    /* Per-row "Ask AI" button (no-verdict state in AI mode). Dashed border
-       signals "no verdict yet — click to ask". Spinner is just opacity +
-       pointer-events while htmx-request is on the row. */
-    .ai-ask-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.3rem;
-      padding: 0.15rem 0.55rem;
-      margin: 0;
-      background: rgba(137, 87, 229, 0.08);
-      border: 1px dashed rgba(137, 87, 229, 0.5);
-      border-radius: 0.4rem;
-      cursor: pointer;
-      font-size: 0.72rem;
-      color: var(--pico-color);
-    }
-    .ai-ask-btn:hover { background: rgba(137, 87, 229, 0.18); }
-    .ai-ask-btn .ai-pill-icon {
-      width: 0.85em;
-      height: 0.85em;
-      color: #8957e5;
-      flex-shrink: 0;
-    }
-    /* Pulse the relevant control while an AI request is in flight on this
-       row — Ask AI (no verdict) or Re-ask. Both set
-       hx-indicator="closest tr", so the row gets .htmx-request and the
-       pill / button animates. */
-    tr.htmx-request .ai-ask-btn,
+    /* Pulse the pill while an AI request is in flight on this row (Ask AI
+       or Re-ask both set hx-indicator="closest tr", so the row gets
+       .htmx-request). */
     tr.htmx-request .ai-verdict-pill-group {
       pointer-events: none;
       animation: ai-pulse 1.2s ease-in-out infinite;

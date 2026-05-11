@@ -997,14 +997,18 @@ def _format_event_for_render(row, now: int, user_login: str | None = None) -> di
     return out
 
 
+# Event kinds that constitute "new context the AI hasn't seen" — a verdict
+# made before any of these arrived is out of date. Row-state user_actions
+# (read/done/mute) are the user's *response* to a verdict, not new context,
+# so they don't count; neither does `visited`.
+_VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat")
+
+
 def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
-    """Mutate `d` in place: attach the `timeline` field when the row has a
-    cached verdict (i.e., the popover will render). Skipped otherwise so
-    bulk list rendering doesn't pay the cost on rows that aren't going to
-    display a popover."""
-    verdict = d.get("ai_verdict")
-    if not verdict:
-        return
+    """Mutate `d` in place: attach the `timeline` list (for the popover) and
+    `ai_uptodate` (drives the re-run button's enabled/green state). Called
+    only in AI mode — the popover doesn't render in manual mode, so the
+    per-row thread_events query is wasted there."""
     rows = conn.execute(
         """
         SELECT ts, kind, source, payload_json
@@ -1022,6 +1026,18 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     timeline = _coalesce_user_actions(timeline)
     timeline = _mark_superseded_reviews(timeline)
     d["timeline"] = timeline
+
+    verdict = d.get("ai_verdict")
+    if not verdict:
+        # No assessment yet — "not up to date" so the trigger button invites
+        # the first Ask AI click.
+        d["ai_uptodate"] = False
+        return
+    after = verdict.get("at") or 0
+    has_new_context = any(
+        r["ts"] > after and r["kind"] in _VERDICT_INVALIDATING_KINDS for r in rows
+    )
+    d["ai_uptodate"] = not verdict.get("stale") and not has_new_context
 
 
 def _ai_verdict_dict(
@@ -1194,11 +1210,11 @@ def _load_notifications():
             "ORDER BY updated_at DESC"
         ).fetchall()
         out = [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
-        # Timeline attached only on rows that will actually render the
-        # popover (i.e., have a cached verdict). Single point query each;
-        # bulk-list cost stays bounded because the verdict cache is rare.
-        for d in out:
-            _attach_timeline(d, conn)
+        # The popover (and the timeline / ai_uptodate it needs) only renders
+        # in AI mode — skip the per-row thread_events query in manual mode.
+        if _get_triage_mode() == "ai":
+            for d in out:
+                _attach_timeline(d, conn)
         return out
     finally:
         conn.close()
