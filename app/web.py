@@ -797,6 +797,28 @@ _REVERT_OF = {
 }
 
 
+def _mark_superseded_reviews(events: list[dict]) -> list[dict]:
+    """Flag review events that a later review by the same author overrode.
+    GitHub keeps every review in the log, but only each author's most-recent
+    review drives the PR's state — so an earlier 'changes requested' followed
+    by an 'approved' from the same person is stale context. The template
+    dims flagged events. (COMMENTED reviews are already folded into
+    comment groups by _coalesce_comments, so the survivors here are the
+    state-bearing ones.) Mutates events in place; returns the list."""
+    last_review_idx: dict[str, int] = {}
+    for idx, ev in enumerate(events):
+        if ev.get("kind") == "review":
+            actor = ev.get("actor") or ""
+            if actor and actor != "?":
+                last_review_idx[actor] = idx
+    for idx, ev in enumerate(events):
+        if ev.get("kind") == "review":
+            actor = ev.get("actor") or ""
+            if last_review_idx.get(actor, idx) > idx:
+                ev["superseded"] = True
+    return events
+
+
 def _coalesce_user_actions(events: list[dict]) -> list[dict]:
     """Collapse runs of adjacent dismissal user_actions (Ignore / Done / Mute
     and their reverts) with no other event between them. Rule: keep only the
@@ -998,6 +1020,7 @@ def _attach_timeline(d: dict, conn: sqlite3.Connection) -> None:
     timeline = _coalesce_comments(timeline)
     timeline = _coalesce_visits(timeline)
     timeline = _coalesce_user_actions(timeline)
+    timeline = _mark_superseded_reviews(timeline)
     d["timeline"] = timeline
 
 
