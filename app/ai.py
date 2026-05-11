@@ -119,9 +119,9 @@ TOOL_DEF: dict = {
                 "minimum": 0.0,
                 "maximum": 1.0,
                 "description": (
-                    "How important is this thread to the user, on a 0.0-1.0 scale. "
-                    "See system prompt §Priority for anchored value examples. "
-                    "Distribute meaningfully — don't cluster around 0.5. "
+                    "How urgently the user should deal with this thread, on a 0.0-1.0 scale. "
+                    "See system prompt §Priority for the named bands each range maps to — "
+                    "pick a value inside the band that fits, or between bands when it's on the edge. "
                     "Independent of action_now: 0.9 + 'look' means 'leave it visible and flag it as urgent'."
                 ),
             },

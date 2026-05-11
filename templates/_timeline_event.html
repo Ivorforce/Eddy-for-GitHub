@@ -20,7 +20,7 @@
     <div class="timeline-bubble bubble-ai">
       <div class="timeline-bubble-head">
         <span class="timeline-actor">AI</span>
-        <span class="ai-verdict-priority-tag" style="--imp: {{ '%.3f' % ev.verdict.priority_score }}">{{ ev.verdict.priority }} · {{ '%.2f' % ev.verdict.priority_score }}</span>
+        <span class="ai-verdict-priority-tag" style="--imp: {{ '%.3f' % ev.verdict.priority_score }}">{{ ev.verdict.priority_level }} · {{ '%.2f' % ev.verdict.priority_score }}</span>
         <span class="timeline-age">{{ ev.age_text }}</span>
       </div>
       {% if ev.verdict.description %}<div class="timeline-bubble-body">{{ ev.verdict.description_html }}</div>{% endif %}

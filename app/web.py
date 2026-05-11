@@ -154,38 +154,80 @@ _AI_TRACK_LABELS = {
 }
 
 
-def _priority_bucket(score: float) -> str:
-    """Map a 0.0-1.0 priority score to one of three buckets — drives the
-    pill's color class. Sort order uses the float directly for
-    finer-grained ranking."""
-    if score < 0.34:
-        return "low"
-    if score < 0.67:
-        return "normal"
-    return "high"
+# Priority is a 0..1 float end-to-end — the AI emits one (`priority_score`),
+# the user's hand-pin is stored as one (`notifications.priority_user`), and
+# `priority_change` timeline events carry floats. The six named bands below
+# are a *display* layer over that float: a shared vocabulary for the pill
+# tint, the picker, tooltips and timeline text, whose boundaries can be
+# re-tuned here (and in ai_system_prompt.md §Priority) without migrating any
+# stored data. _BANDS = exclusive-upper thresholds, low → high; _LEVEL_SCORE
+# = the representative float written when the user picks a band; _DESC = the
+# tooltip / anchor gloss; PRIORITY_GROUPS = the 2-2-2 visual grouping
+# (Low / Medium / High, each label spanning a pair of sub-levels) the picker
+# renders as a single row.
+_PRIORITY_BANDS = (
+    (0.10, "irrelevant"),
+    (0.30, "minor"),
+    (0.50, "routine"),
+    (0.65, "normal"),
+    (0.85, "high"),
+    (1.01, "urgent"),
+)
+PRIORITY_LEVELS = tuple(name for _, name in _PRIORITY_BANDS)
+_PRIORITY_LEVEL_SCORE = {
+    "irrelevant": 0.05, "minor": 0.20, "routine": 0.40,
+    "normal":     0.57, "high":  0.75, "urgent":  0.93,
+}
+_PRIORITY_LEVEL_DESC = {
+    "irrelevant": "Irrelevant",
+    "minor":      "Mostly irrelevant",
+    "routine":    "low priority",
+    "normal":     "normal priority",
+    "high":       "high priority",
+    "urgent":     "urgent",
+}
+PRIORITY_GROUPS = (
+    ("Low",    ("irrelevant", "minor")),
+    ("Medium", ("routine", "normal")),
+    ("High",   ("high", "urgent")),
+)
+# Flattened for the template: ({group, cells: ({key, desc, score}, ...)}, ...).
+PRIORITY_UI = tuple(
+    {
+        "group": label,
+        "cells": tuple(
+            {"key": k, "desc": _PRIORITY_LEVEL_DESC[k], "score": _PRIORITY_LEVEL_SCORE[k]}
+            for k in members
+        ),
+    }
+    for label, members in PRIORITY_GROUPS
+)
+app.jinja_env.globals["PRIORITY_UI"] = PRIORITY_UI
 
 
-# User-settable priority levels (the segmented control in the Relevance
-# column) and their representative scores on the AI's 0..1 scale. The level
-# the user picks is what's stored / shown in the timeline; the score is what
-# the --imp gradient and the AI see. Anchored loosely to ai_system_prompt.md
-# §Priority: low ≈ "skip on a busy day", normal ≈ "this week", high ≈ "soon
-# / today", urgent ≈ "drop other work".
-PRIORITY_LEVELS = ("low", "normal", "high", "urgent")
-_PRIORITY_LEVEL_SCORE = {"low": 0.25, "normal": 0.5, "high": 0.75, "urgent": 0.95}
+def _clamp01(x) -> float | None:
+    try:
+        return max(0.0, min(1.0, float(x)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _score_to_priority_level(score: float) -> str:
-    """Bucket an AI priority_score into the 4-level vocabulary — drives which
-    segment of the priority control is highlighted when the displayed
-    priority comes from the verdict rather than a user pin."""
-    if score >= 0.9:
-        return "urgent"
-    if score >= 0.66:
-        return "high"
-    if score >= 0.33:
-        return "normal"
-    return "low"
+    """Bucket a 0..1 priority score into one of the named bands."""
+    s = _clamp01(score) or 0.0
+    for hi, name in _PRIORITY_BANDS:
+        if s < hi:
+            return name
+    return _PRIORITY_BANDS[-1][1]
+
+
+def _verdict_priority(verdict: dict) -> tuple[str, float]:
+    """(band name, score) for a verdict payload. The AI emits `priority_score`
+    (a float); falls back to 'normal'/0.5 if it's missing or unparseable."""
+    score = _clamp01(verdict.get("priority_score"))
+    if score is None:
+        score = 0.5
+    return _score_to_priority_level(score), score
 
 
 # Vocabulary of "relevant signals" the AI can flag, mapped to display
@@ -753,12 +795,7 @@ def _verdict_render_dict(
     inside the timeline list. Distinct from _ai_verdict_dict, which shapes
     the *cached* verdict for the row pill (and adds stale logic that
     doesn't apply to historical entries)."""
-    score_raw = payload.get("priority_score")
-    if isinstance(score_raw, (int, float)):
-        priority_score = max(0.0, min(1.0, float(score_raw)))
-    else:
-        priority_score = 0.5
-    priority_bucket = _priority_bucket(priority_score)
+    priority_level, priority_score = _verdict_priority(payload)
 
     raw_signals = payload.get("relevant_signals") or []
     signals: list[dict] = []
@@ -775,7 +812,7 @@ def _verdict_render_dict(
             description, cur_repo=cur_repo, interactive=True,
             tracked_people=tracked_people, people_notes=notes_people,
         ),
-        "priority":       priority_bucket,
+        "priority_level": priority_level,
         "priority_score": priority_score,
         "signals":        signals,
         "model":          payload.get("model") or "",
@@ -1060,9 +1097,11 @@ def _format_event_for_render(
         )
     elif kind == "priority_change":
         out["actor"] = "You"
-        to_level = payload.get("to")
-        if to_level in PRIORITY_LEVELS:
-            out["summary"] = f"set priority → {to_level.capitalize()}"
+        to_val = payload.get("to")
+        if isinstance(to_val, (int, float)):
+            out["summary"] = f"set priority → {_score_to_priority_level(to_val).capitalize()}"
+        elif to_val:  # legacy: band name stored directly
+            out["summary"] = f"set priority → {str(to_val).capitalize()}"
         else:
             out["summary"] = "cleared priority (auto)"
     return out
@@ -1138,13 +1177,7 @@ def _ai_verdict_dict(
     action_now = verdict.get("action_now") or "look"
     set_tracked = verdict.get("set_tracked") or "leave"
 
-    score_raw = verdict.get("priority_score")
-    priority_score = (
-        max(0.0, min(1.0, float(score_raw)))
-        if isinstance(score_raw, (int, float))
-        else 0.5
-    )
-    priority_bucket = _priority_bucket(priority_score)
+    priority_level, priority_score = _verdict_priority(verdict)
 
     parts = [_AI_ACTION_LABELS.get(action_now, action_now)]
     if set_tracked in _AI_TRACK_LABELS:
@@ -1171,8 +1204,8 @@ def _ai_verdict_dict(
         "verdict":         verdict,
         "action_now":      action_now,
         "set_tracked":     set_tracked,
+        "priority_level":  priority_level,
         "priority_score":  priority_score,
-        "priority":        priority_bucket,  # low/normal/high — drives CSS
         "description":     description,
         # Non-interactive: the AI button's hover tooltip can't host clickable
         # links (it dismisses on mouse-out), so refs/mentions there render as
@@ -1279,28 +1312,23 @@ def _row_to_dict(
         cur_repo=d["repo"],
     )
 
-    # Effective priority: the user's hand-set level wins (it only persists
-    # until the next verdict, which clears priority_user — see ai._save_verdict);
-    # otherwise fall back to the cached verdict's score. priority_level drives
-    # which segment of the control is highlighted; priority_score drives the
-    # --imp gradient on the pill; priority_from_ai = the highlight is the AI's
-    # suggestion, not a user pin.
-    priority_user = d.get("priority_user")
-    if priority_user not in PRIORITY_LEVELS:
-        priority_user = None
+    # Effective priority — a 0..1 float. The user's hand-pin wins (it only
+    # persists until the next verdict, which clears priority_user — see
+    # ai._save_verdict); otherwise fall back to the cached verdict's score.
+    # priority_score drives the --imp gradient; priority_level is the band it
+    # falls in, used to highlight a cell in the picker (same look whether the
+    # value is a user pin or the AI's).
+    priority_user = _clamp01(d.get("priority_user"))
     d["priority_user"] = priority_user
-    if priority_user:
-        d["priority_level"] = priority_user
-        d["priority_score"] = _PRIORITY_LEVEL_SCORE[priority_user]
-        d["priority_from_ai"] = False
+    if priority_user is not None:
+        d["priority_score"] = priority_user
+        d["priority_level"] = _score_to_priority_level(priority_user)
     elif d["ai_verdict"]:
-        d["priority_level"] = _score_to_priority_level(d["ai_verdict"]["priority_score"])
         d["priority_score"] = d["ai_verdict"]["priority_score"]
-        d["priority_from_ai"] = True
+        d["priority_level"] = d["ai_verdict"]["priority_level"]
     else:
-        d["priority_level"] = None
         d["priority_score"] = None
-        d["priority_from_ai"] = False
+        d["priority_level"] = None
 
     return d
 
@@ -1812,16 +1840,16 @@ def set_muted(thread_id: str):
 def _log_priority_change(
     conn: sqlite3.Connection,
     thread_id: str,
-    from_level: str | None,
-    to_level: str | None,
+    from_score: float | None,
+    to_score: float | None,
 ) -> None:
-    """Append a `priority_change` event to the thread timeline, coalescing
-    with an immediately-prior one: if the latest event on this thread is
-    already a `priority_change` (no GitHub / AI / other activity in between),
-    update it in place rather than stacking a second entry — and if the net
-    effect round-trips back to that run's starting point, drop it entirely.
+    """Append a `priority_change` event (payload {from, to} — 0..1 floats, or
+    null = "auto"), coalescing with an immediately-prior one: if the latest
+    event on this thread is already a `priority_change` (no GitHub / AI /
+    other activity in between), update it in place rather than stacking — and
+    if the run round-trips back to its starting point, drop it entirely.
     Keeps `from` pinned to the value before the first change of the run."""
-    if from_level == to_level:
+    if from_score == to_score:
         return
     now = int(time.time())
     last = conn.execute(
@@ -1835,20 +1863,13 @@ def _log_priority_change(
         except (ValueError, TypeError):
             prev = {}
         origin = prev.get("from")
-        if to_level == origin:
+        if to_score == origin:
             conn.execute("DELETE FROM thread_events WHERE id = ?", (last["id"],))
             return
         conn.execute(
             "UPDATE thread_events SET payload_json = ?, ts = ? WHERE id = ?",
-            (
-                json.dumps(
-                    {"from": origin, "to": to_level,
-                     "score": _PRIORITY_LEVEL_SCORE.get(to_level)},
-                    ensure_ascii=False,
-                ),
-                now,
-                last["id"],
-            ),
+            (json.dumps({"from": origin, "to": to_score}, ensure_ascii=False),
+             now, last["id"]),
         )
         return
     db.write_thread_event(
@@ -1857,36 +1878,35 @@ def _log_priority_change(
         ts=now,
         kind="priority_change",
         source="user",
-        payload={"from": from_level, "to": to_level,
-                 "score": _PRIORITY_LEVEL_SCORE.get(to_level)},
+        payload={"from": from_score, "to": to_score},
     )
 
 
 @app.post("/set/<thread_id>/priority")
 def set_priority(thread_id: str):
-    """Set the user's hand-picked priority level (low / normal / high /
-    urgent). Posting the currently-active level clears it back to "auto"
-    (NULL → fall back to the AI verdict's score, or neutral) — same
-    toggle-to-deselect behaviour as the dismissal buttons. Logs a coalesced
-    `priority_change` timeline event so the next AI judgment reads it as
-    calibration; doesn't invalidate the verdict (the re-assess button stays
-    as it was — a manual priority tweak isn't new context)."""
+    """Pin the thread's priority. The picker posts a band name (one of
+    PRIORITY_LEVELS); we store the band's representative 0..1 score. Posting
+    the band the current pin already sits in clears it back to "auto" (NULL →
+    fall back to the AI verdict's score) — toggle-to-deselect, like the
+    dismissal buttons. Logs a coalesced `priority_change` timeline event so
+    the next judgment reads it as calibration; doesn't invalidate the verdict
+    (a manual priority tweak isn't new context)."""
     n = _load_one(thread_id)
     if not n:
         return ("", 404)
     requested = (request.values.get("level") or "").strip()
-    current = n["priority_user"]
-    new_level = (
-        None if requested not in PRIORITY_LEVELS or requested == current
-        else requested
-    )
+    if requested not in PRIORITY_LEVELS:
+        return ("", 400)
+    current = n["priority_user"]  # 0..1 float or None (clamped in _row_to_dict)
+    current_band = _score_to_priority_level(current) if current is not None else None
+    new_score = None if requested == current_band else _PRIORITY_LEVEL_SCORE[requested]
     conn = db.connect()
     try:
         conn.execute(
             "UPDATE notifications SET priority_user = ? WHERE id = ?",
-            (new_level, thread_id),
+            (new_score, thread_id),
         )
-        _log_priority_change(conn, thread_id, current, new_level)
+        _log_priority_change(conn, thread_id, current, new_score)
     finally:
         conn.close()
     return _render_row(_load_one(thread_id))

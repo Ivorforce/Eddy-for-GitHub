@@ -229,13 +229,22 @@ ALTER TABLE repos         DROP COLUMN note_ai;
 ALTER TABLE orgs          DROP COLUMN note_ai;
 """
 
-# User-set priority: 'low' | 'normal' | 'high' | 'urgent', NULL = unset
-# ("auto" — fall back to the AI verdict's priority_score, or neutral). The
-# user owns the displayed priority until the next AI verdict, which clears
-# this column (the user's choice survives as a priority_change timeline
-# event the next judgment reads as calibration).
+# User-set priority (superseded by V23, which switches the column to REAL).
 SCHEMA_V22 = """
 ALTER TABLE notifications ADD COLUMN priority_user TEXT;
+"""
+
+# Store priority_user as a 0–1 float, not a band name: priorities (user-set
+# and AI) are floats end-to-end, so the named bands ("normal", "high", …)
+# stay a display layer whose boundaries can be re-tuned without migrating
+# data. NULL = unset ("auto" — fall back to the AI verdict's score). The
+# user owns the displayed priority until the next AI verdict, which clears
+# this column (the choice survives as a priority_change timeline event the
+# next judgment reads as calibration). Column is empty in practice (shipped
+# in the same batch), so a plain drop/re-add is safe.
+SCHEMA_V23 = """
+ALTER TABLE notifications DROP COLUMN priority_user;
+ALTER TABLE notifications ADD COLUMN priority_user REAL;
 """
 
 
@@ -340,6 +349,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V22)
             _set_version(conn, 22)
             version = 22
+        if version < 23:
+            conn.executescript(SCHEMA_V23)
+            _set_version(conn, 23)
+            version = 23
     finally:
         conn.close()
 

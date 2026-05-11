@@ -265,21 +265,28 @@
           </div>
         </form>
       </div>
-      {# Priority control — pick a level (low / normal / high / urgent);
-         re-click the active one to clear back to "auto" (fall back to the
-         AI's score, or neutral). When the highlighted segment is mirroring
-         the AI verdict's bucket rather than a user pin it's marked
-         `.from-ai`. Posting re-renders the whole row so the pill gradient
-         and the highlight move together. #}
-      <div class="priority-group" role="group" aria-label="Set priority">
-        {% for lv in ['low', 'normal', 'high', 'urgent'] %}
-        <button type="button" name="level" value="{{ lv }}"
-                class="priority-segment seg-{{ lv }}{% if n.priority_level == lv %} active{% if n.priority_from_ai %} from-ai{% endif %}{% endif %}"
-                hx-post="/set/{{ n.id }}/priority"
-                hx-target="closest tr"
-                hx-swap="outerHTML"
-                hx-include="#filters"
-                title="{% if n.priority_level == lv and n.priority_from_ai %}Priority {{ lv }} — the AI's call; click to pin it{% elif n.priority_level == lv %}Priority {{ lv }} — click to clear (back to auto){% else %}Set priority: {{ lv }}{% endif %}">{{ lv|capitalize }}</button>
+      {# Priority picker — one row of six cells in three labelled bands
+         (Low / Medium / High, each label spanning its pair of cells and
+         straddling the divider between them). Click a cell to pin that
+         priority; click the cell the current pin already sits in to clear
+         back to "auto" (fall back to the AI verdict's score, or neutral).
+         A user pin and an AI-derived highlight look identical. The band
+         labels are a non-interactive overlay — clicks land on the cells
+         underneath. Posting re-renders the whole row so the pill gradient
+         and the picker highlight move together. #}
+      <div class="priority-grid" role="group" aria-label="Priority">
+        {% for g in PRIORITY_UI %}{% set gi = loop.index0 %}
+          {% for c in g.cells %}
+          <button type="button" name="level" value="{{ c.key }}"
+                  style="grid-column: {{ gi * 2 + loop.index }}; --imp: {{ '%.3f' % c.score }};"
+                  class="priority-cell{% if loop.first %} band-start{% endif %}{% if n.priority_level == c.key %} active{% endif %}"
+                  hx-post="/set/{{ n.id }}/priority"
+                  hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters"
+                  title="{{ c.desc }}"></button>
+          {% endfor %}
+        {% endfor %}
+        {% for g in PRIORITY_UI %}
+        <span class="priority-band-label" style="grid-column: {{ loop.index0 * 2 + 1 }} / span 2;" aria-hidden="true">{{ g.group }}</span>
         {% endfor %}
       </div>
       {% if v and v.signals %}

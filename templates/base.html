@@ -599,65 +599,68 @@
       50%      { opacity: 0.85; }
     }
 
-    /* Priority control — segmented low / normal / high / urgent the user
-       can pin in the Relevance column (re-click the active one to clear
-       back to "auto"). The active segment fills with a tint pulled from
-       the same oklch ramp as the verdict pill, at that level's score, so
-       the control echoes the row gradient. A user pin is solid; when the
-       highlight is only mirroring the AI verdict's bucket (priority_user
-       unset, .from-ai) it's faint with a dotted outline — "the AI's call,
-       not something you set". */
-    .priority-group {
-      display: inline-flex;
+    /* Priority picker — one row of six cells grouped 2-2-2 under Low /
+       Medium / High band labels. The labels are an overlay (pointer-events:
+       none) sitting over the cells, each word centred on its pair so it
+       straddles the faint divider between that pair's two cells; the
+       brighter dividers fall between the three bands (and carry no label
+       above them), which is what makes the grouping read. The active cell
+       fills with a tint from the same oklch ramp as the verdict pill (its
+       score set inline as --imp) — same look whether the highlight is a
+       user pin or the AI verdict's score. */
+    .priority-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      grid-template-rows: 1.25rem;
+      min-width: 11rem;   /* keep cell pairs wide enough that the band labels
+                             ("Medium" is the long one) fit on one line */
       max-width: 100%;
       margin: 0.3rem 0 0;
-      background: rgba(140, 149, 159, 0.08);
+      background: rgba(140, 149, 159, 0.06);
       border: 1px solid var(--pico-muted-border-color);
       border-radius: 0.4rem;
       overflow: hidden;
     }
-    .priority-segment {
+    .priority-cell {
+      grid-row: 1;
+      position: relative;
       background: none;
       border: none;
       margin: 0;
-      padding: 0.06rem 0.4rem;
+      padding: 0;
       cursor: pointer;
-      line-height: 1.45;
-      font-size: 0.6rem;
-      font-weight: 500;
-      color: var(--pico-muted-color);
-      white-space: nowrap;
     }
-    .priority-segment + .priority-segment {
-      border-left: 1px solid var(--pico-muted-border-color);
+    /* Within-pair divider: very faint. Band boundary (the .band-start cells
+       — first of Medium, first of High): brighter, so the 2-2-2 reads. */
+    .priority-cell + .priority-cell { box-shadow: inset 1px 0 0 rgba(140, 149, 159, 0.16); }
+    .priority-cell.band-start:not(:first-child) {
+      box-shadow: inset 1px 0 0 rgba(140, 149, 159, 0.55);
     }
-    .priority-segment:hover {
-      background: rgba(140, 149, 159, 0.18);
-      color: var(--pico-color);
-    }
-    .priority-segment.active {
+    .priority-cell:hover { background: rgba(140, 149, 159, 0.13); }
+    .priority-cell.active {
       --imp-e: pow(var(--imp), 1.4);
       --hue: calc(165 - pow(var(--imp), 2.5) * 115);
-      color: var(--pico-color);
-      font-weight: 600;
+      --chroma: calc(0.06 + var(--imp-e) * 0.15);
       background: oklch(
-        calc(0.42 + var(--imp-e) * 0.18)
-        calc(var(--imp-e) * 0.17)
+        calc(0.56 + var(--imp-e) * 0.09)
+        var(--chroma)
         var(--hue)
-        / calc(0.30 + var(--imp-e) * 0.55));
+        / calc(0.62 + var(--imp-e) * 0.33));
     }
-    .priority-segment.seg-low.active    { --imp: 0.25; }
-    .priority-segment.seg-normal.active { --imp: 0.5; }
-    .priority-segment.seg-high.active   { --imp: 0.75; }
-    .priority-segment.seg-urgent.active { --imp: 0.95; }
-    .priority-segment.active.from-ai {
-      background: oklch(
-        calc(0.42 + var(--imp-e) * 0.18)
-        calc(var(--imp-e) * 0.17)
-        var(--hue)
-        / calc(0.12 + var(--imp-e) * 0.22));
-      outline: 1px dotted var(--pico-muted-border-color);
-      outline-offset: -2px;
+    .priority-band-label {
+      grid-row: 1;
+      align-self: center;
+      justify-self: stretch;   /* fill the 2-cell span so the padding keeps the
+                                  text clear of the band dividers on both sides */
+      text-align: center;      /* centred → straddles the within-pair divider */
+      white-space: nowrap;
+      pointer-events: none;
+      padding: 0 0.4rem;
+      font-size: 0.6rem;
+      font-weight: 500;
+      line-height: 1;
+      color: color-mix(in oklab, var(--pico-color) 60%, var(--pico-muted-color));
+      text-shadow: 0 0 2px var(--pico-background-color);
     }
 
     /* Signal row — small pills below the verdict explaining what the AI
