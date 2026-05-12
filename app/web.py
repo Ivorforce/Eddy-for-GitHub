@@ -810,13 +810,32 @@ def _verdict_render_dict(
     doesn't apply to historical entries)."""
     priority_level, priority_score = _verdict_priority(payload)
 
+    def _md(text):
+        return ghmd.render(
+            text, cur_repo=cur_repo, interactive=True,
+            tracked_people=tracked_people, people_notes=notes_people,
+        )
+
+    action_now = payload.get("action_now") or "look"
+    action_label = _AI_ACTION_LABELS.get(action_now, action_now)
+    sd = payload.get("snooze_days")
+    if action_now == "snooze" and isinstance(sd, int) and 1 <= sd <= 90:
+        action_label = f"{action_label} ~{_short_duration(sd * 86400)}"
+
     description = (payload.get("description") or "").strip()
+    # `reply` is optional and only present when the AI had something to say
+    # back to the user. When it's set, the timeline renders the verdict as a
+    # chat bubble (with the standing description as an aside); when it's not,
+    # the verdict collapses to a compact one-line entry (action + priority +
+    # description). See templates/_timeline_event.html.
+    reply = (payload.get("reply") or "").strip()
     return {
         "description":      description,
-        "description_html": ghmd.render(
-            description, cur_repo=cur_repo, interactive=True,
-            tracked_people=tracked_people, people_notes=notes_people,
-        ),
+        "description_html": _md(description),
+        "reply":            reply,
+        "reply_html":       _md(reply) if reply else "",
+        "action_now":       action_now,
+        "action_label":     action_label,
         "priority_level": priority_level,
         "priority_score": priority_score,
         "model":          payload.get("model") or "",
@@ -2373,8 +2392,9 @@ def ai_judge(thread_id: str):
 
     Three invocation modes, derived from the request shape:
       - body present                          → 'chat'         (the user
-        is talking to the AI; the verdict's description should reply to
-        their message rather than summarize the thread)
+        sent a message — saved as a user_chat event first — and wants a
+        fresh verdict; the AI may answer in the verdict's optional `reply`
+        field, but omits it when there's nothing to say back)
       - body empty + cached verdict exists    → 're_evaluate'  (Re-ask
         button; focus on what's changed since the last verdict)
       - body empty + no cached verdict        → 'summary'      (first

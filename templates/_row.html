@@ -255,9 +255,10 @@
 
     {# Shared timeline popover — chronological event log. Renders in both
        modes (even before the first AI verdict). The partial renders one
-       <li> per event: ai_verdict + user_chat as full chat bubbles, others
-       as muted one-liners. Manual mode: no composer, title "Thread". AI
-       mode: composer + "Thread × AI". #}
+       <li> per event: user_chat and reply-bearing ai_verdicts as full chat
+       bubbles, everything else (incl. reply-less "re-assessed" verdicts) as
+       muted one-liners. Manual mode: no composer, title "Thread". AI mode:
+       composer + "Thread × AI". #}
     {% set thread_id = n.id %}
     <div class="action-popover ai-verdict-popover" popover id="pop-timeline-{{ n.id }}"
          data-kind="ai" data-thread-id="{{ n.id }}"
@@ -271,17 +272,20 @@
         {% endfor %}
       </ol>
       {% if triage_mode == 'ai' %}
-      {# Composer. Chat-style: explicit Send (Enter) or Send + Re-ask
-         (Ctrl+Enter, label switches to "↻ Re-ask" when the textarea
-         is empty). Shift+Enter inserts a newline. Send is disabled
-         when the textarea is empty. The textarea clears via
-         hx-on::after-request after a successful Send so subsequent
-         messages append rather than re-saving the same draft. #}
+      {# Composer. Two acts: Note (Enter — saves a user_chat event, no AI
+         call; the AI sees it next time it judges this thread) and the AI
+         button (Ctrl+Enter — re-judge; label "↻ Re-ask" when empty,
+         "Send to AI" with text, in which case the text is saved as a
+         user_chat event first and the verdict may carry a `reply`).
+         Shift+Enter inserts a newline. Note is disabled when the textarea
+         is empty. The textarea clears via hx-on::after-request after a
+         successful Note so subsequent notes append rather than re-saving
+         the same draft. #}
       <form class="ai-chat-form"
             onsubmit="return false"
             onkeydown="aiChatKeydown(event)">
         <textarea name="body" rows="2"
-                  placeholder="Reply to the AI… (Enter to send, Ctrl+Enter to send and re-ask, Shift+Enter for newline)"
+                  placeholder="Note (Enter) · send to AI (Ctrl+Enter) · Shift+Enter for newline"
                   oninput="aiChatInput(event)"></textarea>
         <div class="ai-chat-form-buttons">
           <button type="button" class="ai-send-btn" disabled
@@ -290,7 +294,7 @@
                   hx-swap="beforeend"
                   hx-on::before-request="aiBusyOn(this)"
                   hx-on::after-request="aiSendAfterRequest(this, event)"
-                  title="Send chat message (Enter)">Send</button>
+                  title="Add note (Enter) — no AI call">Note</button>
           <button type="button" class="ai-rejudge-btn"
                   hx-post="/ai/{{ n.id }}/judge"
                   hx-target="closest tr"
@@ -298,7 +302,7 @@
                   hx-include="#filters, closest form"
                   hx-indicator="closest tr"
                   hx-on::before-request="aiBusyOn(this)"
-                  title="Empty: (re-)assess based on current state. With text: send your message and the AI replies (Ctrl+Enter)."><span class="rejudge-label">↻ Re-ask</span></button>
+                  title="Empty: re-assess from current state. With text: send it to the AI and re-assess (Ctrl+Enter)."><span class="rejudge-label">↻ Re-ask</span></button>
         </div>
       </form>
       {% endif %}

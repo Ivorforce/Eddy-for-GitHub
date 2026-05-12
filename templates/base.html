@@ -1033,12 +1033,33 @@
       color: var(--pico-muted-color);
       margin-top: 0.25rem;
     }
+    /* The standing description carried under a reply bubble — set off from
+       the reply by a hairline rule, muted so the reply reads first. */
+    .ai-verdict-popover .timeline-bubble-aside {
+      margin-top: 0.3rem;
+      padding-top: 0.3rem;
+      border-top: 1px solid var(--pico-muted-border-color);
+      font-size: 0.72rem;
+      color: var(--pico-muted-color);
+    }
+    /* Compact ai_verdict line — a re-assessment with no reply (no bubble).
+       Action label + priority tag carry "what changed"; the description
+       ellipsizes to one line (full text on hover) and keeps full contrast
+       so the take reads against the muted comment/review lines around it. */
+    .ai-verdict-popover .timeline-verdict-line .ai-verdict-priority-tag { margin-left: 0; }
+    .ai-verdict-popover .timeline-verdict-line .timeline-summary { color: var(--pico-color); }
+    .ai-verdict-popover .timeline-verdict-action {
+      flex-shrink: 0;
+      font-weight: 500;
+      color: var(--pico-color);
+    }
 
-    /* ── Chat composer ──────────────────────────────────────────── */
-    /* Chat-style: explicit Send (Enter) and Re-ask / Send + Re-ask
-       (Ctrl+Enter). No auto-save; nothing fires on blur or on debounce.
-       The button row sits directly below the textarea inside the same
-       form so HTMX picks up the body via the implicit form-include. */
+    /* ── Composer ───────────────────────────────────────────────── */
+    /* Two explicit acts: Note (Enter — free, no AI call) and the AI button
+       (Ctrl+Enter — re-judge, "↻ Re-ask" empty / "Send to AI" with text).
+       No auto-save; nothing fires on blur or on debounce. The button row
+       sits directly below the textarea inside the same form so HTMX picks
+       up the body via the implicit form-include. */
     .ai-verdict-popover .ai-chat-form {
       margin: 0.4rem 0 0;
       padding-top: 0.4rem;
@@ -1083,12 +1104,14 @@
       cursor: not-allowed;
       opacity: 0.5;
     }
-    /* Send leans blue (matches user-chat bubble); Re-ask stays neutral
-       so it visually reads as a meta-action rather than a chat reply. */
-    .ai-verdict-popover .ai-send-btn:not(:disabled) {
-      background: rgba(31, 122, 207, 0.1);
-      border-color: rgba(31, 122, 207, 0.32);
-      color: #1f7acf;
+    /* Note stays neutral (the low-key default); the AI button — "↻ Re-ask"
+       empty or "Send to AI" with text — is purple, the AI accent used by
+       the verdict pill / bubble, so the AI action reads as distinct from
+       the neutral Note in either state. */
+    .ai-verdict-popover .ai-chat-form-buttons .ai-rejudge-btn {
+      background: rgba(137, 87, 229, 0.12);
+      border-color: rgba(137, 87, 229, 0.42);
+      color: #8957e5;
     }
     /* In-flight state. Popover stays open so the user can see the new
        chat bubble appear when the response arrives (same visual idiom
@@ -1816,18 +1839,22 @@
     document.addEventListener("change", onFilterEvent);
     document.addEventListener("input", onFilterEvent);
 
-    // AI chat composer: keyboard shortcuts + button-state syncing.
+    // AI composer: keyboard shortcuts + button-state syncing. The default
+    // act is a free "Note" (no AI call); sending to the AI is the deliberate
+    // Ctrl+Enter — the asymmetry matches the cost asymmetry (~0.5¢ + latency
+    // per judgment vs. zero for a note the AI picks up next time it judges).
     //
-    //   Enter        → click the Send button (post chat as user_chat event)
-    //   Ctrl+Enter   → click the Re-ask button (re-judge, optionally with
-    //                  any text in the textarea posted as user_chat first)
+    //   Enter        → click the Note button (post text as a user_chat event)
+    //   Ctrl+Enter   → click the AI button: re-judge, posting any text in the
+    //                  textarea as a user_chat event first (the AI replies in
+    //                  the verdict's optional `reply` field only if warranted)
     //   Shift+Enter  → default newline (no shortcut handling)
     //
-    // Send is disabled when the textarea is empty; the Re-ask button's
-    // label switches between "Re-ask" and "Send + Re-ask" depending on
-    // whether there's text. aiChatInput() also gets called from the
-    // Send button's hx-on::after-request after a successful POST so the
-    // disabled state and label resync once the textarea has been cleared.
+    // Note is disabled when the textarea is empty; the AI button's label
+    // switches between "↻ Re-ask" (empty) and "Send to AI" (has text).
+    // aiChatInput() also gets called from the Note button's
+    // hx-on::after-request after a successful POST so the disabled state and
+    // label resync once the textarea has been cleared.
     window.aiChatKeydown = function (e) {
       if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
       const popover = e.target.closest(".ai-verdict-popover");
@@ -1840,11 +1867,11 @@
 
     // Visual busy state for AI requests fired from inside the popover.
     // Adds .busy on the popover so CSS dims + pulses the controls and the
-    // keyboard handler bails. For Send (timeline append, no row swap) we
-    // remove it on after-request and clear the textarea on success. For
-    // Re-ask / Send & Reply (full row swap), the popover element itself
-    // is replaced — the new instance has no .busy class, and a separate
-    // beforeSwap/afterSwap handler re-opens it (see below) so the
+    // keyboard handler bails. For Note (timeline append, no row swap) we
+    // remove it on after-request and clear the textarea on success. For the
+    // AI button (Re-ask / Send to AI — full row swap), the popover element
+    // itself is replaced — the new instance has no .busy class, and a
+    // separate beforeSwap/afterSwap handler re-opens it (see below) so the
     // conversation stays visible.
     window.aiBusyOn = function (btn) {
       btn.closest(".ai-verdict-popover")?.classList.add("busy");
@@ -1859,7 +1886,7 @@
     };
 
     // Keep the AI popover open across the row swaps that judgments
-    // trigger (Send & Reply, Re-ask). The general per-row handler
+    // trigger (Send to AI, Re-ask). The general per-row handler
     // intentionally lets popovers close because most per-row swaps come
     // from "the action is done" buttons (mark read, mute) — but the AI
     // popover hosts an ongoing conversation, so closing it mid-flow loses
@@ -1889,16 +1916,15 @@
       const hasText = ta.value.trim().length > 0;
       const send = popover.querySelector(".ai-send-btn");
       if (send) send.disabled = !hasText;
+      // Two invocation modes share the rejudge button. Empty textarea →
+      // re-evaluate ("↻ Re-ask"). Text present → chat: send the message and
+      // re-judge ("Send to AI"). Just the label changes; the button is
+      // purple (the AI accent) in both states.
       const rejudgeLabel = popover.querySelector(".ai-rejudge-btn .rejudge-label");
       if (rejudgeLabel) {
-        // Two distinct invocation modes share this button. Empty textarea
-        // → re-evaluate ("↻ Re-ask", with optional events-since count
-        // suffix from the server render). Text present → chat: the user
-        // wants the AI to reply, not re-summarize. Different label +
-        // icon to make the mode shift legible at a glance.
         const initial = rejudgeLabel.dataset.initial || rejudgeLabel.textContent;
         rejudgeLabel.dataset.initial = initial;
-        rejudgeLabel.textContent = hasText ? "✉ Send & Reply" : initial;
+        rejudgeLabel.textContent = hasText ? "Send to AI" : initial;
       }
     };
 

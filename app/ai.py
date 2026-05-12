@@ -116,7 +116,18 @@ TOOL_DEF: dict = {
                 "type": "string",
                 "description": (
                     "Interpretation of the thread (not restatement of row-visible facts). "
+                    "The standing take, never a reply to the user — that's `reply`. "
                     "See system prompt §Brevity for length and content rules."
+                ),
+            },
+            "reply": {
+                "type": "string",
+                "description": (
+                    "Optional. A direct reply to the user — include it only when a `user_chat` "
+                    "message on the thread asks something or wants a response (most often you've "
+                    "just been sent one in 'chat' mode). Answer it or push back, concisely. "
+                    "Omit entirely when there's nothing to answer; a bare acknowledgement is "
+                    "noise. Not a substitute for `description`. See system prompt §Output fields."
                 ),
             },
         },
