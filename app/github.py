@@ -1584,7 +1584,7 @@ def _upsert(
     # uncertainty (distinct from the local 'visited' / 'read' labels).
     prev = conn.execute(
         "SELECT unread, action, ignored, muted_kinds, effective_updated_at, "
-        "snooze_until FROM notifications WHERE id = ?",
+        "snooze_until, updated_at FROM notifications WHERE id = ?",
         (item["id"],),
     ).fetchone()
     if touched is not None and prev is not None:
@@ -1594,19 +1594,24 @@ def _upsert(
         ))
     new_unread = 1 if item.get("unread") else 0
     external_read = (prev is not None and prev["unread"] == 1 and new_unread == 0)
+    updated_at = item.get("updated_at") or ""
     # Resurface a locally-archived thread — Done (action='done') or Snooze
-    # (action='snoozed') — when GitHub hands us the notification again: both
-    # archive on GitHub, so a re-fetch means genuinely new activity landed
-    # (this mirrors github.com's own "Done" auto-reset, and beats a pending
-    # snooze timer). Mute (action='done' + ignored) stays archived: the
-    # unsubscribe means GitHub won't deliver further activity, and the point
-    # of Mute is "I never want to see this again".
+    # (action='snoozed') — when GitHub hands us the notification again *with new
+    # activity*: both archive on GitHub, so a bumped updated_at means genuinely
+    # new activity landed (this mirrors github.com's own "Done" auto-reset, and
+    # beats a pending snooze timer). The updated_at gate matters because the
+    # poll's unread fetch (a thread whose mark_done didn't take) and an explicit
+    # backfetch (unconditional `?all=true` pull) can both re-deliver a hidden
+    # row with nothing actually changed — without the gate that would spuriously
+    # un-archive it / wipe its snooze deadline. Mute (action='done' + ignored)
+    # stays archived regardless: the unsubscribe means GitHub won't deliver
+    # further activity, and the point of Mute is "I never want to see this again".
     resurfaced = (
         prev is not None
         and prev["action"] in ("done", "snoozed")
         and not prev["ignored"]
+        and updated_at != (prev["updated_at"] or "")
     )
-    updated_at = item.get("updated_at") or ""
     conn.execute(
         """
         INSERT INTO notifications (
