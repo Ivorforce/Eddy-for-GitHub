@@ -72,6 +72,8 @@ In **AI mode**, the verdict's suggestions show as purple inset rings on the matc
 
 **Storage:** every API call writes a row to `ai_calls` (full request + response, token breakdown, estimated cost, status). Useful for prompt tuning and the soft daily cap (`AI_DAILY_CAP_USD`, default $2). Past verdicts also live as `ai_verdict` events on `thread_events` — joined via `external_id`.
 
+**Introspecting one item.** The SQLite DB is `data/notifications.db`. To see exactly what the AI saw and thought for a given thread, look up its `notifications` row by `html_url` (or `id`), then read `ai_calls` for that `thread_id` — `request_json` is the assembled prompt, `response_json` has the model's thinking blocks and tool call.
+
 **Default model:** Haiku 4.5. Configurable via `AI_MODEL`. The system prompt + preferences sit at ~3k tokens after the timeline-interpretation section — still below Haiku's 4096-token cache minimum, so `cache_control` markers don't fire today; they're forward-compatible once preferences grow.
 
 **Thinking budget.** Extended thinking (~4k-token budget) on every judgment *except* a Re-ask whose only delta since the cached verdict is a code push or label/metadata churn (no new `comment`/`review`/`lifecycle`/`user_chat`/`body_edit`) — those run thinking-off with `tool_choice` forced (the two are mutually exclusive on the API), since the new file list / diff stats / `last_commit` are already in the prompt and don't need deliberating over. Thinking is ~40% of a cache-warm call's cost. See `ai._should_think` / `_THINKING_REQUIRED_KINDS`.
