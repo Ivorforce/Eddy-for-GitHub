@@ -500,13 +500,13 @@ query($owner: String!, $name: String!, $number: Int!) {
           databaseId
           author { login }
           authorAssociation
-          bodyText
+          body
           createdAt
           lastEditedAt
           isMinimized
           minimizedReason
           reactionGroups { content reactors { totalCount } }
-          replies(last: 3) { totalCount nodes { author { login } bodyText createdAt } }
+          replies(last: 3) { totalCount nodes { author { login } body createdAt } }
         }
       }
       reactionGroups { content reactors { totalCount } }
@@ -625,7 +625,7 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
             "author_association": c.get("authorAssociation"),
             "created_at": c.get("createdAt"),
             "edited_at": c.get("lastEditedAt"),
-            "body": c.get("bodyText") or "",
+            "body": c.get("body") or "",
             **_comment_node_extras(c),
         }
         reply_count = replies.get("totalCount") or len(reply_nodes)
@@ -741,8 +741,8 @@ query($owner: String!, $name: String!, $number: Int!) {
           isResolved
           isOutdated
           path
-          opener: comments(first: 1) { nodes { author { login } bodyText } }
-          latest: comments(last: 2) { totalCount nodes { createdAt author { login } bodyText } }
+          opener: comments(first: 1) { nodes { author { login } body } }
+          latest: comments(last: 2) { totalCount nodes { createdAt author { login } body } }
         }
       }
       comments(last: 100) {
@@ -751,7 +751,7 @@ query($owner: String!, $name: String!, $number: Int!) {
           databaseId
           author { login }
           authorAssociation
-          bodyText
+          body
           createdAt
           lastEditedAt
           isMinimized
@@ -765,7 +765,7 @@ query($owner: String!, $name: String!, $number: Int!) {
           state
           author { login }
           authorAssociation
-          bodyText
+          body
           submittedAt
           lastEditedAt
           comments { totalCount }
@@ -881,21 +881,21 @@ _DISCUSSION_REPLY_BODY_CAP = 12
 
 
 def _truncate_body(c: dict) -> str:
-    body = (c.get("bodyText") or "").strip()
+    body = (c.get("body") or "").strip()
     if len(body) > _SAMPLED_COMMENT_TRUNC:
         body = body[:_SAMPLED_COMMENT_TRUNC] + "…[truncated]"
     return body
 
 
 def _review_thread_comment(c: dict) -> dict:
-    """One sampled review-thread comment → {author, body}; body is bodyText
-    (markup stripped), truncated."""
+    """One sampled review-thread comment → {author, body}; body is raw
+    markdown, truncated."""
     return {"author": (c.get("author") or {}).get("login"), "body": _truncate_body(c)}
 
 
 def _sampled_reply(c: dict) -> dict:
     """One sampled discussion reply → {author, created_at, body}; body is
-    bodyText (markup stripped), truncated."""
+    raw markdown, truncated."""
     return {
         "author": (c.get("author") or {}).get("login"),
         "created_at": c.get("createdAt"),
@@ -1028,7 +1028,7 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
             "author_association": c.get("authorAssociation"),
             "created_at": c.get("createdAt"),
             "edited_at": c.get("lastEditedAt"),
-            "body": c.get("bodyText") or "",
+            "body": c.get("body") or "",
             **_comment_node_extras(c),
         })
 
@@ -1048,7 +1048,7 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
             "author_association": rev.get("authorAssociation"),
             "submitted_at": rev.get("submittedAt"),
             "edited_at": rev.get("lastEditedAt"),
-            "body": rev.get("bodyText") or "",
+            "body": rev.get("body") or "",
         }
         rev_rx = _condense_reaction_groups(rev.get("reactionGroups"))
         if rev_rx:
@@ -1231,7 +1231,7 @@ query($owner: String!, $name: String!, $number: Int!) {
           databaseId
           author { login }
           authorAssociation
-          bodyText
+          body
           createdAt
           lastEditedAt
           isMinimized
@@ -1313,7 +1313,7 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
             "author_association": c.get("authorAssociation"),
             "created_at": c.get("createdAt"),
             "edited_at": c.get("lastEditedAt"),
-            "body": c.get("bodyText") or "",
+            "body": c.get("body") or "",
             **_comment_node_extras(c),
         })
 
