@@ -1054,6 +1054,50 @@
       padding-top: 0.3rem;
       border-top: 1px solid var(--pico-muted-border-color);
     }
+    /* A verdict a later judgment has superseded — kept in the log as a bare
+       thin purple rule (its position marks "AI last looked here"); hover
+       reveals the full verdict via the custom tooltip (.tip-verdict-* below).
+       The vertical padding is a comfortable hover target around the 0px rule. */
+    .ai-verdict-popover .timeline-verdict-line {
+      display: flex;
+      align-items: center;
+      padding: 0.15rem 0;
+      cursor: default;
+    }
+    .ai-verdict-popover .timeline-verdict-rule {
+      flex: 1;
+      height: 0;
+      margin: 0 0.1rem;
+      border-top: 1px solid rgba(137, 87, 229, 0.4);
+    }
+    .ai-verdict-popover .timeline-verdict-line:hover .timeline-verdict-rule {
+      border-top-color: rgba(137, 87, 229, 0.75);
+    }
+    /* Inside the hover tooltip: the superseded verdict's content, mirroring
+       the live bubble's hierarchy (priority tag · reply over a hairline ·
+       recessed description · muted model). */
+    .custom-tooltip .tip-verdict-tag {
+      display: inline-block;
+      margin-bottom: 0.2rem;
+      font-size: 0.6rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 0.7;
+    }
+    .custom-tooltip .tip-verdict-reply,
+    .custom-tooltip .tip-verdict-desc { white-space: normal; }
+    .custom-tooltip .tip-verdict-desc { opacity: 0.8; }
+    .custom-tooltip .tip-verdict-reply + .tip-verdict-desc {
+      margin-top: 0.3rem;
+      padding-top: 0.3rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.18);
+    }
+    .custom-tooltip .tip-verdict-model {
+      margin-top: 0.3rem;
+      font-size: 0.6rem;
+      opacity: 0.5;
+    }
 
     /* ── Composer ───────────────────────────────────────────────── */
     /* Two explicit acts: Note (Enter — free, no AI call) and the AI button

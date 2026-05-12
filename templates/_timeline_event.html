@@ -18,7 +18,14 @@
    (member, first-time, self) use the same macro as the Repo column. #}
 {% from "_macros.html" import author_chip %}
 <li class="timeline-event kind-{{ ev.kind }} src-{{ ev.source }}{% if ev.superseded %} review-superseded{% endif %}">
-  {% if ev.kind == 'ai_verdict' %}
+  {% if ev.kind == 'ai_verdict' and ev.verdict_superseded %}
+    {# A verdict a later judgment has overridden — collapsed to a bare thin
+       purple rule (the preceding event's time already locates it); hover
+       reproduces the bubble's content. Marks "AI last looked here". #}
+    <div class="timeline-verdict-line" data-tip-html="{{ ev.verdict.tip_html|forceescape }}" aria-label="AI: {{ ev.verdict.description }}">
+      <span class="timeline-verdict-rule" aria-hidden="true"></span>
+    </div>
+  {% elif ev.kind == 'ai_verdict' %}
     <div class="timeline-bubble bubble-ai">
       <div class="timeline-bubble-head">
         <span class="timeline-actor">AI</span>

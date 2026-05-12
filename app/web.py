@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 
 from flask import Flask, make_response, render_template, request
+from markupsafe import Markup
 
 from . import ai, db, ghmd, github
 
@@ -822,14 +823,28 @@ def _verdict_render_dict(
     # recessed aside; when `reply` is present it sits above as the body.
     # See templates/_timeline_event.html.
     reply = (payload.get("reply") or "").strip()
+    description_html = _md(description)
+    reply_html = _md(reply) if reply else Markup("")
+    model = payload.get("model") or ""
+    # Collapsed (superseded) verdicts render as a thin line whose hover
+    # tooltip reproduces the bubble's hierarchy in miniature — see
+    # templates/_timeline_event.html / the .tip-verdict-* CSS in base.html.
+    tip_parts = [Markup('<span class="tip-verdict-tag">{} · {:.2f}</span>').format(
+        priority_level, priority_score)]
+    if reply:
+        tip_parts.append(Markup('<div class="tip-verdict-reply">{}</div>').format(reply_html))
+    tip_parts.append(Markup('<div class="tip-verdict-desc">{}</div>').format(description_html))
+    if model:
+        tip_parts.append(Markup('<div class="tip-verdict-model">{}</div>').format(model))
     return {
         "description":      description,
-        "description_html": _md(description),
+        "description_html": description_html,
         "reply":            reply,
-        "reply_html":       _md(reply) if reply else "",
+        "reply_html":       reply_html,
         "priority_level": priority_level,
         "priority_score": priority_score,
-        "model":          payload.get("model") or "",
+        "model":          model,
+        "tip_html":       Markup("").join(tip_parts),
     }
 
 
@@ -923,6 +938,25 @@ def _mark_superseded_reviews(events: list[dict]) -> list[dict]:
             actor = ev.get("actor") or ""
             if last_review_idx.get(actor, idx) > idx:
                 ev["superseded"] = True
+    return events
+
+
+def _mark_superseded_verdicts(events: list[dict]) -> list[dict]:
+    """Flag every ai_verdict event except the most recent one. A verdict is
+    an opinion about the whole thread so far, not a fact like a comment —
+    later opinions supersede it. The template renders the survivor as a full
+    chat bubble and collapses the rest to a thin hover-line, so the timeline
+    stays readable when a thread gets judged repeatedly; the line's position
+    in the log also marks "AI last looked here". Mutates in place; returns
+    the list."""
+    last_idx = max(
+        (i for i, ev in enumerate(events) if ev.get("kind") == "ai_verdict"),
+        default=None,
+    )
+    if last_idx is not None:
+        for i, ev in enumerate(events):
+            if ev.get("kind") == "ai_verdict" and i != last_idx:
+                ev["verdict_superseded"] = True
     return events
 
 
@@ -1163,6 +1197,7 @@ def _attach_timeline(
     timeline = _coalesce_visits(timeline)
     timeline = _coalesce_user_actions(timeline)
     timeline = _mark_superseded_reviews(timeline)
+    timeline = _mark_superseded_verdicts(timeline)
     d["timeline"] = timeline
 
     verdict = d.get("ai_verdict")
