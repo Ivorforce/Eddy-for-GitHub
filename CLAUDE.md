@@ -35,7 +35,7 @@ Verdicts are advisory only: the pill / priority color shape *display*, but no ro
 **Inputs:**
 
 - `config/preferences.md` — free-text user prefs (interests, important repos / people, noise patterns). Loaded into the cached system block. `config/preferences.example.md` ships as a template.
-- `app/ai_system_prompt.md` — shipped instructions (cost asymmetry, brevity rules, output-field semantics, **timeline interpretation**). The "do not restate row-visible facts" rule is load-bearing; "user_chat is authoritative for this thread" and "user_action after a verdict is calibration feedback" are the v1 reading-rules.
+- `app/ai_system_prompt.md` — shipped instructions (cost asymmetry, brevity rules, output-field semantics, **timeline interpretation**). The "do not restate row-visible facts" rule is load-bearing, as is "the `description` is self-contained — written fresh each judgment, never referencing prior verdicts (no 'unchanged'/'as before')"; "user_chat is authoritative for this thread", "user_action after a verdict is calibration feedback", and "prior verdicts are calibration input, not something to cite" are the v1 reading-rules.
 
 **Verdict shape (single tool call, forced via the prompt):**
 
@@ -46,7 +46,7 @@ judge_thread({
     set_tracked:          "track" | "untrack" | "leave",
     priority_score:       float ∈ [0, 1],       # bucketed to low/normal/high for color
     subscription_changes: ["mute_<kind>" | "unmute_<kind>", ...],  # usually []; per-thread mute_kinds tweaks
-    description:          str,                  # what the row doesn't already show — the standing take
+    description:          str,                  # the standing take — self-contained, written fresh each time, never citing prior verdicts
     reply:               str,                  # optional; a direct reply to a user_chat — omitted when there's nothing to say
 })
 ```

@@ -116,8 +116,10 @@ TOOL_DEF: dict = {
                 "type": "string",
                 "description": (
                     "Interpretation of the thread (not restatement of row-visible facts). "
-                    "The standing take, never a reply to the user — that's `reply`. "
-                    "See system prompt §Brevity for length and content rules."
+                    "The standing take, written self-contained — fresh each judgment, never "
+                    "referencing your prior verdicts ('unchanged', 'as before'). Never a reply "
+                    "to the user — that's `reply`. See system prompt §Brevity for length and "
+                    "content rules."
                 ),
             },
             "reply": {
@@ -602,9 +604,10 @@ def judge(
     module remains callable without web's app context.
 
     invocation_mode — one of `summary` / `re_evaluate` / `chat`. Surfaced
-    in the user message so the system prompt can branch on what tone
-    the description should take (see ai_system_prompt.md §Invocation
-    modes). Defaults to `summary` for callers that don't supply it."""
+    in the user message; it tells the model why this judgment is firing
+    (fresh thread / Re-ask / the user sent a chat) — not what the output
+    should look like, which is the same across modes (see ai_system_prompt.md
+    §Invocation modes). Defaults to `summary` for callers that don't supply it."""
     model = _model_id()
     cap = _daily_cap()
     spent = _spent_today(conn)
