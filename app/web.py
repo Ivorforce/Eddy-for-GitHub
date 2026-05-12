@@ -878,6 +878,25 @@ def _coalesce_visits(events: list[dict]) -> list[dict]:
     return out
 
 
+def _coalesce_body_edits(events: list[dict]) -> list[dict]:
+    """Drop earlier `body_edit` events when adjacent in the timeline (no
+    other event of any kind between them). Each one says "the description
+    changed"; only the most recent matters — its `at` and `editor` describe
+    the body the AI / the user is now looking at, and the in-between states
+    are gone (we never kept them). Same shape as _coalesce_visits."""
+    out: list[dict] = []
+    for ev in events:
+        if (
+            ev.get("kind") == "body_edit"
+            and out
+            and out[-1].get("kind") == "body_edit"
+        ):
+            out[-1] = ev   # replace older edit with newer
+        else:
+            out.append(ev)
+    return out
+
+
 def _drop_close_after_merge(events: list[dict]) -> list[dict]:
     """A merged PR emits both a `merged` and a `closed` lifecycle event —
     GitHub closes the PR as part of the merge. The `closed` line carries
@@ -1147,6 +1166,9 @@ def _format_event_for_render(
             payload.get("body") or "", cur_repo=cur_repo, interactive=True,
             tracked_people=tracked_people, people_notes=notes_people,
         )
+    elif kind == "body_edit":
+        out["actor"] = payload.get("editor") or "?"
+        out["summary"] = "edited the description"
     elif kind == "priority_change":
         out["actor"] = "You"
         to_val = payload.get("to")
@@ -1162,8 +1184,11 @@ def _format_event_for_render(
 # Event kinds that constitute "new context the AI hasn't seen" — a verdict
 # made before any of these arrived is out of date. Row-state user_actions
 # (read/done/mute) are the user's *response* to a verdict, not new context,
-# so they don't count; neither does `visited`.
-_VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat")
+# so they don't count; neither does `visited`. (`code` pushes aren't here —
+# they re-enable Re-ask via the verdict going `stale` when details
+# re-enrich; `body_edit` is, since a reframed description is real new
+# context.) Mirrors ai._THINKING_REQUIRED_KINDS.
+_VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat", "body_edit")
 
 
 def _recency_summary(rows, after: int, *, description_html) -> dict | None:
@@ -1258,6 +1283,7 @@ def _attach_timeline(
     timeline = _drop_close_after_merge(timeline)
     timeline = _coalesce_comments(timeline)
     timeline = _coalesce_visits(timeline)
+    timeline = _coalesce_body_edits(timeline)
     timeline = _coalesce_user_actions(timeline)
     timeline = _mark_superseded_reviews(timeline)
     timeline = _mark_superseded_verdicts(timeline)

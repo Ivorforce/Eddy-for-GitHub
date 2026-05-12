@@ -42,11 +42,27 @@ log = logging.getLogger(__name__)
 # strictly < max_tokens. We give the model a meaningful budget for this
 # task — the verdict requires reasoning across multiple signals (tracked
 # flags, recent activity, user preferences) and cheaping out on thinking
-# tokens shows up immediately as worse rationales.
+# tokens shows up immediately as worse rationales. Thinking is the single
+# biggest controllable slice of a call's cost (~40% of a cache-warm call),
+# so it's skipped on re-judgments where the only thing that's changed since
+# the last verdict is a code push — see _should_think.
 DEFAULT_MODEL = "claude-haiku-4-5"
 DEFAULT_MAX_TOKENS = 8192
 DEFAULT_THINKING_BUDGET = 4000
 DEFAULT_DAILY_CAP_USD = 2.0
+
+# Event kinds that, arriving since the last verdict, warrant a fresh
+# deliberation pass. A re-judgment with none of these new since the prior
+# verdict is a code-push / label-churn re-ask (a head-commit or metadata
+# change re-enriched the details, which is the only other thing that
+# re-enables Re-ask) — and the current PR file list + diff stats +
+# last_commit are right there in the prompt, so the model doesn't need a
+# scratchpad to see them. `body_edit` is in the set: the model only ever
+# sees the *current* body, never the diff, so an edit it hasn't seen could
+# be a substantial reframe and gets the full pass. Mirrors
+# web._VERDICT_INVALIDATING_KINDS (which drives the Re-ask button's enabled
+# state) — same concept, kept local to dodge the ai↔web import cycle.
+_THINKING_REQUIRED_KINDS = ("comment", "review", "lifecycle", "user_chat", "body_edit")
 
 # Per-1M-token prices in USD. Cache writes are ~1.25× input on a 5-minute
 # TTL; cache reads are ~0.1× input. These are estimates for cost logging,
@@ -581,6 +597,43 @@ def _save_verdict(
 
 # ---- Public API ---------------------------------------------------------
 
+def _should_think(
+    conn: sqlite3.Connection, thread_id: str, invocation_mode: str
+) -> bool:
+    """Whether this judgment gets an extended-thinking pass.
+
+    On for first judgments (`summary`) and chats (`chat` — the user typed
+    something that has to be weighed against surface signals). For a Re-ask
+    (`re_evaluate`): on only if a `comment` / `review` / `lifecycle` /
+    `user_chat` event landed since the cached verdict. Re-ask is otherwise
+    re-enabled solely by a details re-enrichment (a code push or label/
+    metadata churn) — and the model can read the new file list / diff stats
+    / last_commit straight out of the prompt without deliberating, so a
+    no-thinking call is both cheaper and (with tool use forced, which the
+    thinking path can't do) more robust. Worst case is a slightly weaker
+    `description` on a tracked PR the user is already re-reviewing — cheap,
+    and recoverable with another Re-ask, which by then sees a `code` push as
+    the only delta again... so it stays no-thinking; the recovery lever is
+    really "the user looks". Defaults to thinking on any unexpected mode."""
+    if invocation_mode != "re_evaluate":
+        return True
+    row = conn.execute(
+        "SELECT ai_verdict_at FROM notifications WHERE id = ?", (thread_id,)
+    ).fetchone()
+    verdict_at = row["ai_verdict_at"] if row else None
+    if not verdict_at:
+        return True  # no prior verdict to anchor on — treat as a fresh pass
+    placeholders = ",".join("?" for _ in _THINKING_REQUIRED_KINDS)
+    n = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n FROM thread_events
+         WHERE thread_id = ? AND ts > ? AND kind IN ({placeholders})
+        """,
+        (thread_id, verdict_at, *_THINKING_REQUIRED_KINDS),
+    ).fetchone()["n"]
+    return n > 0
+
+
 class AIError(RuntimeError):
     """Raised when judge() can't proceed.
     Routes catch this and surface via the existing showError HX-Trigger."""
@@ -639,18 +692,29 @@ def judge(
     prefs = _read_preferences()
     user_msg = _build_user_message(ctx)
 
+    # Extended thinking + a *forced* tool_choice are mutually exclusive on
+    # the API ("Thinking may not be enabled when tool_choice forces tool
+    # use"). So the two paths trade off differently:
+    #   thinking on  → tool_choice left to {"type": "auto"}; we rely on the
+    #     one-tool-defined + system-prompt nudge to make Claude call it (and
+    #     AIError below if it doesn't — the route shows a red toast, nothing
+    #     is cached).
+    #   thinking off → we force tool_choice = judge_thread, so the call
+    #     can't drift into prose.
+    # _should_think turns thinking off for code-push / metadata-churn
+    # re-judgments — see its docstring.
+    think = _should_think(conn, thread_id, invocation_mode)
+    thinking_cfg: dict = (
+        {"type": "enabled", "budget_tokens": DEFAULT_THINKING_BUDGET}
+        if think else {"type": "disabled"}
+    )
+    tool_choice: dict | None = None if think else {"type": "tool", "name": "judge_thread"}
+
     request_log = {
         "model": model,
         "max_tokens": DEFAULT_MAX_TOKENS,
-        "thinking": {"type": "enabled", "budget_tokens": DEFAULT_THINKING_BUDGET},
-        # tool_choice is intentionally NOT forced. Anthropic rejects the
-        # combination of extended thinking + forced tool_choice with
-        # "Thinking may not be enabled when tool_choice forces tool use."
-        # We keep thinking (deliberation matters more than the marginal
-        # safety net of forcing) and rely on the system prompt + the fact
-        # that there's exactly one tool defined to make Claude call it.
-        # If it doesn't, judge() raises AIError below; the route surfaces
-        # it as a red toast and no verdict is cached.
+        "thinking": thinking_cfg,
+        **({"tool_choice": tool_choice} if tool_choice else {}),
         # System and user content are logged in full so we can replay the
         # exact prompt later when tuning. Static content (system prompt,
         # prefs) is repeated across rows; that's the price of being able
@@ -672,18 +736,22 @@ def judge(
 
     client = anthropic.Anthropic(api_key=api_key)
 
+    create_kwargs: dict = dict(
+        model=model,
+        max_tokens=DEFAULT_MAX_TOKENS,
+        thinking=thinking_cfg,
+        system=[
+            {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": prefs, "cache_control": {"type": "ephemeral"}},
+        ],
+        tools=[tool_def],
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    if tool_choice:
+        create_kwargs["tool_choice"] = tool_choice
+
     try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=DEFAULT_MAX_TOKENS,
-            thinking={"type": "enabled", "budget_tokens": DEFAULT_THINKING_BUDGET},
-            system=[
-                {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}},
-                {"type": "text", "text": prefs, "cache_control": {"type": "ephemeral"}},
-            ],
-            tools=[tool_def],
-            messages=[{"role": "user", "content": user_msg}],
-        )
+        response = client.messages.create(**create_kwargs)
     except anthropic.APIError as e:
         msg = f"{type(e).__name__}: {e}"
         _log_call(
@@ -693,8 +761,10 @@ def judge(
         )
         raise AIError(msg) from e
 
-    # Find the judge_thread tool_use block. With tool_choice forcing it,
-    # there's exactly one — but we still defend against drift.
+    # Find the judge_thread tool_use block. On the thinking-off path
+    # tool_choice forces exactly one; on the thinking-on path it's the only
+    # tool defined + the system prompt insists — either way we defend
+    # against drift (no block ⇒ AIError below).
     tool_use = next(
         (b for b in response.content if getattr(b, "type", None) == "tool_use"
          and getattr(b, "name", None) == "judge_thread"),

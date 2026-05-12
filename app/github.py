@@ -233,6 +233,8 @@ query($owner: String!, $name: String!, $number: Int!) {
       number
       title
       body
+      lastEditedAt
+      editor { login }
       url
       createdAt
       updatedAt
@@ -367,6 +369,8 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
         "html_url": disc.get("url"),
         "created_at": disc.get("createdAt"),
         "body": disc.get("body"),
+        "body_edited_at": disc.get("lastEditedAt"),
+        "body_editor": (disc.get("editor") or {}).get("login"),
         "state": state,
         "category": (disc.get("category") or {}).get("name"),
         "user": {
@@ -392,6 +396,8 @@ query($owner: String!, $name: String!, $number: Int!) {
       number
       title
       body
+      lastEditedAt
+      editor { login }
       url
       createdAt
       updatedAt
@@ -678,6 +684,11 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "created_at": pr.get("createdAt"),
         "updated_at": pr.get("updatedAt"),
         "body": pr.get("body"),
+        # When the description was last edited (None if never) + who did it.
+        # Distinct from updated_at, which also moves on comments / labels /
+        # commits — _enrich fans this out into a `body_edit` thread_event.
+        "body_edited_at": pr.get("lastEditedAt"),
+        "body_editor": (pr.get("editor") or {}).get("login"),
         "state": state,
         "draft": pr.get("isDraft"),
         "merged": pr.get("merged"),
@@ -716,6 +727,8 @@ query($owner: String!, $name: String!, $number: Int!) {
       number
       title
       body
+      lastEditedAt
+      editor { login }
       url
       createdAt
       updatedAt
@@ -839,6 +852,8 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         "created_at": issue.get("createdAt"),
         "updated_at": issue.get("updatedAt"),
         "body": issue.get("body"),
+        "body_edited_at": issue.get("lastEditedAt"),
+        "body_editor": (issue.get("editor") or {}).get("login"),
         "state": state,
         "state_reason": state_reason,
         "comments": comment_total,
@@ -983,7 +998,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
             (r["kind"], r["external_id"])
             for r in conn.execute(
                 "SELECT kind, external_id FROM thread_events "
-                "WHERE thread_id = ? AND kind IN ('comment', 'review', 'lifecycle')",
+                "WHERE thread_id = ? AND kind IN ('comment', 'review', 'lifecycle', 'body_edit')",
                 (row["id"],),
             )
         }
@@ -1063,6 +1078,29 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
                 source="github",
                 external_id=str(ev_id),
                 payload=payload,
+            )
+
+        # Description edits → a `body_edit` event keyed on the edit timestamp,
+        # so each distinct edit appears once and a re-fetch is a no-op. Not a
+        # muted kind (a re-delivery carrying one stays surfaced) and it counts
+        # as new context for the AI — it only ever sees the *current* body,
+        # never the diff, so an edit since its last verdict means "re-read the
+        # body" (consumed via app/ai.py:_THINKING_REQUIRED_KINDS and
+        # app/web.py:_VERDICT_INVALIDATING_KINDS). On first enrichment the edit
+        # predates anything we've recorded — write it for the timeline, but
+        # don't flag it as new-this-poll.
+        body_edited_at = details.get("body_edited_at")
+        if body_edited_at:
+            if row["details_json"] and ("body_edit", body_edited_at) not in existing_events:
+                nk.add("body_edit")
+            db.write_thread_event(
+                conn,
+                thread_id=row["id"],
+                ts=db.iso_to_unix(body_edited_at) or now,
+                kind="body_edit",
+                source="github",
+                external_id=body_edited_at,
+                payload={"editor": details.get("body_editor")},
             )
 
         # 'code' push: a PR head commit oid that differs from the one we last
