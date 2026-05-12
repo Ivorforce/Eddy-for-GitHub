@@ -672,12 +672,12 @@
 
     /* AI verdict pill. Lives in the Relevance column when triage mode =
        AI. Full-width strip stacked directly above the priority picker so
-       the two read as one structural pair (no reflow when a re-assess
-       changes the label). Left = the AI's take: brain glyph + suggested
-       action + a muted, truncated echo of the description (full text on
-       hover / in the popover); clicking it opens the popover timeline.
-       Right = the assess / re-assess trigger. Purple framing is the AI
-       identity — priority lives entirely in the picker below, so the
+       the two read as one structural pair. Left = sparkle glyph + a muted,
+       truncated echo of the verdict's description (full text on hover / in
+       the popover); the suggested action isn't spelled out here — it shows
+       as purple rings on the Actions column. Clicking opens the popover
+       timeline. Right = the assess / re-assess trigger. Purple framing is
+       the AI identity — priority lives entirely in the picker below, so the
        strip carries no priority tint. Advisory; nothing auto-applies. */
     .ai-verdict-pill-group {
       display: flex;
@@ -690,14 +690,13 @@
     }
     /* Outdated: a verdict exists but new activity (or a re-poll) landed
        after it. Dashed border signals "this take is behind the thread";
-       the suggested action (pill text) and its echoes in the Actions
-       column (the dashed rings) dim a touch more — they read "maybe,
-       re-ask first" rather than "do this now". Re-ask makes it crisp again. */
+       its echoes in the Actions column (the dashed rings) dim a touch
+       more — they read "maybe, re-ask first" rather than "do this now".
+       Re-ask makes it crisp again. */
     .ai-verdict-pill-group.outdated {
       border-style: dashed;
       opacity: 0.85;
     }
-    .ai-verdict-pill-group.outdated .ai-verdict-take { opacity: 0.82; }
     tr.ai-outdated td.actions .action-segment.ai-suggests,
     tr.ai-outdated td.actions .row2-btn.ai-suggests { outline-color: rgba(137, 87, 229, 0.55); }
     .ai-verdict-main,
@@ -716,7 +715,7 @@
       min-width: 0;
       display: flex;
       align-items: baseline;
-      gap: 1rem;                  /* generous air between the verb and the description echo */
+      gap: 0.3rem;                /* sparkle icon → description echo */
       padding: 0.14rem 0.5rem;
       letter-spacing: 0.01em;
       border-right: 1px solid rgba(137, 87, 229, 0.30);

@@ -178,26 +178,6 @@ def _mute_kind_options(notif_type: str) -> list[tuple[str, str, bool]]:
     return opts
 
 
-# Human-readable labels for the action_now and set_tracked enums in the
-# AI verdict pill. Mirrors the JSON enum values defined in app/ai.py:TOOL_DEF.
-# action_now is a suggestion to the user (not an auto-applied mutation):
-# 'look' = open the link, 'ignore' = mark read without engaging, 'mute' =
-# silence, 'archive' = nothing left to do. The pill's color tint conveys
-# priority independently.
-_AI_ACTION_LABELS = {
-    "look":    "look",
-    "ignore":  "ignore",
-    "mute":    "mute",
-    "archive": "archive",
-    "snooze":  "snooze",   # _ai_verdict_dict appends "~Nd" from snooze_days
-}
-_AI_TRACK_LABELS = {
-    "track":   "track",
-    "untrack": "untrack",
-    # 'leave' intentionally absent — pill omits it.
-}
-
-
 # Priority is a 0..1 float end-to-end — the AI emits one (`priority_score`),
 # the user's hand-pin is stored as one (`notifications.priority_user`), and
 # `priority_change` timeline events carry floats. The six named bands below
@@ -1326,14 +1306,6 @@ def _ai_verdict_dict(
     sd = verdict.get("snooze_days")
     snooze_days = sd if (action_now == "snooze" and isinstance(sd, int) and 1 <= sd <= 90) else None
 
-    action_label = _AI_ACTION_LABELS.get(action_now, action_now)
-    if snooze_days:
-        action_label = f"{action_label} ~{_short_duration(snooze_days * 86400)}"
-    parts = [action_label]
-    if set_tracked in _AI_TRACK_LABELS:
-        parts.append(_AI_TRACK_LABELS[set_tracked])
-    pill_text = " · ".join(parts)
-
     age_text = _humanize_age(int(time.time()) - at)
 
     description = (verdict.get("description") or "").strip()
@@ -1378,7 +1350,6 @@ def _ai_verdict_dict(
         "model":           model or "",
         "at":              at,
         "age_text":        age_text,
-        "pill_text":       pill_text,
         "stale":           bool(details_fetched_at and details_fetched_at > at),
     }
 
