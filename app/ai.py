@@ -11,6 +11,12 @@ did after the last verdict and can recalibrate.
 Re-ask re-runs judge() with the prior verdict still visible in the
 timeline (mode=`re_evaluate`); chat re-runs it with the user's latest
 `user_chat` event appended (mode=`chat`). The cache is never auto-cleared.
+On a re-judgment the model can be economical: `judge_thread` with the
+standing fields (`action_now` / `priority_score` / `description`) omitted
+to keep the last verdict's values, or — on a plain Re-ask — a single
+`skip` call that re-affirms the prior verdict wholesale. Either way
+`_save_verdict` stores the fully-merged result, so the cached verdict is
+always complete (and the next re-judgment inherits from a complete base).
 
 Caching note: the system block is split into [system_prompt, prefs] with
 ephemeral cache_control on both. Haiku 4.5's minimum cacheable prefix is
@@ -75,13 +81,14 @@ _PRICES = {
 }
 
 
-# The judge_thread tool. Forced via the system prompt + only-tool-defined
-# pattern; its arguments are the verdict.
+# The judge_thread tool. The model is steered to it by the system prompt
+# (and, when extended thinking is off, tool_choice forces *a* tool — judge
+# or skip); its arguments are the verdict.
 TOOL_DEF: dict = {
     "name": "judge_thread",
     "description": (
         "Record your triage verdict for the thread shown in the user message. "
-        "Call this tool exactly once. Do not produce any other output."
+        "Use exactly one tool call (this or `skip`, when offered); produce no other output."
     ),
     "input_schema": {
         "type": "object",
@@ -96,7 +103,8 @@ TOOL_DEF: dict = {
                     "'snooze' (nothing to do *now* but it won't stay quiet — hide it until ~snooze_days from now; "
                     "blocked-on-someone, scheduled-for-later). "
                     "Advisory only — the user takes their own row actions; nothing auto-applies. "
-                    "Prefer 'look' over 'ignore' over 'archive' when uncertain; reach for 'snooze' only with a concrete reason it'll be quiet until then."
+                    "Prefer 'look' over 'ignore' over 'archive' when uncertain; reach for 'snooze' only with a concrete reason it'll be quiet until then. "
+                    "On a re-judgment, may be omitted to keep your last verdict's value (see system prompt §Output fields)."
                 ),
             },
             "snooze_days": {
@@ -125,7 +133,8 @@ TOOL_DEF: dict = {
                     "How urgently the user should deal with this thread, on a 0.0-1.0 scale. "
                     "See system prompt §Priority for the named bands each range maps to — "
                     "pick a value inside the band that fits, or between bands when it's on the edge. "
-                    "Independent of action_now: 0.9 + 'look' means 'leave it visible and flag it as urgent'."
+                    "Independent of action_now: 0.9 + 'look' means 'leave it visible and flag it as urgent'. "
+                    "On a re-judgment, may be omitted to keep your last verdict's value (see §Output fields)."
                 ),
             },
             "description": {
@@ -135,7 +144,9 @@ TOOL_DEF: dict = {
                     "The standing take, written self-contained — fresh each judgment, never "
                     "referencing your prior verdicts ('unchanged', 'as before'). Never a reply "
                     "to the user — that's `reply`. See system prompt §Brevity for length and "
-                    "content rules."
+                    "content rules. On a re-judgment, may be omitted to keep your last "
+                    "verdict's description verbatim — but only when you'd write exactly that "
+                    "again (see §Output fields)."
                 ),
             },
             "reply": {
@@ -154,34 +165,58 @@ TOOL_DEF: dict = {
 }
 
 
-def _build_tool_def(notif_type: str, muted_kinds) -> dict:
-    """judge_thread, with the subscription_changes enum tailored to this
-    thread: for each kind that fires on this notification type, offer
-    `mute_<kind>` if it's currently un-muted on the thread, else
-    `unmute_<kind>` — so the model can't emit a no-op. Omitted entirely for
-    types that produce no filterable activity (Release, CheckSuite, …)."""
-    applicable = github.MUTE_KINDS_BY_TYPE.get(notif_type, ())
-    if not applicable:
-        return TOOL_DEF
-    muted = set(muted_kinds or [])
-    tokens = [
-        (f"unmute_{k}" if k in muted else f"mute_{k}")
-        for k in github.MUTE_KINDS if k in applicable
-    ]
+# The skip tool — re-affirm the cached verdict unchanged. Only offered on a
+# re-judgment (re_evaluate, prior verdict present); see judge() / the system
+# prompt §Output fields. No arguments: "skip" means "nothing to change".
+SKIP_TOOL_DEF: dict = {
+    "name": "skip",
+    "description": (
+        "Re-affirm your existing verdict, unchanged — call with no arguments. "
+        "Use this on a Re-ask when, after weighing everything that's happened since your "
+        "last verdict, your read is the same in every respect: same action, same priority, "
+        "the same standing description, nothing to add for subscription_changes. It re-stamps "
+        "the prior verdict as current. If *anything* moves — even a priority nudge or a "
+        "one-word sharpening of the description — that's a `judge_thread` call instead "
+        "(omitting only the fields that genuinely haven't changed). See system prompt §Output fields."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+
+def _build_tool_def(notif_type: str, muted_kinds, *, has_prior: bool) -> dict:
+    """judge_thread, tailored to this thread. The subscription_changes enum
+    offers, for each kind that fires on this notification type, `mute_<kind>`
+    when it's currently un-muted on the thread else `unmute_<kind>` (so the
+    model can't emit a no-op); it's dropped entirely for types with no
+    filterable activity (Release, CheckSuite, …). When `has_prior` — there's
+    a verdict in the timeline this re-judgment can fall back on — `action_now`,
+    `priority_score` and `description` come out of `required`: omitting any of
+    them keeps that field's value from the last verdict (see §Output fields).
+    `set_tracked` stays required (it's your this-turn call on the track flag,
+    almost always 'leave')."""
     schema = copy.deepcopy(TOOL_DEF)
-    schema["input_schema"]["properties"]["subscription_changes"] = {
-        "type": "array",
-        "items": {"type": "string", "enum": tokens},
-        "description": (
-            "Forward-looking subscription tweaks for this thread — quiet (or resume) "
-            "individual activity kinds without unsubscribing. Empty list = no change "
-            "(the common case). Use it when there's a durable reason the user cares "
-            "about only some kinds here — waiting on a review/merge, or has stepped back "
-            "from the thread entirely (then it pairs with action_now: ignore/mute). "
-            "Tokens reflect current state; `mute_<kind>` stops those notifications going "
-            "forward, `unmute_<kind>` resumes them. See system prompt §Subscription tweaks."
-        ),
-    }
+    applicable = github.MUTE_KINDS_BY_TYPE.get(notif_type, ())
+    if applicable:
+        muted = set(muted_kinds or [])
+        tokens = [
+            (f"unmute_{k}" if k in muted else f"mute_{k}")
+            for k in github.MUTE_KINDS if k in applicable
+        ]
+        schema["input_schema"]["properties"]["subscription_changes"] = {
+            "type": "array",
+            "items": {"type": "string", "enum": tokens},
+            "description": (
+                "Forward-looking subscription tweaks for this thread — quiet (or resume) "
+                "individual activity kinds without unsubscribing. Empty list = no change "
+                "(the common case). Use it when there's a durable reason the user cares "
+                "about only some kinds here — waiting on a review/merge, or has stepped back "
+                "from the thread entirely (then it pairs with action_now: ignore/mute). "
+                "Tokens reflect current state; `mute_<kind>` stops those notifications going "
+                "forward, `unmute_<kind>` resumes them. See system prompt §Subscription tweaks."
+            ),
+        }
+    if has_prior:
+        schema["input_schema"]["required"] = ["set_tracked"]
     return schema
 
 
@@ -577,22 +612,54 @@ def _log_call(
     return int(cursor.lastrowid)
 
 
+def _cached_verdict(conn: sqlite3.Connection, thread_id: str) -> dict | None:
+    """The verdict currently cached on the row (the displayed one / the most
+    recent), or None if the thread has never been judged. The inheritance
+    source when a re-judgment omits a standing field, and the payload that
+    `skip` re-affirms. Always a *complete* verdict — `_save_verdict` only
+    ever stores fully-merged ones — so inheriting from it never leaves a gap."""
+    row = conn.execute(
+        "SELECT ai_verdict_json FROM notifications WHERE id = ?", (thread_id,)
+    ).fetchone()
+    if not row or not row["ai_verdict_json"]:
+        return None
+    try:
+        v = json.loads(row["ai_verdict_json"])
+    except (ValueError, TypeError):
+        return None
+    return v if isinstance(v, dict) else None
+
+
 def _save_verdict(
-    conn: sqlite3.Connection, thread_id: str, verdict: dict, model: str
+    conn: sqlite3.Connection, thread_id: str, verdict: dict, model: str,
+    *, reclaim_priority: bool = True,
 ) -> None:
-    # A fresh verdict reclaims the displayed priority: clear any hand-set
-    # priority_user. The user's choice isn't lost — it survives as a
-    # priority_change event in the timeline, which this judgment already
-    # saw and folded into priority_score. The user can re-pin afterwards.
-    conn.execute(
-        """
-        UPDATE notifications
-           SET ai_verdict_json = ?, ai_verdict_at = ?, ai_verdict_model = ?,
-               priority_user = NULL
-         WHERE id = ?
-        """,
-        (json.dumps(verdict, ensure_ascii=False), int(time.time()), model, thread_id),
-    )
+    # A fresh verdict normally reclaims the displayed priority: clear any
+    # hand-set priority_user. The user's choice isn't lost — it survives as a
+    # priority_change event in the timeline, which this judgment already saw
+    # and folded into priority_score. The user can re-pin afterwards. But a
+    # re-judgment that *inherited* priority_score from the prior verdict (or a
+    # `skip`) isn't asserting a new priority — it's saying the old one still
+    # stands — so it leaves a user pin in place (reclaim_priority=False).
+    if reclaim_priority:
+        conn.execute(
+            """
+            UPDATE notifications
+               SET ai_verdict_json = ?, ai_verdict_at = ?, ai_verdict_model = ?,
+                   priority_user = NULL
+             WHERE id = ?
+            """,
+            (json.dumps(verdict, ensure_ascii=False), int(time.time()), model, thread_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE notifications
+               SET ai_verdict_json = ?, ai_verdict_at = ?, ai_verdict_model = ?
+             WHERE id = ?
+            """,
+            (json.dumps(verdict, ensure_ascii=False), int(time.time()), model, thread_id),
+        )
 
 
 # ---- Public API ---------------------------------------------------------
@@ -660,7 +727,14 @@ def judge(
     in the user message; it tells the model why this judgment is firing
     (fresh thread / Re-ask / the user sent a chat) — not what the output
     should look like, which is the same across modes (see ai_system_prompt.md
-    §Invocation modes). Defaults to `summary` for callers that don't supply it."""
+    §Invocation modes). Defaults to `summary` for callers that don't supply it.
+
+    On a re-judgment (a prior verdict exists) the model may omit
+    `action_now` / `priority_score` / `description` from `judge_thread` — the
+    merge fills them from `prior_verdict` — and in `re_evaluate` mode may call
+    `skip` instead, which re-affirms the prior verdict unchanged. An inherited
+    `priority_score` (and `skip`) won't clear a hand-set `priority_user`; a
+    freshly-supplied one will. See ai_system_prompt.md §Output fields."""
     model = _model_id()
     cap = _daily_cap()
     spent = _spent_today(conn)
@@ -679,11 +753,25 @@ def judge(
         raise AIError(f"Thread {thread_id} not found")
     ctx["invocation_mode"] = invocation_mode
 
-    # Tool schema is built per-thread so subscription_changes only offers the
-    # kinds that fire on this type, in the right (mute vs unmute) direction.
-    tool_def = _build_tool_def(
-        ctx["notification"]["type"], ctx["notification"].get("muted_kinds")
-    )
+    # The prior verdict (if any) is both the fallback for omitted standing
+    # fields on a re-judgment and the payload `skip` re-affirms. `skip` is
+    # offered only on a plain Re-ask with a verdict to fall back on — never
+    # right after the user has spoken (chat) or on a first pass.
+    prior_verdict = _cached_verdict(conn, thread_id)
+    has_prior = prior_verdict is not None
+    offer_skip = has_prior and invocation_mode == "re_evaluate"
+
+    # Tool schema is per-thread: subscription_changes only offers the kinds
+    # that fire on this type (right mute/unmute direction), and a re-judgment
+    # drops the inheritable standing fields from `required` (see _build_tool_def).
+    tools = [
+        _build_tool_def(
+            ctx["notification"]["type"], ctx["notification"].get("muted_kinds"),
+            has_prior=has_prior,
+        )
+    ]
+    if offer_skip:
+        tools.append(SKIP_TOOL_DEF)
 
     system_prompt = _read_system_prompt()
     identity = _identity_block(user_login, user_teams)
@@ -694,13 +782,14 @@ def judge(
 
     # Extended thinking + a *forced* tool_choice are mutually exclusive on
     # the API ("Thinking may not be enabled when tool_choice forces tool
-    # use"). So the two paths trade off differently:
-    #   thinking on  → tool_choice left to {"type": "auto"}; we rely on the
-    #     one-tool-defined + system-prompt nudge to make Claude call it (and
-    #     AIError below if it doesn't — the route shows a red toast, nothing
-    #     is cached).
-    #   thinking off → we force tool_choice = judge_thread, so the call
-    #     can't drift into prose.
+    # use"), so:
+    #   thinking on  → tool_choice left to {"type": "auto"}; the only tools
+    #     defined are the verdict tools and the system prompt insists, which
+    #     reliably gets Claude to call one (AIError below if not — the route
+    #     shows a red toast, nothing is cached).
+    #   thinking off → {"type": "any"} forces *a* tool call but leaves Claude
+    #     the judge_thread-vs-skip choice — this is the boring re-judgment
+    #     path, exactly where `skip` is often the right call.
     # _should_think turns thinking off for code-push / metadata-churn
     # re-judgments — see its docstring.
     think = _should_think(conn, thread_id, invocation_mode)
@@ -708,7 +797,7 @@ def judge(
         {"type": "enabled", "budget_tokens": DEFAULT_THINKING_BUDGET}
         if think else {"type": "disabled"}
     )
-    tool_choice: dict | None = None if think else {"type": "tool", "name": "judge_thread"}
+    tool_choice: dict | None = None if think else {"type": "any"}
 
     request_log = {
         "model": model,
@@ -721,7 +810,7 @@ def judge(
         # to audit individual calls.
         "system": [system_prompt, prefs],
         "user_message": user_msg,
-        "tools": [tool_def],
+        "tools": tools,
     }
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -744,7 +833,7 @@ def judge(
             {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": prefs, "cache_control": {"type": "ephemeral"}},
         ],
-        tools=[tool_def],
+        tools=tools,
         messages=[{"role": "user", "content": user_msg}],
     )
     if tool_choice:
@@ -761,50 +850,74 @@ def judge(
         )
         raise AIError(msg) from e
 
-    # Find the judge_thread tool_use block. On the thinking-off path
-    # tool_choice forces exactly one; on the thinking-on path it's the only
-    # tool defined + the system prompt insists — either way we defend
-    # against drift (no block ⇒ AIError below).
+    # Find the verdict tool_use block — judge_thread or skip. With tool_choice
+    # {"type": "any"} (thinking off) there's exactly one; with thinking on the
+    # system prompt + the fact that only verdict tools are defined gets Claude
+    # to call one — defend against drift either way (no block ⇒ AIError).
     tool_use = next(
         (b for b in response.content if getattr(b, "type", None) == "tool_use"
-         and getattr(b, "name", None) == "judge_thread"),
+         and getattr(b, "name", None) in ("judge_thread", "skip")),
         None,
     )
     response_dict = response.model_dump() if hasattr(response, "model_dump") else None
     usage = (response_dict or {}).get("usage") or {}
     cost = _estimate_cost(model, usage)
 
+    def _fail(msg: str) -> AIError:
+        _log_call(
+            conn, thread_id=thread_id, model=model,
+            request=request_log, response=response_dict, usage=usage,
+            cost_usd=cost, error=msg, status="error",
+        )
+        return AIError(msg)
+
     if tool_use is None:
-        msg = "Model did not call judge_thread"
-        _log_call(
-            conn, thread_id=thread_id, model=model,
-            request=request_log, response=response_dict, usage=usage,
-            cost_usd=cost, error=msg, status="error",
-        )
-        raise AIError(msg)
+        raise _fail("Model did not call judge_thread or skip")
 
-    verdict = dict(tool_use.input or {})
-    required = {"action_now", "set_tracked", "priority_score", "description"}
-    missing = required - verdict.keys()
+    is_skip = getattr(tool_use, "name", None) == "skip"
+    if is_skip and not has_prior:
+        # skip is only ever *offered* with a prior verdict; if the model
+        # calls it anyway there's nothing to re-affirm.
+        raise _fail("Model called skip but there is no prior verdict to re-affirm")
+
+    if is_skip:
+        # Re-affirm the cached verdict verbatim. `skip` asserts nothing
+        # changed, so it doesn't reclaim a hand-set priority. `prior_verdict`
+        # is always a complete, `model`-free dict (see _cached_verdict).
+        verdict = dict(prior_verdict)
+        reclaim_priority = False
+    else:
+        raw = dict(tool_use.input or {})
+        verdict = dict(raw)
+        # Fill omitted standing fields from the prior verdict — the schema
+        # only drops them from `required` when `has_prior`, so this is the
+        # AI's deliberate "keep my last value". `snooze_days` rides with
+        # `action_now`: inherited together if `action_now` is inherited; if
+        # `action_now` is fresh, the model supplies `snooze_days` alongside.
+        if has_prior:
+            for k in ("action_now", "priority_score", "description", "snooze_days"):
+                if k not in verdict and k in prior_verdict:
+                    verdict[k] = prior_verdict[k]
+        # A fresh priority_score reclaims the displayed priority; an inherited
+        # one leaves a user pin alone (see _save_verdict).
+        reclaim_priority = "priority_score" in raw
+
+    missing = {"action_now", "set_tracked", "priority_score", "description"} - verdict.keys()
     if missing:
-        msg = f"Verdict missing fields: {sorted(missing)}"
-        _log_call(
-            conn, thread_id=thread_id, model=model,
-            request=request_log, response=response_dict, usage=usage,
-            cost_usd=cost, error=msg, status="error",
-        )
-        raise AIError(msg)
+        raise _fail(f"Verdict missing fields: {sorted(missing)}")
 
-    _save_verdict(conn, thread_id, verdict, model)
+    _save_verdict(conn, thread_id, verdict, model, reclaim_priority=reclaim_priority)
     ai_call_id = _log_call(
         conn, thread_id=thread_id, model=model,
         request=request_log, response=response_dict, usage=usage,
         cost_usd=cost, error=None, status="ok",
     )
-    # Append the verdict to the per-thread timeline. external_id joins
-    # back to ai_calls so the full request / response is one query away.
-    # `model` is folded into the payload so timeline-render of past
-    # verdicts can show which model produced each one.
+    # Append the (possibly re-affirmed) verdict to the per-thread timeline.
+    # external_id joins back to ai_calls so the full request / response is one
+    # query away; `model` rides in the payload so timeline-render can show
+    # which model produced it. A `skip` lands here as another ai_verdict event
+    # with the prior payload — the timeline collapses superseded verdicts, so
+    # it just advances the "AI last looked here" mark.
     db.write_thread_event(
         conn,
         thread_id=thread_id,
