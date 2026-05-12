@@ -56,13 +56,11 @@ The user can set priority by hand (a `priority_change` timeline event — see **
 
 ## Subscription tweaks
 
-`subscription_changes` — `mute_<kind>` / `unmute_<kind>` tokens that change *which activity kinds notify the user on this thread*, without unsubscribing. (State changes — merge / close / reopen / answered — always notify; not a knob.) Forward-looking; a separate axis from `action_now` (`action_now` is whether they're done with the thread / want out entirely; this is which kinds of update still reach them while they stay subscribed). The *partial* tool — keep some kinds, drop the rest; for "nothing further at all" that's `action_now: mute`, and for "the thread is over" `action_now: archive` — neither is a subscription tweak. Default `[]`. The three mutable kinds:
+`subscription_changes` — `mute_<kind>` / `unmute_<kind>` tokens that change *which activity kinds notify the user on this thread*, without unsubscribing. (State changes — merge / close / reopen / answered — always notify, even on a partially-muted thread; not a knob.) Forward-looking; a separate axis from `action_now` (`action_now` = done with the thread / out entirely; this = which updates still reach them while subscribed). For "nothing further at all" use `action_now: mute`; for "the thread is over", `archive` — neither is a subscription tweak.
 
-- **`code`** (PR pushes) — most mutable: rebases / fixups / force-pushes are pure churn for anyone not re-reviewing each push. Mute for a thread the user follows but isn't actively reviewing; keep only if they're reviewing or authoring.
-- **`comment`** (issue/PR comments) — mute when the user has stepped back and cares only about the outcome, or it's a chatty thread that isn't theirs; keep when they're a participant or the discussion *is* the point.
-- **`review`** (approvals / changes-requested) — last to mute; the "are you on the hook" signal (a review bouncing to them, their own PR's merge gate). Mute only when they're fully out — opted out, delegated — and won't get a review bounced back to them.
+**Reach for it when** there's a durable reason the user wants only some kinds here, and pair it with the matching `action_now` — a passive watcher of a PR they aren't reviewing → `["mute_code", "mute_comment"]` (reviews + the merge/close ping still come through); someone who's stepped back to await the outcome → mute `comment`. **Avoid it when** there's no such reason: `[]` is the common case, pushes-happen-on-PRs isn't a reason on its own, and never re-suggest a kind `notification.muted_kinds` already lists — the user sees the resulting set next time, so drop a `mute_X` they keep not taking.
 
-E.g. passive watcher of a PR they aren't reviewing → `["mute_code", "mute_comment"]` (reviews + the merge/close ping still come through). If you pick `ignore`/`mute` for a durable reason, trim the subscription to match — don't leave it untrimmed by reflex. Not a reflex on every PR (pushes happen on PRs — not a reason on its own); no clear reason → `[]`. Don't re-suggest what `notification.muted_kinds` already lists. The user applies these; a later judgment sees the resulting `muted_kinds`, so drop a `mute_X` they keep not taking.
+Mutable kinds, most-to-least mutable: **`code`** (PR pushes — rebases / fixups / force-pushes, pure churn unless they're re-reviewing each push), **`comment`** (issue/PR comments — keep if they're a participant or the discussion *is* the point), **`review`** (approvals / changes-requested — last to mute; the "are you on the hook" signal, a review bouncing back to them or their own PR's merge gate; mute only when they're fully out — opted out, delegated).
 
 ## Brevity
 
@@ -133,7 +131,7 @@ The user message includes `invocation_mode` — why this judgment is firing. It 
 Most fields are self-describing; a few need context:
 
 - `note_user` on author / repo / org is *deliberate user-authored guidance* and overrides surface-level signals. A note of "Renovate bot, mostly noise" against a routine Renovate PR is strong evidence for `mark_read` or `mute`. (Per-thread guidance comes via `user_chat` timeline events, not a note.)
-- `notification.muted_kinds` is the set of activity kinds the user has already silenced on this thread (see **Subscription tweaks**). Don't re-suggest a `mute_<kind>` for one that's already there; if it's listed, the only relevant move for that kind is `unmute_<kind>` (and only if it's become relevant again).
+- `notification.muted_kinds` is the set of activity kinds the user has already silenced on this thread — for those, the only move is `unmute_<kind>`, and only if it's become relevant again (see **Subscription tweaks**).
 - `is_tracked` on any level biases toward high `priority_score` and `action_now: "look"` unless context contradicts.
 - `mention` or `team_mention` in `seen_reasons` means a real @-mention happened — almost always high signal.
 - `action_needed: "review_you" / "review_team" / "assigned"` typically maps to a high `priority_score` + `action_now: "look"` (don't suggest clearing something the user owes a response on).
