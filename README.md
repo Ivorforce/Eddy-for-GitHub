@@ -1,7 +1,8 @@
-# gh-notification-auto-triage
+# Eddy for GitHub
 
-Local GitHub notification triage app. Runs a Flask server on `localhost:5734` that
-polls your GitHub notifications every 5 minutes and shows them in a table.
+Local GitHub notification triage app — the calm pocket beside the firehose. Runs a
+Flask server on `localhost:5734` that polls your GitHub notifications every 5 minutes
+and shows them in a table.
 
 ## Setup
 

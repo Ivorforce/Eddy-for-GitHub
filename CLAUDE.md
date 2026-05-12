@@ -1,4 +1,4 @@
-# GitHub notification triage
+# Eddy for GitHub
 
 A local Flask app that turns GitHub's notification firehose into a "you should look at this" view. Single user, runs as `source .venv/bin/activate && python -m app run` and serves on `localhost:5734`. Auth via `gh auth token` (with `GITHUB_TOKEN` env override).
 
@@ -6,7 +6,7 @@ The point is *triage* — surface what needs attention, quiet what doesn't — n
 
 ## Stack
 
-Flask + Jinja + HTMX + Pico CSS + SQLite. Static assets vendored under `static/vendor/`; UI icons are Octicons (vendored there, inlined as `<path>` data in templates with `fill="currentColor"` — the funnel brand mark in `static/icon.svg` / the header is ours). Bundled/depended third-party licenses are reproduced in `THIRD_PARTY_LICENSES.md`. Python 3.11, stdlib `venv` + `pip`, no lockfile. Schema migrates via a hand-rolled version ladder in `app/db.py` — add a new `SCHEMA_VN` rather than editing existing ones.
+Flask + Jinja + HTMX + Pico CSS + SQLite. Static assets vendored under `static/vendor/`; UI icons are Octicons (vendored there, inlined as `<path>` data in templates with `fill="currentColor"` — the swirly-eyes brand mark in `static/icon.svg` / the header is ours — alternate `icon-a.svg` / `icon-c.svg` kept around). Bundled/depended third-party licenses are reproduced in `THIRD_PARTY_LICENSES.md`. Python 3.11, stdlib `venv` + `pip`, no lockfile. Schema migrates via a hand-rolled version ladder in `app/db.py` — add a new `SCHEMA_VN` rather than editing existing ones.
 
 ## Cross-cutting principles
 
