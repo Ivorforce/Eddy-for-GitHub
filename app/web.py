@@ -290,10 +290,10 @@ _INTEREST_REACTION = "eyes"
 
 TYPE_LABELS = {
     "PullRequest": "PR",
-    "Issue": "Issue",
+    "Issue": "ISS",
     "Discussion": "Disc",
     "Release": "Rel",
-    "CheckSuite": "Check",
+    "CheckSuite": "CHK",
 }
 
 # Long form for places that have room (e.g. popover headers).

@@ -102,45 +102,57 @@
   </td>
   {% set m = n.meta %}
   <td class="title">
-    {# Prefer link_url (per-event pointer captured while unread) over the
-       generic item URL — sends the user to the first comment they haven't
-       seen on this aggregated thread. #}
-    {% set click_url = n.link_url or n.html_url %}
-    {% if click_url %}
-      {# Link click always logs a 'visited' user_action event (distinct
-         from a plain mark-read click) so the AI sees engagement with
-         the underlying content rather than just dismissal of the row.
-         The visit endpoint also marks read / unsubscribes if needed,
-         matching the previous mark-read-on-click behavior. #}
-      <a class="item-title{% if n.is_tracked %} is-tracked{% endif %}"
-         href="{{ click_url }}" target="_blank" rel="noopener"
-         title="{{ n.title }}"
-         onclick="htmx.ajax('POST', '/visit/{{ n.id }}', {target: this.closest('tr'), swap: 'outerHTML', source: '#filters'})"><span class="item-title-text">{{ n.title_html }}</span></a>
-    {% else %}
-      <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}" title="{{ n.title }}"><span class="item-title-text">{{ n.title_html }}</span></span>
-    {% endif %}
-    <div class="meta-row">
-      <span class="type-pill type-{{ n.type|lower }} state-{{ n.type_state }}"
-            title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ type_icon(n.type, n.type_state) }}{{ n.type_label }}</span>
-      {% if n.category %}
-      <span class="category-pill" title="Discussion category">{{ n.category }}</span>
-      {% endif %}
-      {% if m.complexity %}
-        <span class="diff-stats"
-              title="{% if m.top_files %}{% for f in m.top_files %}{{ f.filename }}  +{{ f.additions or 0 }}/−{{ f.deletions or 0 }}{% if not loop.last %}&#10;{% endif %}{% endfor %}{% else %}{{ m.complexity[0] }} lines added, {{ m.complexity[1] }} lines deleted{% endif %}">
-          <span class="stat-add">+{{ m.complexity[0] }}</span>
-          <span class="stat-del">−{{ m.complexity[1] }}</span>
-        </span>
-      {% endif %}
-      {% for label in n.labels_visible %}
-        <span class="label-pill"
-              style="background:#{{ label.color }};color:{{ label.text_color }}"
-              {% if label.description %}title="{{ label.description }}"{% endif %}>{{ label.name }}</span>
-      {% endfor %}
-      {% if n.labels_extra %}
-        <span class="label-more"
-              title="{% for l in n.labels_extra %}{{ l.name }}{% if not loop.last %}, {% endif %}{% endfor %}">+{{ n.labels_extra|length }} more</span>
-      {% endif %}
+    {# Two-line layout: a full-height "type spine" (rounded rect, colour =
+       GitHub state) pinned at the left, then the title on line 1 and the
+       meta-row (category · diff · labels) on line 2 to its right. #}
+    {% set meta_has = n.category or m.complexity or n.labels_visible or n.labels_extra %}
+    <div class="title-cell">
+      <span class="type-spine type-{{ n.type|lower }} state-{{ n.type_state }}"
+            title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ type_icon(n.type, n.type_state) }}<span class="type-spine-label">{{ n.type_label }}</span></span>
+      <div class="title-cell-body">
+        {# Prefer link_url (per-event pointer captured while unread) over the
+           generic item URL — sends the user to the first comment they haven't
+           seen on this aggregated thread. #}
+        {% set click_url = n.link_url or n.html_url %}
+        {% if click_url %}
+          {# Link click always logs a 'visited' user_action event (distinct
+             from a plain mark-read click) so the AI sees engagement with
+             the underlying content rather than just dismissal of the row.
+             The visit endpoint also marks read / unsubscribes if needed,
+             matching the previous mark-read-on-click behavior. #}
+          <a class="item-title{% if n.is_tracked %} is-tracked{% endif %}"
+             href="{{ click_url }}" target="_blank" rel="noopener"
+             title="{{ n.title }}"
+             onclick="htmx.ajax('POST', '/visit/{{ n.id }}', {target: this.closest('tr'), swap: 'outerHTML', source: '#filters'})"><span class="item-title-text">{{ n.title_html }}</span></a>
+        {% else %}
+          <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}" title="{{ n.title }}"><span class="item-title-text">{{ n.title_html }}</span></span>
+        {% endif %}
+        <div class="meta-row">
+          {% if meta_has %}
+          {% if n.category %}
+          <span class="category-pill" title="Discussion category">{{ n.category }}</span>
+          {% endif %}
+          {% if m.complexity %}
+            <span class="diff-stats"
+                  title="{% if m.top_files %}{% for f in m.top_files %}{{ f.filename }}  +{{ f.additions or 0 }}/−{{ f.deletions or 0 }}{% if not loop.last %}&#10;{% endif %}{% endfor %}{% else %}{{ m.complexity[0] }} lines added, {{ m.complexity[1] }} lines deleted{% endif %}">
+              <span class="stat-add">+{{ m.complexity[0] }}</span>
+              <span class="stat-del">−{{ m.complexity[1] }}</span>
+            </span>
+          {% endif %}
+          {% for label in n.labels_visible %}
+            <span class="label-pill"
+                  style="background:#{{ label.color }};color:{{ label.text_color }}"
+                  {% if label.description %}title="{{ label.description }}"{% endif %}>{{ label.name }}</span>
+          {% endfor %}
+          {% if n.labels_extra %}
+            <span class="label-more"
+                  title="{% for l in n.labels_extra %}{{ l.name }}{% if not loop.last %}, {% endif %}{% endfor %}">+{{ n.labels_extra|length }} more</span>
+          {% endif %}
+          {% else %}
+          <span class="meta-empty" title="No labels, diff, or category">no metadata</span>
+          {% endif %}
+        </div>
+      </div>
     </div>
   </td>
   <td class="activity">

@@ -56,25 +56,51 @@
        title elongates the table past the viewport. */
     td.title { width: 100%; max-width: 0; }
 
-    /* Type pill — color tracks GitHub state, not type. Sits at the head
-       of the meta-row alongside labels. Sized to match .label-pill so it
-       reads as a peer tag, with the state-color as the only differentiator. */
-    .type-pill {
-      display: inline-block;
-      padding: 0.02rem 0.4rem;
-      border-radius: 0.5rem;
-      font-size: 0.62rem;
-      font-weight: 500;
-      line-height: 1.45;
+    /* Type spine — a rounded rect pinned at the left of the title cell,
+       stretched to the cell's full (≈ two-line) height. Colour tracks
+       GitHub state, not type (the .state-* rules below); the type icon +
+       short label stack vertically inside it. */
+    td.title .title-cell {
+      display: flex;
+      align-items: stretch;
+      gap: 0.55rem;
+      min-height: 2.45rem;
+    }
+    td.title .title-cell-body {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      /* Top-aligned: when a row has no meta-row, the second line stays
+         reserved (the .title-cell min-height holds it) rather than the
+         title floating to the vertical centre. */
+      justify-content: flex-start;
+    }
+    .type-spine {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.2rem;
+      width: 1.9rem;   /* fixed — every type spine the same width regardless of label */
+      padding: 0.15rem 0.2rem;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 0.35rem;
+      font-size: 0.52rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      line-height: 1;
+      text-transform: uppercase;
       white-space: nowrap;
       color: white;
       background: #6e7781; /* default for Discussion / Release / not-yet-enriched */
     }
-    .type-pill .type-icon {
-      width: 0.92em;
-      height: 0.92em;
-      vertical-align: -0.13em;
-      margin-right: 0.2em;
+    .type-spine-label { line-height: 1; }
+    .type-spine .type-icon {
+      display: block;
+      width: 1.17rem;
+      height: 1.17rem;
     }
 
     /* Activity column ("Reception" / "Age") — age pill on top, then a 2-col
@@ -155,18 +181,18 @@
       grid-column: 1 / -1;
       justify-content: center;
     }
-    .type-pill.state-open                { background: var(--state-good-emphasis); }
-    .type-pill.state-draft               { background: #57606a; }
-    .type-pill.state-merged,
-    .type-pill.state-closed_completed,
-    .type-pill.state-answered            { background: var(--state-merged); }
-    .type-pill.state-closed_pr           { background: var(--state-bad); }
-    .type-pill.state-closed,
-    .type-pill.state-closed_not_planned  { background: #6e7781; }
+    .type-spine.state-open                { background: var(--state-good-emphasis); }
+    .type-spine.state-draft               { background: #57606a; }
+    .type-spine.state-merged,
+    .type-spine.state-closed_completed,
+    .type-spine.state-answered            { background: var(--state-merged); }
+    .type-spine.state-closed_pr           { background: var(--state-bad); }
+    .type-spine.state-closed,
+    .type-spine.state-closed_not_planned  { background: #6e7781; }
     /* Open discussions read grey, not "open = green" — matches github.com,
        where an open discussion is a neutral conversation, not a tracked
        work item. Closed/answered keep their state colour above. */
-    .type-pill.type-discussion.state-open { background: #6e7781; }
+    .type-spine.type-discussion.state-open { background: #6e7781; }
 
     /* repo cell — owner above, name below, author below that, all clickable.
        Pinned to 11rem on all three width axes so the column doesn't reflow
@@ -389,8 +415,9 @@
       min-height: 2.6rem;
       padding: 0.3rem 0.45rem;
     }
-    /* title meta-row — type pill, PR diff (if any), and labels share one
-       wrapping line so they fit when narrow but stay grouped when wide. */
+    /* title meta-row — discussion category, PR diff (if any), and labels
+       share one wrapping line so they fit when narrow but stay grouped when
+       wide. (The type lives in the .type-spine to the left, not here.) */
     td.title .meta-row {
       font-size: 0.74rem;
       color: var(--pico-muted-color);
@@ -399,6 +426,12 @@
       flex-wrap: wrap;
       gap: 0.4rem;
       align-items: center;
+      /* Fixed line height regardless of which chips are present (plain vs.
+         bordered pills, the 0.74rem diff-stats, the empty placeholder all
+         differ slightly) — keeps the title cell, and so the .type-spine
+         stretched to it, a constant height row to row. Many labels still
+         wrap and grow it, which is fine. */
+      min-height: 1rem;
     }
     .icon {
       width: 0.95em;
@@ -436,6 +469,19 @@
       color: var(--pico-muted-color);
       cursor: help;
       padding: 0 0.2rem;
+    }
+    /* Placeholder when a row has no category / diff / labels — keeps the
+       meta-row line occupied (so the title stays top-aligned with a real
+       second line) without implying any tag. Dashed outline, no fill. */
+    .meta-empty {
+      display: inline-block;
+      padding: 0.02rem 0.4rem;
+      border-radius: 0.5rem;
+      font-size: 0.62rem;
+      line-height: 1.45;
+      white-space: nowrap;
+      border: 1px dashed currentColor;
+      color: color-mix(in srgb, var(--pico-muted-color) 65%, transparent);
     }
 
     /* actions — segmented control of three mutually-exclusive states
