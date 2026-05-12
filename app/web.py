@@ -755,7 +755,7 @@ def _short_duration(secs: int) -> str:
 # it grows new action labels. Unknown actions render as the raw key
 # (forward-compat).
 _USER_ACTION_LABELS = {
-    "visited":          "Opened link",
+    "visited":          "Last opened link",
     "read":             "Marked read",
     "read_on_github":   "Marked read remotely",
     "muted":            "Muted",
@@ -857,25 +857,20 @@ _COMMENT_COALESCE_GAP_SECS = 30 * 86400
 
 
 def _coalesce_visits(events: list[dict]) -> list[dict]:
-    """Drop earlier `visited` user_actions when adjacent in the timeline
-    (no other event of any kind between them). Repeated link-clicks all
-    carry the same payload, so only the most-recent one is informative —
-    older ones are redundant noise that pushes the composer down."""
-    out: list[dict] = []
-    for ev in events:
-        is_visit = (
+    """Keep only the most-recent `visited` user_action in the whole timeline.
+    Repeated link-clicks all carry the same payload, so older ones are
+    redundant noise that pushes the composer down; the latest one — in its
+    true chronological slot — is what answers "what's happened since I last
+    looked here?". The AI still sees every visit (raw thread_events); this
+    only thins the visual popover. Events arrive chronologically, so the
+    last `visited` in the list is the newest."""
+    def is_visit(ev: dict) -> bool:
+        return (
             ev.get("kind") == "user_action"
             and (ev.get("payload") or {}).get("action") == "visited"
         )
-        prev_is_visit = bool(out) and (
-            out[-1].get("kind") == "user_action"
-            and (out[-1].get("payload") or {}).get("action") == "visited"
-        )
-        if is_visit and prev_is_visit:
-            out[-1] = ev   # replace older visit with newer
-        else:
-            out.append(ev)
-    return out
+    keep = max((i for i, ev in enumerate(events) if is_visit(ev)), default=None)
+    return [ev for i, ev in enumerate(events) if i == keep or not is_visit(ev)]
 
 
 def _coalesce_body_edits(events: list[dict]) -> list[dict]:
@@ -883,7 +878,9 @@ def _coalesce_body_edits(events: list[dict]) -> list[dict]:
     other event of any kind between them). Each one says "the description
     changed"; only the most recent matters — its `at` and `editor` describe
     the body the AI / the user is now looking at, and the in-between states
-    are gone (we never kept them). Same shape as _coalesce_visits."""
+    are gone (we never kept them). Unlike _coalesce_visits this only
+    collapses *adjacent* runs — a body_edit is informative in its slot
+    between activity, an old visit isn't."""
     out: list[dict] = []
     for ev in events:
         if (
