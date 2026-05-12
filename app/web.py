@@ -328,6 +328,7 @@ TYPE_LABELS_LONG = {
 #   action_needed: 'assigned' | 'review_you' | 'review_team' | None  (mutually exclusive)
 #   mentioned_since: bool      (since last action)
 #   is_author: bool
+#   is_involved: bool          (author / directed reason / active-participant reason)
 
 
 def _aggregate_reactions(reactions: dict | None) -> tuple[int, int, int]:
@@ -1462,6 +1463,14 @@ def _row_to_dict(
     d["action_needed"] = _action_needed(details, repo_owner, d["reason"], seen)
     d["mentioned_since"] = _mentioned_since(seen)
     d["is_author"] = _is_author(details)
+    # "Involved" = directed at you or an active participant, by any reason
+    # GitHub has ever delivered for this thread (current or accumulated), plus
+    # the enriched author check (catches a row not yet enriched-as-yours).
+    d["is_involved"] = bool(
+        d["is_author"]
+        or (d["reason"] or "") in github.INVOLVED_REASONS
+        or (seen & github.INVOLVED_REASONS)
+    )
     d["merge_state"] = _merge_state(details, d["type"])
     # 'New since last action': review state changed since the user last engaged
     # (action or first ingest, baseline NULL means "never engaged").
@@ -1626,6 +1635,7 @@ def _filters_from_request() -> dict:
         "show_archived": bool(src.get("show_archived")),
         "tracked_only":  bool(src.get("tracked_only")),
         "mine_only":     bool(src.get("mine_only")),
+        "involved_only": bool(src.get("involved_only")),
         "owner":         src.get("owner") or "",
         "repo":          src.get("repo") or "",
         "sort":          src.get("sort") or "updated",
@@ -1729,6 +1739,8 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         ]
     if f["mine_only"]:
         rows = [r for r in rows if r["is_author"]]
+    if f["involved_only"]:
+        rows = [r for r in rows if r["is_involved"]]
     if f["owner"]:
         rows = [r for r in rows if r["repo_owner"] == f["owner"]]
     if f["repo"]:

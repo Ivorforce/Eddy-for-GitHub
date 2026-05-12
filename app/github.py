@@ -227,7 +227,12 @@ def backfetch_issues(
     q = f"is:open archived:false {qualifier}"
     per_page = min(100, n)
     headers = _auth_headers(token)
-    reason = "author" if scope == "authored" else "subscribed"
+    # `author` for the authored scope; for the involved scope use `manual` —
+    # the search query is a deliberate inclusion, not a passive watch, and
+    # `manual` ∈ INVOLVED_REASONS so these rows show under "Involved only"
+    # (search doesn't tell us per-result whether you're assignee / commenter /
+    # mentioned, so the exact directed reason isn't recoverable).
+    reason = "author" if scope == "authored" else "manual"
 
     items: list[dict[str, Any]] = []
     next_url: str | None = None
@@ -1485,6 +1490,12 @@ _DIRECTED_REASONS = {"mention", "team_mention", "assign", "review_requested"}
 # engaged user wants updates promptly. (Does NOT bypass per-kind mute — that's
 # an explicit "I don't want this kind here" override.)
 _INVOLVED_REASONS = {"author", "comment", "manual", "your_activity"}
+
+# Union of the two: every `reason` that means "you, specifically" — directed
+# at you or you're an active participant — as opposed to a passive repo/thread
+# watch (`subscribed`, `ci_activity`, `state_change`, `push`, `security_alert`,
+# …). Drives the "Involved only" row filter in the web UI.
+INVOLVED_REASONS = _DIRECTED_REASONS | _INVOLVED_REASONS
 
 # Activity kinds the bystander throttle is allowed to suppress. `review` and
 # `lifecycle` always bump (lower-volume, higher-signal — the merge / approval /
