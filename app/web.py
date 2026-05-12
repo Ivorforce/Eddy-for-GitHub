@@ -34,7 +34,16 @@ def _humanize(iso: str | None) -> str:
         return f"{secs // 60}m ago"
     if secs < 86400:
         return f"{secs // 3600}h ago"
-    return f"{secs // 86400}d ago"
+    days = secs / 86400.0
+    # Same w/mo/y vocabulary as the age pill (see _age_pill) so the "Updated
+    # … ago" line in its tooltip reads in the same units as the pill text.
+    if days < 7:
+        return f"{int(days)}d ago"
+    if days < 30:
+        return f"{int(days / 7)}w ago"
+    if days < 365:
+        return f"{int(days / 30.44)}mo ago"
+    return f"{int(days / 365.25)}y ago"
 
 
 app.jinja_env.filters["humanize"] = _humanize
@@ -1540,8 +1549,13 @@ def _set_quiet_bystanders(on: bool) -> bool:
 
 def _render_row(n: dict):
     """Wrap render_template('_row.html', ...) so every row swap carries
-    the active triage_mode (read from the persisted setting)."""
-    return render_template("_row.html", n=n, triage_mode=_get_triage_mode())
+    the active triage_mode (persisted setting) and sort (rides on the
+    request via the hx-included #filters — the Reception column shows the
+    engaged-count in AI mode only while that's the active sort)."""
+    return render_template(
+        "_row.html", n=n, triage_mode=_get_triage_mode(),
+        sort=request.values.get("sort") or "updated",
+    )
 
 
 def _eff_updated(r: dict) -> str:
@@ -1684,6 +1698,7 @@ def index():
         owners=owners,
         repo_names=repo_names,
         filters=f,
+        sort=f["sort"],
         triage_mode=_get_triage_mode(),
         quiet_bystanders=_get_quiet_bystanders(),
         type_labels=TYPE_LABELS_LONG,
@@ -1697,7 +1712,7 @@ def list_view():
     f = _filters_from_request()
     rows = _filter_and_sort(_load_notifications(), f)
     return render_template(
-        "_table.html", notifications=rows, error=None, filters=f,
+        "_table.html", notifications=rows, error=None, filters=f, sort=f["sort"],
         triage_mode=_get_triage_mode(),
     )
 
@@ -1733,7 +1748,7 @@ def set_triage_mode():
     f = _filters_from_request()
     rows = _filter_and_sort(_load_notifications(), f)
     return render_template(
-        "_table.html", notifications=rows, error=None, filters=f,
+        "_table.html", notifications=rows, error=None, filters=f, sort=f["sort"],
         triage_mode=new_mode,
     )
 
@@ -1744,7 +1759,8 @@ def _table_response(error: str | None) -> "Response":
     f = _filters_from_request()
     rows = _filter_and_sort(_load_notifications(), f)
     body = render_template(
-        "_table.html", notifications=rows, filters=f, triage_mode=_get_triage_mode(),
+        "_table.html", notifications=rows, filters=f, sort=f["sort"],
+        triage_mode=_get_triage_mode(),
     )
     response = make_response(body, 200)
     if error:

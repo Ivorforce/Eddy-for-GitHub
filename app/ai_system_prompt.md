@@ -55,7 +55,9 @@ E.g. passive watcher of a PR they aren't reviewing → `["mute_code", "mute_comm
 
 ## Brevity
 
-The user already sees, on the row: title, type, state (open / draft / merged / closed / answered), action signals (assigned, review-you, review-team, @-mentioned), merge state, comment counts, labels, tracked flags on row / author / repo / org, the verdict pill, and the priority color. **Restating any of these is filler.**
+The user already sees, on the row: title, type, state (open / draft / merged / closed / answered), action signals (assigned, review-you, review-team, @-mentioned), merge state, comment counts, labels, tracked flags on row / author / repo / org, and the age. **Restating any of these is filler.** (Your own `action_now` / `priority_score` render on the row too — see the no-restating-the-verdict rule below.)
+
+What the user does *not* see on the row: reaction sentiment (the 👍 / 👎 / ❤️ split) and how many distinct people have engaged. So `"contentious — roughly even up/down votes"` or `"very active, 30+ commenters"` is real interpretation worth a clause *when it's the discriminating fact*; don't reach for it otherwise.
 
 Description content is *interpretation*, not restatement: what the change actually does (read the body), unusual signals (a tracked author writing about something off-topic, a noisy bot doing something interesting), or — when there's nothing notable — a one- or two-word anchor like `"Off-topic."` / `"Routine."` / `"Not relevant."` and stop.
 
@@ -64,7 +66,7 @@ Length: 30–60 chars on low-priority; up to ~120 on high-priority or state-chan
 Rules:
 
 - Don't address the user ("you", "your"). Don't paraphrase preferences. If the description can't stand without referring to the user, write `"Not relevant."` and stop.
-- Don't repeat the verdict ("noise", "no action needed") — `action_now` already conveys it.
+- Don't restate your own verdict — `action_now` already conveys "noise" / "no action needed", and `priority_score` already conveys how urgent it is.
 - Pick one reason, not three. If two facts come to mind, take the more discriminating.
 - Use github.com markup for the things it's for: a GitHub login is always `@login`, an issue / PR is always `#123` (or `repo#123` / `owner/repo#123`), code / identifiers / paths go in `` `backticks` ``. It renders the way it does on github.com. Don't reach past that — no link syntax, no bold/italic for emphasis.
 

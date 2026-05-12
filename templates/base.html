@@ -55,10 +55,11 @@
       background: #6e7781; /* default for Discussion / Release / not-yet-enriched */
     }
 
-    /* Activity column — 2×N icon-grid of stats. Up to three rows: complexity
-       (+adds, −dels) for PRs, popularity (▲ ▼), interest (💬 👥). Vertical-
-       centered so a 2-row Issue block sits balanced against a 3-row PR's
-       title height. Pills are avoided on count rows — they read as noise
+    /* Activity column ("Reception" / "Age") — age pill on top, then a 2-col
+       stat grid: popularity (▲ ▼) | engagement (👥). AI mode collapses it to
+       the age alone (.ai-mode below) — reception "temperature" is the AI's
+       to weigh — except the engaged-count returns while sorting by it.
+       Vertical-centered; pills avoided on count rows — they read as noise
        when their width fluctuates with single-digit numbers. */
     td.activity {
       width: 1%;
@@ -121,6 +122,15 @@
       grid-column: 1 / -1;
       min-width: 0;
       font-weight: 600;
+      justify-content: center;
+    }
+    /* AI mode collapses this column to the age (plus the engaged-count when
+       the active sort is "engaged"). No 2-col stat grid to keep aligned —
+       single centered column. */
+    td.activity .activity-stats.ai-mode { grid-template-columns: auto; }
+    td.activity .activity-stats.ai-mode .stat {
+      min-width: 0;
+      grid-column: 1 / -1;
       justify-content: center;
     }
     .type-pill.state-open                { background: #1f883d; }
