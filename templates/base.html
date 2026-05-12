@@ -242,6 +242,15 @@
     .repo-owner.entity-trigger { color: var(--pico-muted-color); }
     .author-login.entity-trigger { font-weight: 500; }
     .entity-trigger.is-tracked { color: #eaa54a; }
+    /* Hover affordance — all three triggers respond the same way: lift to
+       full body color (the org is muted at rest, so its plain underline is
+       too faint to read as interactive on its own) and underline. Tracked
+       entities keep their amber. No color transition: Pico animates `a`
+       color over 0.2s, which lags behind the (non-animatable) underline and
+       feels sluggish for a hover cue — snap both at once. */
+    a.entity-trigger { transition: none; }
+    .entity-trigger:hover { color: var(--pico-color); text-decoration: underline; }
+    .entity-trigger.is-tracked:hover { color: #eaa54a; }
     /* Item title is the longest piece of free-text prose on the row, so it
        reads as text rather than as a styled link: inherits body color (NOT
        Pico's anchor-scoped --pico-color, which is the link primary blue —
