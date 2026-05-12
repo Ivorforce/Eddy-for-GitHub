@@ -278,6 +278,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       min-width: 0;
+      pointer-events: none;       /* see .ai-verdict-desc — dodge Safari's clipped-text tooltip; clicks/hover fall through to the .item-title link */
     }
     a.item-title:hover .item-title-text { text-decoration: underline; }
     a.item-title.is-tracked,
