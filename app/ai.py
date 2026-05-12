@@ -372,6 +372,92 @@ def _load_timeline(conn: sqlite3.Connection, thread_id: str) -> list[dict]:
     return out
 
 
+# Kinds whose payloads we summarize in `changes_since_last_verdict`. `code`
+# pushes aren't here (no per-push event — derived from `item.last_commit`),
+# and `ai_verdict` is the cutoff, not content.
+def _changes_since_last_verdict(
+    conn: sqlite3.Connection, thread_id: str, last_commit: dict | None
+) -> dict | None:
+    """Mechanical histogram of timeline events after the most recent
+    `ai_verdict` event (a `skip` counts — it writes one too), so a re-judgment
+    doesn't have to re-derive "what's moved since I last looked" by scanning
+    the flat log. Returns None when no prior verdict exists (a first judgment —
+    `activity` already covers "new since the *user* last looked", a different
+    anchor); returns an empty dict when a verdict exists but nothing's happened
+    since (its presence still tells the model "you've judged this before").
+
+    Purely derived from `thread_events`; the `timeline` array stays
+    authoritative if they ever disagree. Caveat: event `ts` is the GitHub
+    timestamp (`created_at` / `submittedAt`), so a comment authored *before*
+    the last verdict but fetched *after* it sorts before the cutoff and isn't
+    counted — the same blind spot the model has scanning the raw timeline, not
+    a worse one.
+    """
+    cut = conn.execute(
+        "SELECT MAX(ts) AS t FROM thread_events WHERE thread_id = ? AND kind = 'ai_verdict'",
+        (thread_id,),
+    ).fetchone()
+    last_verdict_ts = cut["t"] if cut else None
+    if last_verdict_ts is None:
+        return None
+    rows = conn.execute(
+        """
+        SELECT kind, payload_json FROM thread_events
+         WHERE thread_id = ? AND ts > ? AND kind != 'ai_verdict'
+         ORDER BY ts ASC, id ASC
+        """,
+        (thread_id, last_verdict_ts),
+    ).fetchall()
+    new_comments = 0
+    new_reviews: list[dict] = []
+    lifecycle: list[str] = []
+    user_actions: list[str] = []
+    priority_changes: list = []
+    user_chats = 0
+    body_edited = False
+    for r in rows:
+        try:
+            p = json.loads(r["payload_json"])
+        except (ValueError, TypeError):
+            p = {}
+        k = r["kind"]
+        if k == "comment":
+            new_comments += 1
+        elif k == "review":
+            new_reviews.append({
+                "author": p.get("author"),
+                "state": (p.get("state") or "").lower() or None,
+            })
+        elif k == "lifecycle":
+            if p.get("action"):
+                lifecycle.append(p["action"])
+        elif k == "body_edit":
+            body_edited = True
+        elif k == "user_action":
+            if p.get("action"):
+                user_actions.append(p["action"])
+        elif k == "priority_change":
+            priority_changes.append(p.get("to"))
+        elif k == "user_chat":
+            user_chats += 1
+    code_pushed = False
+    if last_commit:
+        committed = db.iso_to_unix(last_commit.get("committed_at"))
+        if committed is not None and committed > last_verdict_ts:
+            code_pushed = True
+    out = {
+        "new_comments":     new_comments or None,
+        "new_reviews":      new_reviews or None,
+        "lifecycle":        lifecycle or None,
+        "body_edited":      body_edited or None,
+        "code_pushed":      code_pushed or None,
+        "user_actions":     user_actions or None,
+        "priority_changes": priority_changes or None,
+        "user_chats":       user_chats or None,
+    }
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | None:
     """Build the full context dict for one thread. Returns None if not found.
     Mirrors the data web._row_to_dict surfaces in the UI, so the AI sees the
@@ -514,7 +600,7 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
     timeline = _load_timeline(conn, thread_id)
     now_iso = datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
-    return {
+    ctx = {
         "now": now_iso,
         "notification": notification,
         "item": item,
@@ -522,6 +608,13 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
         "entities": entities,
         "timeline": timeline,
     }
+    # Re-judgments only: an explicit, derived delta against the last verdict so
+    # the model doesn't reconstruct it from the flat timeline every time. Omit
+    # the key entirely on a first judgment (no prior verdict to diff against).
+    changes = _changes_since_last_verdict(conn, thread_id, item.get("last_commit"))
+    if changes is not None:
+        ctx["changes_since_last_verdict"] = changes
+    return ctx
 
 
 def _build_user_message(ctx: dict) -> str:
