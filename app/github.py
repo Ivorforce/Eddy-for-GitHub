@@ -346,6 +346,46 @@ _GRAPHQL_REACTION_KEYS = {
     "EYES": "eyes",
 }
 
+
+def _condense_reaction_groups(groups) -> dict | None:
+    """reactionGroups list → {emoji_key: count, …, "total_count": N} with
+    zero-count emoji omitted, or None when there are no reactions at all.
+
+    The lean per-comment / per-review / per-linked-issue shape — distinct from
+    the top-level item `reactions` dict, which keeps every key (zeros included)
+    because the positive-max popularity aggregator iterates a fixed key set.
+    """
+    out: dict[str, int] = {}
+    total = 0
+    for g in groups or []:
+        n = ((g.get("reactors") or {}).get("totalCount")) or 0
+        if n <= 0:
+            continue
+        key = _GRAPHQL_REACTION_KEYS.get(g.get("content"))
+        if key is not None:
+            out[key] = n
+        total += n
+    if total <= 0:
+        return None
+    out["total_count"] = total
+    return out
+
+
+def _comment_node_extras(n: dict) -> dict:
+    """Per-comment fields beyond the core set, as a dict to splat into the
+    comment_history entry: `reactions` (when any), and `minimized_reason`
+    (`off-topic` / `outdated` / `resolved` / `duplicate` / `spam` / `abuse` /
+    `hidden` fallback) when a maintainer has collapsed the comment. Empty when
+    neither applies."""
+    out: dict = {}
+    rx = _condense_reaction_groups(n.get("reactionGroups"))
+    if rx:
+        out["reactions"] = rx
+    if n.get("isMinimized"):
+        out["minimized_reason"] = (n.get("minimizedReason") or "hidden").lower()
+    return out
+
+
 _DISCUSSION_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -372,6 +412,9 @@ query($owner: String!, $name: String!, $number: Int!) {
           bodyText
           createdAt
           lastEditedAt
+          isMinimized
+          minimizedReason
+          reactionGroups { content reactors { totalCount } }
           replies(first: 100) { nodes { author { login } } }
         }
       }
@@ -472,6 +515,7 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
             "created_at": c.get("createdAt"),
             "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
+            **_comment_node_extras(c),
         })
 
     # State flows through the same field as Issues so _type_state can
@@ -572,6 +616,18 @@ query($owner: String!, $name: String!, $number: Int!) {
         }
       }
       reactionGroups { content reactors { totalCount } }
+      closingIssuesReferences(first: 10) {
+        nodes { number title state reactionGroups { content reactors { totalCount } } }
+      }
+      reviewThreads(last: 100) {
+        nodes {
+          isResolved
+          isOutdated
+          path
+          opener: comments(first: 1) { nodes { author { login } bodyText } }
+          latest: comments(last: 2) { totalCount nodes { createdAt author { login } bodyText } }
+        }
+      }
       comments(last: 100) {
         totalCount
         nodes {
@@ -581,6 +637,9 @@ query($owner: String!, $name: String!, $number: Int!) {
           bodyText
           createdAt
           lastEditedAt
+          isMinimized
+          minimizedReason
+          reactionGroups { content reactors { totalCount } }
         }
       }
       reviews(last: 100) {
@@ -592,6 +651,8 @@ query($owner: String!, $name: String!, $number: Int!) {
           bodyText
           submittedAt
           lastEditedAt
+          comments { totalCount }
+          reactionGroups { content reactors { totalCount } }
         }
       }
       timelineItems(last: 50, itemTypes: [
@@ -692,6 +753,78 @@ def _condense_check_rollup(rollup: dict | None) -> dict | None:
     return out
 
 
+# Per-comment body cap inside review-thread samples (these are fetched dozens
+# at a time, unlike the item body's generous 32k guardrail), and how many
+# unresolved threads carry comment bodies — beyond that they're count-only; a
+# PR with that many open threads is already an obvious `look`.
+_REVIEW_COMMENT_TRUNC = 600
+_REVIEW_THREAD_BODY_CAP = 12
+
+
+def _review_thread_comment(c: dict) -> dict:
+    """One sampled review-thread comment → {author, body}; body is bodyText
+    (markup stripped), truncated."""
+    body = (c.get("bodyText") or "").strip()
+    if len(body) > _REVIEW_COMMENT_TRUNC:
+        body = body[:_REVIEW_COMMENT_TRUNC] + "…[truncated]"
+    return {"author": (c.get("author") or {}).get("login"), "body": body}
+
+
+def _condense_review_threads(node) -> dict | None:
+    """reviewThreads connection → {resolved: int, unresolved: [{path, comments,
+    last_comment_at?, outdated?, comments_sample?}]} or None when the PR has no
+    review threads.
+
+    Resolved threads collapse to a bare count — resolved means that point was
+    dealt with, no further detail needed. Unresolved ones carry their comment
+    count + last-comment timestamp (which separates a live back-and-forth from
+    a remark nobody ever marked resolved that's gone quiet), `outdated` when the
+    diff moved out from under the thread, and — for the first
+    _REVIEW_THREAD_BODY_CAP of them — `comments_sample`: the opening comment
+    plus the last one or two, verbatim and truncated. The opener is what tells
+    you *what* is being discussed; a bare tail usually doesn't ("what if it's
+    xy.py?" / "I'll look Monday" / "ok" never restates the topic). When
+    `comments` exceeds the sample length there's a gap between opener and tail —
+    the count makes that plain. `unresolved` is omitted when every thread is
+    resolved. Capped at the GraphQL 100; more threads undercount, as elsewhere.
+    """
+    if not node:
+        return None
+    resolved = 0
+    unresolved: list[dict] = []
+    bodied = 0
+    for t in node.get("nodes") or []:
+        if t.get("isResolved"):
+            resolved += 1
+            continue
+        latest_nodes = (t.get("latest") or {}).get("nodes") or []
+        total = (t.get("latest") or {}).get("totalCount") or len(latest_nodes)
+        entry: dict = {"path": t.get("path"), "comments": total}
+        last_at = latest_nodes[-1].get("createdAt") if latest_nodes else None
+        if last_at:
+            entry["last_comment_at"] = last_at
+        if t.get("isOutdated"):
+            entry["outdated"] = True
+        if bodied < _REVIEW_THREAD_BODY_CAP:
+            sample: list[dict] = []
+            opener_nodes = (t.get("opener") or {}).get("nodes") or []
+            # Prepend the opener only when it falls outside the latest window
+            # (otherwise it's already the first of latest_nodes).
+            if opener_nodes and total > len(latest_nodes):
+                sample.append(_review_thread_comment(opener_nodes[0]))
+            sample.extend(_review_thread_comment(c) for c in latest_nodes)
+            if sample:
+                entry["comments_sample"] = sample
+                bodied += 1
+        unresolved.append(entry)
+    if resolved == 0 and not unresolved:
+        return None
+    out: dict = {"resolved": resolved}
+    if unresolved:
+        out["unresolved"] = unresolved
+    return out
+
+
 def fetch_pr(token: str, api_url: str | None) -> dict | None:
     """GraphQL fetch for a PR. Replaces four REST round trips with one.
 
@@ -763,17 +896,19 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
             "created_at": c.get("createdAt"),
             "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
+            **_comment_node_extras(c),
         })
 
     # Reviews — feed _compute_review_state in REST shape, count distinct
     # non-PENDING authors. Body and submittedAt ride along so the AI
-    # summary can surface change-request rationales.
+    # summary can surface change-request rationales; comment_count (inline
+    # line-comments) and reactions ride along too where present.
     rest_reviews: list[dict] = []
     reviewer_logins: set[str] = set()
     for rev in (pr.get("reviews") or {}).get("nodes") or []:
         state = rev.get("state")
         author_login = (rev.get("author") or {}).get("login")
-        rest_reviews.append({
+        rev_entry: dict = {
             "database_id": rev.get("databaseId"),
             "state": state,
             "user": {"login": author_login},
@@ -781,7 +916,14 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
             "submitted_at": rev.get("submittedAt"),
             "edited_at": rev.get("lastEditedAt"),
             "body": rev.get("bodyText") or "",
-        })
+        }
+        rev_rx = _condense_reaction_groups(rev.get("reactionGroups"))
+        if rev_rx:
+            rev_entry["reactions"] = rev_rx
+        rev_cc = ((rev.get("comments") or {}).get("totalCount")) or 0
+        if rev_cc:
+            rev_entry["comment_count"] = rev_cc
+        rest_reviews.append(rev_entry)
         if state != "PENDING" and author_login:
             reviewer_logins.add(author_login)
     review_state = _compute_review_state(rest_reviews)
@@ -809,6 +951,25 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         }
         for l in (pr.get("labels") or {}).get("nodes") or []
     ]
+
+    # Issues this PR closes on merge — {number, title, state, reactions?}.
+    # The linked issue's reaction count is a popularity proxy for the
+    # underlying request: a PR closing a +200 issue carries more weight than
+    # one closing a 0-reaction one.
+    closes: list[dict] = []
+    for cn in (pr.get("closingIssuesReferences") or {}).get("nodes") or []:
+        num = (cn or {}).get("number")
+        if not num:
+            continue
+        entry: dict = {
+            "number": num,
+            "title": (cn or {}).get("title"),
+            "state": ((cn or {}).get("state") or "").lower() or None,
+        }
+        ci_rx = _condense_reaction_groups(cn.get("reactionGroups"))
+        if ci_rx:
+            entry["reactions"] = ci_rx
+        closes.append(entry)
 
     # Per-file diff stats. REST-shaped (filename / additions / deletions) so
     # details_json stays consistent with the rest of this module's contract.
@@ -884,6 +1045,11 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "deletions": pr.get("deletions"),
         "changed_files": pr.get("changedFiles"),
         "files": files,
+        "closes": closes,
+        # Inline review-thread state: {resolved: int, unresolved: [{path,
+        # comments, last_comment_at?, outdated?, comments_sample?}]} or None.
+        # See _condense_review_threads.
+        "review_threads": _condense_review_threads(pr.get("reviewThreads")),
         "last_commit": last_commit,
         "comments": comment_total,
         "_comment_history": comment_history,
@@ -935,6 +1101,9 @@ query($owner: String!, $name: String!, $number: Int!) {
           bodyText
           createdAt
           lastEditedAt
+          isMinimized
+          minimizedReason
+          reactionGroups { content reactors { totalCount } }
         }
       }
       timelineItems(last: 50, itemTypes: [CLOSED_EVENT, REOPENED_EVENT]) {
@@ -1012,6 +1181,7 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
             "created_at": c.get("createdAt"),
             "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
+            **_comment_node_extras(c),
         })
 
     assignees = [
@@ -1202,6 +1372,17 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
             if ("comment", str(db_id)) not in existing_events:
                 nk.add("comment")
             ts = db.iso_to_unix(c.get("created_at")) or now
+            payload = {
+                "author": (c.get("user") or {}).get("login"),
+                "author_association": c.get("author_association"),
+                "body": c.get("body") or "",
+                "created_at": c.get("created_at"),
+                "edited_at": c.get("edited_at"),
+            }
+            if c.get("reactions"):
+                payload["reactions"] = c["reactions"]
+            if c.get("minimized_reason"):
+                payload["minimized_reason"] = c["minimized_reason"]
             db.write_thread_event(
                 conn,
                 thread_id=row["id"],
@@ -1209,13 +1390,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
                 kind="comment",
                 source="github",
                 external_id=str(db_id),
-                payload={
-                    "author": (c.get("user") or {}).get("login"),
-                    "author_association": c.get("author_association"),
-                    "body": c.get("body") or "",
-                    "created_at": c.get("created_at"),
-                    "edited_at": c.get("edited_at"),
-                },
+                payload=payload,
             )
         for rev in pr_reviews:
             db_id = rev.get("database_id")
@@ -1224,6 +1399,18 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
             if ("review", str(db_id)) not in existing_events:
                 nk.add("review")
             ts = db.iso_to_unix(rev.get("submitted_at")) or now
+            payload = {
+                "author": (rev.get("user") or {}).get("login"),
+                "author_association": rev.get("author_association"),
+                "body": rev.get("body") or "",
+                "state": rev.get("state"),
+                "submitted_at": rev.get("submitted_at"),
+                "edited_at": rev.get("edited_at"),
+            }
+            if rev.get("comment_count"):
+                payload["comment_count"] = rev["comment_count"]
+            if rev.get("reactions"):
+                payload["reactions"] = rev["reactions"]
             db.write_thread_event(
                 conn,
                 thread_id=row["id"],
@@ -1231,14 +1418,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
                 kind="review",
                 source="github",
                 external_id=str(db_id),
-                payload={
-                    "author": (rev.get("user") or {}).get("login"),
-                    "author_association": rev.get("author_association"),
-                    "body": rev.get("body") or "",
-                    "state": rev.get("state"),
-                    "submitted_at": rev.get("submitted_at"),
-                    "edited_at": rev.get("edited_at"),
-                },
+                payload=payload,
             )
         # State transitions (merged / closed / reopened / draft↔ready).
         # Deduped on the GraphQL global node id; re-fetch leaves them

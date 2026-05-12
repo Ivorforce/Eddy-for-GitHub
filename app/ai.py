@@ -329,6 +329,12 @@ def _summarize_details(d: dict, subject_type: str) -> dict:
                 f"{f.get('filename')} +{f.get('additions') or 0}/-{f.get('deletions') or 0}"
                 for f in files if f.get("filename")
             ]
+        # Issues this PR closes on merge ({number, title, state, reactions?})
+        # and the inline-review-thread state ({resolved: int, unresolved:
+        # [{path, comments, last_comment_at?, outdated?, comments_sample?}]}) —
+        # both None-dropped below when absent.
+        out["closes"] = d.get("closes")
+        out["review_threads"] = d.get("review_threads")
     if subject_type == "Discussion":
         out["category"] = d.get("category")
     # Comment + review bodies are no longer summarized here — they're
