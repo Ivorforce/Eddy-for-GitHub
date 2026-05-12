@@ -301,6 +301,19 @@ DELETE FROM thread_events
    AND json_extract(payload_json, '$.action') = 'unarchived';
 """
 
+# Re-key synthetic search-backfill rows from "q:<node_id>" to "q_<node_id>".
+# The id lands verbatim in DOM `id` attributes and from there in CSS selectors
+# (`#timeline-<id>`) and custom-idents (`anchor-name: --pop-timeline-<id>`),
+# where a ":" is a syntax error — the Note button's hx-target stopped resolving
+# on backfilled rows, and the popover anchor positioning broke. node_ids are
+# `[A-Za-z0-9_-]`, so the underscored form is a valid identifier; real thread
+# ids are all-digits, so the prefix stays unambiguous. Mirrors github._is_synthetic.
+SCHEMA_V28 = """
+UPDATE notifications SET id        = 'q_' || substr(id, 3)        WHERE id        LIKE 'q:%';
+UPDATE thread_events SET thread_id = 'q_' || substr(thread_id, 3) WHERE thread_id LIKE 'q:%';
+UPDATE ai_calls      SET thread_id = 'q_' || substr(thread_id, 3) WHERE thread_id LIKE 'q:%';
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -423,6 +436,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V27)
             _set_version(conn, 27)
             version = 27
+        if version < 28:
+            conn.executescript(SCHEMA_V28)
+            _set_version(conn, 28)
+            version = 28
     finally:
         conn.close()
 

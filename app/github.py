@@ -114,14 +114,17 @@ def _thread_url(thread_id: str) -> str:
     return f"https://api.github.com/notifications/threads/{thread_id}"
 
 
-# Synthetic search-backfilled rows carry an id like "q:<node_id>" — there's no
+# Synthetic search-backfilled rows carry an id like "q_<node_id>" — there's no
 # GitHub notification thread behind them, so the thread-mutating calls below
 # short-circuit. Acting on such a row updates local state only (via
 # _apply_action); in particular Mute won't actually unsubscribe on GitHub. If
 # real activity later delivers a genuine notification for that thread, _upsert's
 # de-dup drops the synthetic row and the real one comes in unmuted — acceptable.
+# The id lands verbatim in DOM ids / CSS selectors, so it stays "_"-joined
+# (a ":" is a CSS syntax error); real thread ids are all-digits, so "q_" is
+# unambiguous. node_ids are [A-Za-z0-9_-], i.e. valid CSS identifier tails.
 def _is_synthetic(thread_id: str) -> bool:
-    return thread_id.startswith("q:")
+    return thread_id.startswith("q_")
 
 
 def mark_read(token: str, thread_id: str) -> None:
@@ -214,7 +217,7 @@ def backfetch_issues(
 ) -> int:
     """Pull the latest N open issues/PRs matching `scope` (authored / involved)
     from the search API and insert them as synthetic notification rows
-    (id "q:<node_id>", unread=0), then force enrichment like `backfetch`.
+    (id "q_<node_id>", unread=0), then force enrichment like `backfetch`.
 
     These aren't real notifications — GitHub has no notification-thread handle
     for an arbitrary issue/PR — so the row's id is synthetic and the
@@ -264,7 +267,7 @@ def backfetch_issues(
             continue
         # A real notification row, if one exists, owns this thread — leave it.
         if conn.execute(
-            "SELECT 1 FROM notifications WHERE html_url = ? AND id NOT LIKE 'q:%'",
+            "SELECT 1 FROM notifications WHERE html_url = ? AND id NOT LIKE 'q\\_%' ESCAPE '\\'",
             (html,),
         ).fetchone():
             continue
@@ -275,7 +278,7 @@ def backfetch_issues(
             continue
         repo_full = repo_url[len(_API_REPOS_PREFIX):]
         synth = {
-            "id": "q:" + node_id,
+            "id": "q_" + node_id,
             "unread": False,
             "reason": reason,
             "updated_at": it.get("updated_at") or "",
@@ -1490,14 +1493,14 @@ def _upsert(
             (item["id"],),
         )
     # A genuine notification just arrived for a thread that a search-backfill
-    # had stood in for (id "q:<node_id>") — drop the synthetic row (and its
+    # had stood in for (id "q_<node_id>") — drop the synthetic row (and its
     # timeline); the real row will re-enrich fresh, owning the thread from here.
-    if prev is None and not item["id"].startswith("q:"):
+    if prev is None and not item["id"].startswith("q_"):
         html = derive_html_url(item)
         if html:
             for r in conn.execute(
                 "SELECT id FROM notifications "
-                "WHERE id LIKE 'q:%' AND html_url = ? AND id != ?",
+                "WHERE id LIKE 'q\\_%' ESCAPE '\\' AND html_url = ? AND id != ?",
                 (html, item["id"]),
             ).fetchall():
                 conn.execute(
