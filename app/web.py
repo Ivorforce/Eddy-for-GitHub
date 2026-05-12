@@ -1947,6 +1947,33 @@ def backfetch():
     return _table_response(error)
 
 
+@app.post("/backfetch/issues")
+def backfetch_issues():
+    """Backfill open issues/PRs from the search API as synthetic rows.
+    scope ∈ {authored (author:@me), involved (involves:@me)}; latest N by
+    updated, N clamped to [1, 1000]."""
+    scope = request.values.get("scope", "")
+    if scope not in ("authored", "involved"):
+        return _table_response("Backfill: unknown scope")
+    try:
+        n = int(request.values.get("n", 50))
+    except (TypeError, ValueError):
+        n = 50
+    n = max(1, min(n, 1000))
+    token = app.config["GITHUB_TOKEN"]
+    error: str | None = None
+    conn = db.connect()
+    try:
+        try:
+            github.backfetch_issues(conn, token, scope, n=n)
+        except Exception as e:
+            log.exception("backfetch_issues failed")
+            error = f"Backfill ({scope} {n}) failed: {e}"
+    finally:
+        conn.close()
+    return _table_response(error)
+
+
 def _apply_action(
     thread_id: str,
     action: str,

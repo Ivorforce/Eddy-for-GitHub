@@ -12,6 +12,11 @@ import requests
 from . import db
 
 API_NOTIFICATIONS = "https://api.github.com/notifications"
+API_SEARCH_ISSUES = "https://api.github.com/search/issues"
+# Search-backfill scopes: which `is:open` issues/PRs to pull in as synthetic
+# notification rows. `involves:@me` is a superset of `author:@me` (also
+# assignee / commenter / mentioned).
+_SEARCH_SCOPES = {"authored": "author:@me", "involved": "involves:@me"}
 PER_PAGE = 50
 MAX_PAGES_PER_FETCH = 2  # ~100 items per fetch — bound poll cost
 ENRICHMENT_PER_POLL = 20
@@ -109,8 +114,20 @@ def _thread_url(thread_id: str) -> str:
     return f"https://api.github.com/notifications/threads/{thread_id}"
 
 
+# Synthetic search-backfilled rows carry an id like "q:<node_id>" — there's no
+# GitHub notification thread behind them, so the thread-mutating calls below
+# short-circuit. Acting on such a row updates local state only (via
+# _apply_action); in particular Mute won't actually unsubscribe on GitHub. If
+# real activity later delivers a genuine notification for that thread, _upsert's
+# de-dup drops the synthetic row and the real one comes in unmuted — acceptable.
+def _is_synthetic(thread_id: str) -> bool:
+    return thread_id.startswith("q:")
+
+
 def mark_read(token: str, thread_id: str) -> None:
     """Mark a notification thread as read. Stays in the inbox."""
+    if _is_synthetic(thread_id):
+        return
     r = _session.patch(_thread_url(thread_id), headers=_auth_headers(token), timeout=10)
     if r.status_code in (200, 205, 304):
         return
@@ -119,6 +136,8 @@ def mark_read(token: str, thread_id: str) -> None:
 
 def mark_done(token: str, thread_id: str) -> None:
     """Mark as done — clears the notification from the inbox."""
+    if _is_synthetic(thread_id):
+        return
     r = _session.delete(_thread_url(thread_id), headers=_auth_headers(token), timeout=10)
     if r.status_code in (204, 404):
         return  # 404 if already gone — idempotent
@@ -127,6 +146,8 @@ def mark_done(token: str, thread_id: str) -> None:
 
 def set_ignored(token: str, thread_id: str) -> None:
     """Set thread subscription to ignored — stops future notifications on this thread."""
+    if _is_synthetic(thread_id):
+        return
     r = _session.put(
         f"{_thread_url(thread_id)}/subscription",
         headers=_auth_headers(token),
@@ -176,6 +197,97 @@ def backfetch(conn: sqlite3.Connection, token: str, n: int = 50) -> int:
             continue
         ids.append(item["id"])
         _upsert(conn, item, now)
+
+    if ids:
+        placeholders = ",".join(["?"] * len(ids))
+        conn.execute(
+            f"UPDATE notifications SET details_fetched_at = NULL "
+            f"WHERE id IN ({placeholders})",
+            tuple(ids),
+        )
+    _enrich(conn, token)
+    return len(items)
+
+
+def backfetch_issues(
+    conn: sqlite3.Connection, token: str, scope: str, n: int = 50
+) -> int:
+    """Pull the latest N open issues/PRs matching `scope` (authored / involved)
+    from the search API and insert them as synthetic notification rows
+    (id "q:<node_id>", unread=0), then force enrichment like `backfetch`.
+
+    These aren't real notifications — GitHub has no notification-thread handle
+    for an arbitrary issue/PR — so the row's id is synthetic and the
+    thread-mutating actions short-circuit (see _is_synthetic). Skips a result
+    if a real notification row already owns that html_url; the reverse case
+    (a real notification arriving later) is handled by _upsert's de-dup.
+    """
+    qualifier = _SEARCH_SCOPES[scope]
+    n = max(1, min(n, 1000))  # search API returns at most 1000 results
+    q = f"is:open archived:false {qualifier}"
+    per_page = min(100, n)
+    headers = _auth_headers(token)
+    reason = "author" if scope == "authored" else "subscribed"
+
+    items: list[dict[str, Any]] = []
+    next_url: str | None = None
+    while len(items) < n:
+        if next_url:
+            r = _session.get(next_url, headers=headers, timeout=30)
+        else:
+            r = _session.get(
+                API_SEARCH_ISSUES,
+                headers=headers,
+                params={"q": q, "sort": "updated", "order": "desc",
+                        "per_page": per_page},
+                timeout=30,
+            )
+        r.raise_for_status()
+        items.extend(r.json().get("items", []))
+        next_url = r.links.get("next", {}).get("url")
+        if not next_url:
+            break
+    items = items[:n]
+
+    now = int(time.time())
+    ids: list[str] = []
+    for it in items:
+        html = it.get("html_url")
+        node_id = it.get("node_id")
+        repo_url = it.get("repository_url") or ""
+        if not html or not node_id or not repo_url.startswith(_API_REPOS_PREFIX):
+            continue
+        # A real notification row, if one exists, owns this thread — leave it.
+        if conn.execute(
+            "SELECT 1 FROM notifications WHERE html_url = ? AND id NOT LIKE 'q:%'",
+            (html,),
+        ).fetchone():
+            continue
+        is_pr = "pull_request" in it
+        # search `url` is always .../issues/{n}; fetch_pr wants .../pulls/{n}.
+        api_url = (it.get("pull_request") or {}).get("url") if is_pr else it.get("url")
+        if not api_url:
+            continue
+        repo_full = repo_url[len(_API_REPOS_PREFIX):]
+        synth = {
+            "id": "q:" + node_id,
+            "unread": False,
+            "reason": reason,
+            "updated_at": it.get("updated_at") or "",
+            "last_read_at": None,
+            "subject": {
+                "type": "PullRequest" if is_pr else "Issue",
+                "title": it.get("title") or "",
+                "url": api_url,
+                "latest_comment_url": None,
+            },
+            "repository": {
+                "full_name": repo_full,
+                "html_url": f"https://github.com/{repo_full}",
+            },
+        }
+        ids.append(synth["id"])
+        _upsert(conn, synth, now)
 
     if ids:
         placeholders = ",".join(["?"] * len(ids))
@@ -1173,6 +1285,8 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
 
 def set_subscribed(token: str, thread_id: str) -> None:
     """Re-subscribe to a thread (reverse of set_ignored)."""
+    if _is_synthetic(thread_id):
+        return
     r = _session.put(
         f"{_thread_url(thread_id)}/subscription",
         headers=_auth_headers(token),
@@ -1303,6 +1417,21 @@ def _upsert(
             "action_source = NULL, snooze_until = NULL WHERE id = ?",
             (item["id"],),
         )
+    # A genuine notification just arrived for a thread that a search-backfill
+    # had stood in for (id "q:<node_id>") — drop the synthetic row (and its
+    # timeline); the real row will re-enrich fresh, owning the thread from here.
+    if prev is None and not item["id"].startswith("q:"):
+        html = derive_html_url(item)
+        if html:
+            for r in conn.execute(
+                "SELECT id FROM notifications "
+                "WHERE id LIKE 'q:%' AND html_url = ? AND id != ?",
+                (html, item["id"]),
+            ).fetchall():
+                conn.execute(
+                    "DELETE FROM thread_events WHERE thread_id = ?", (r["id"],)
+                )
+                conn.execute("DELETE FROM notifications WHERE id = ?", (r["id"],))
 
 
 def _accumulate_seen_reason(

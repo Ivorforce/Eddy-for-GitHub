@@ -1261,6 +1261,16 @@
     }
     .backfill-menu > ul,
     .options-menu  > ul { font-size: 0.82rem; }
+    /* Non-interactive group label inside the Backfill dropdown. */
+    .backfill-menu .bf-section {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--pico-muted-color);
+      padding: 0.5rem 0.5rem 0.15rem;
+      pointer-events: none;
+    }
+    .backfill-menu .bf-section:first-child { padding-top: 0.15rem; }
     /* Toggle row checkmark: hidden by default, revealed when .on is set
        (server-rendered for initial state, htmx flips it on response). */
     .options-toggle .check { visibility: hidden; margin-inline-end: 0.15rem; }
