@@ -31,6 +31,7 @@ import copy
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 from datetime import date, datetime, timezone
@@ -464,6 +465,48 @@ def _changes_since_last_verdict(
     return {k: v for k, v in out.items() if v is not None}
 
 
+# Every timestamp the context payload carries is a full ISO-8601 UTC string
+# ("2024-12-16T19:35:06Z", optionally with fractional seconds — see
+# _load_timeline and the GitHub createdAt/submittedAt/updatedAt fields). The
+# model is unreliable at subtracting two of these, so _annotate_ages appends a
+# coarse human-readable age — "<iso> (1.4y ago)" — at every site before the
+# payload is serialized. Anchored full-match only: a timestamp embedded inside a
+# comment body / note / chat message is left untouched.
+_ISO_UTC_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\Z")
+
+
+def _humanize_age(seconds: float) -> str:
+    """Magnitude, not precision: "0m" / "3h" / "15d" / "2.3mo" / "1.4y". The
+    caller adds the " ago" / " from now" direction."""
+    s = abs(seconds)
+    if s < 3600:
+        return f"{round(s / 60)}m"
+    if s < 86400:
+        return f"{round(s / 3600)}h"
+    if s < 86400 * 60:
+        return f"{round(s / 86400)}d"
+    if s < 86400 * 365:
+        return f"{round(s / 86400 / 30, 1)}mo"
+    return f"{round(s / 86400 / 365, 1)}y"
+
+
+def _annotate_ages(node, now_unix: float) -> None:
+    """Recursively rewrite full ISO-8601 UTC timestamp strings in `node` (a
+    dict / list, mutated in place) to "<iso> (<age> ago)". Skips `now` itself —
+    the caller restores it bare afterwards."""
+    items = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else None
+    if items is None:
+        return
+    for key, val in list(items):
+        if isinstance(val, (dict, list)):
+            _annotate_ages(val, now_unix)
+        elif isinstance(val, str) and _ISO_UTC_RE.match(val):
+            ts = db.iso_to_unix(val)
+            if ts is not None:
+                delta = now_unix - ts
+                node[key] = f"{val} ({_humanize_age(delta)} {'ago' if delta >= 0 else 'from now'})"
+
+
 def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | None:
     """Build the full context dict for one thread. Returns None if not found.
     Mirrors the data web._row_to_dict surfaces in the UI, so the AI sees the
@@ -604,7 +647,8 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
     notification = {k: v for k, v in notification.items() if v not in (None, "", False)}
 
     timeline = _load_timeline(conn, thread_id)
-    now_iso = datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    now_dt = datetime.now(tz=timezone.utc)
+    now_iso = now_dt.isoformat().replace("+00:00", "Z")
 
     ctx = {
         "now": now_iso,
@@ -620,6 +664,10 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
     changes = _changes_since_last_verdict(conn, thread_id, item.get("last_commit"))
     if changes is not None:
         ctx["changes_since_last_verdict"] = changes
+    # Append "(<age> ago)" to every ISO timestamp so the model doesn't subtract
+    # dates by hand; `now` is the reference, restored bare afterwards.
+    _annotate_ages(ctx, now_dt.timestamp())
+    ctx["now"] = now_iso
     return ctx
 
 

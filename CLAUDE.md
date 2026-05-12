@@ -38,6 +38,7 @@ Verdicts are advisory only: the pill / priority color shape *display*, but no ro
 
 - `config/preferences.md` — free-text user prefs (interests, important repos / people, noise patterns). Loaded into the cached system block. `config/preferences.example.md` ships as a template.
 - `app/ai_system_prompt.md` — shipped instructions (cost asymmetry, brevity rules, output-field semantics, **timeline interpretation**). The "do not restate row-visible facts" rule is load-bearing, as is "the `description` is self-contained — written fresh each judgment, never referencing prior verdicts (no 'unchanged'/'as before')"; "user_chat is authoritative for this thread", "user_action after a verdict is calibration feedback", and "prior verdicts are calibration input, not something to cite" are the v1 reading-rules.
+- The per-thread context payload (`_load_thread_context`, serialized into the user message). Every ISO timestamp in it is suffixed with a coarse precomputed age — `2024-12-16T19:35:06Z (1.4y ago)` — by `_annotate_ages`, so the model never subtracts dates by hand (Haiku gets multi-month deltas badly wrong). Anchored full-match only, so timestamps inside comment/note bodies are left alone.
 
 **Verdict shape (one forced tool call — `judge_thread` or, on a re-judgment, `skip`):**
 
