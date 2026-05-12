@@ -1098,6 +1098,16 @@
       font-size: 0.6rem;
       opacity: 0.5;
     }
+    /* Hover for the pill's recency segment: the standing take, then the
+       since-last-verdict breakdown below a hairline. */
+    .custom-tooltip .tip-recency-desc,
+    .custom-tooltip .tip-recency-since { white-space: normal; }
+    .custom-tooltip .tip-recency-desc { opacity: 0.8; }
+    .custom-tooltip .tip-recency-desc + .tip-recency-since {
+      margin-top: 0.3rem;
+      padding-top: 0.3rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.18);
+    }
 
     /* ── Composer ───────────────────────────────────────────────── */
     /* Two explicit acts: Note (Enter — free, no AI call) and the AI button

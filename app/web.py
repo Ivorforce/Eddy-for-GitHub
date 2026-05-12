@@ -1166,6 +1166,69 @@ def _format_event_for_render(
 _VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat")
 
 
+def _recency_summary(rows, after: int, *, description_html) -> dict | None:
+    """Non-AI "what's landed since the last verdict" recap for the AI-mode
+    pill: GitHub activity (comments / reviews / lifecycle) with ts > `after`,
+    summarised type-by-type in importance order (reviews, lifecycle, comments).
+    None when there's nothing new — the pill segment is then absent. The hover
+    repeats the verdict's standing take (`description_html`) above the
+    breakdown so it reads as "the take, plus what's happened since."""
+    comments = reviews = 0
+    review_states: list[str] = []
+    lifecycle_verbs: list[str] = []
+    for r in rows:
+        if r["ts"] <= after:
+            continue
+        kind = r["kind"]
+        if kind == "comment":
+            comments += 1
+        elif kind == "review":
+            reviews += 1
+            try:
+                st = (json.loads(r["payload_json"]).get("state") or "").upper()
+            except (ValueError, TypeError):
+                st = ""
+            if st:
+                review_states.append(st)
+        elif kind == "lifecycle":
+            try:
+                action = json.loads(r["payload_json"]).get("action") or ""
+            except (ValueError, TypeError):
+                action = ""
+            if action:
+                lifecycle_verbs.append(_LIFECYCLE_LABEL.get(action, (action, ""))[0])
+    if not (comments or reviews or lifecycle_verbs):
+        return None
+
+    def _plural(n: int, noun: str) -> str:
+        return f"+{n} {noun}{'' if n == 1 else 's'}"
+
+    parts: list[str] = []        # inline pill text — plain counts
+    detail: list[str] = []       # hover line — counts + review-state notes
+    if reviews:
+        parts.append(_plural(reviews, "review"))
+        cr = sum(1 for s in review_states if s == "CHANGES_REQUESTED")
+        ap = sum(1 for s in review_states if s == "APPROVED")
+        notes = [f"{cr} changes requested"] if cr else []
+        if ap:
+            notes.append(f"{ap} approved")
+        detail.append(_plural(reviews, "review") + (f" ({', '.join(notes)})" if notes else ""))
+    for verb in lifecycle_verbs:
+        parts.append(verb)
+        detail.append(verb)
+    if comments:
+        parts.append(_plural(comments, "comment"))
+        detail.append(_plural(comments, "comment"))
+
+    desc_part = (
+        Markup('<div class="tip-recency-desc">{}</div>').format(description_html)
+        if description_html else Markup("")
+    )
+    tip_html = desc_part + Markup('<div class="tip-recency-since">since the last assessment: {}</div>').format(
+        ", ".join(detail))
+    return {"text": " · ".join(parts), "tip_html": tip_html}
+
+
 def _attach_timeline(
     d: dict, conn: sqlite3.Connection, *,
     tracked_people=frozenset(), notes_people: dict | None = None,
@@ -1203,14 +1266,16 @@ def _attach_timeline(
     verdict = d.get("ai_verdict")
     if not verdict:
         # No assessment yet — "not up to date" so the trigger button invites
-        # the first Ask AI click.
+        # the first Ask AI click; no verdict ⇒ no recency segment.
         d["ai_uptodate"] = False
+        d["recency"] = None
         return
     after = verdict.get("at") or 0
     has_new_context = any(
         r["ts"] > after and r["kind"] in _VERDICT_INVALIDATING_KINDS for r in rows
     )
     d["ai_uptodate"] = not verdict.get("stale") and not has_new_context
+    d["recency"] = _recency_summary(rows, after, description_html=verdict.get("description_html"))
 
 
 def _ai_verdict_dict(
