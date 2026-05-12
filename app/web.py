@@ -1555,7 +1555,11 @@ def _row_to_dict(
     return d
 
 
-def _load_notifications():
+def _load_notifications(show_archived: bool = True):
+    """Load + hydrate notification rows for the table. `_filter_and_sort`
+    remains the source of truth for visibility; `show_archived=False` just
+    lets the default view skip loading (and hydrating) the archived/snoozed
+    rows it would immediately discard — pass `f["show_archived"]` through."""
     t_p = _tracked_people()
     t_r = _tracked_set("repos")
     t_o = _tracked_set("orgs")
@@ -1564,10 +1568,9 @@ def _load_notifications():
     n_o = _entity_notes("orgs", "name")
     conn = db.connect()
     try:
-        # Archived (action='done') rows are loaded unconditionally; the
-        # `show_archived` filter in _filter_and_sort decides visibility.
+        where = "" if show_archived else "WHERE COALESCE(action, '') NOT IN ('done', 'snoozed') "
         rows = conn.execute(
-            f"SELECT {_ROW_COLS} FROM notifications "
+            f"SELECT {_ROW_COLS} FROM notifications {where}"
             "ORDER BY COALESCE(effective_updated_at, updated_at) DESC"
         ).fetchall()
         out = [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
@@ -1822,7 +1825,7 @@ def _load_one(thread_id: str) -> dict | None:
 @app.get("/")
 def index():
     f = _filters_from_request()
-    rows = _filter_and_sort(_load_notifications(), f)
+    rows = _filter_and_sort(_load_notifications(f["show_archived"]), f)
     owners, repo_names = _load_repo_options(show_archived=f["show_archived"])
     return render_template(
         "index.html",
@@ -1842,7 +1845,7 @@ def index():
 def list_view():
     """Re-render the table with current filter/sort params (no polling)."""
     f = _filters_from_request()
-    rows = _filter_and_sort(_load_notifications(), f)
+    rows = _filter_and_sort(_load_notifications(f["show_archived"]), f)
     return render_template(
         "_table.html", notifications=rows, error=None, filters=f, sort=f["sort"],
         triage_mode=_get_triage_mode(),
@@ -1902,7 +1905,7 @@ def set_triage_mode():
     )
     _set_triage_mode(new_mode)
     f = _filters_from_request()
-    rows = _filter_and_sort(_load_notifications(), f)
+    rows = _filter_and_sort(_load_notifications(f["show_archived"]), f)
     return render_template(
         "_table.html", notifications=rows, error=None, filters=f, sort=f["sort"],
         triage_mode=new_mode,
@@ -1913,7 +1916,7 @@ def _table_response(error: str | None) -> "Response":
     """Re-render the table with current filters; if an error happened, attach
     HX-Trigger 'showError' so the status dot flips red without disrupting the swap."""
     f = _filters_from_request()
-    rows = _filter_and_sort(_load_notifications(), f)
+    rows = _filter_and_sort(_load_notifications(f["show_archived"]), f)
     body = render_template(
         "_table.html", notifications=rows, filters=f, sort=f["sort"],
         triage_mode=_get_triage_mode(),
