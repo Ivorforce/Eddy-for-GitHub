@@ -816,26 +816,17 @@ def _verdict_render_dict(
             tracked_people=tracked_people, people_notes=notes_people,
         )
 
-    action_now = payload.get("action_now") or "look"
-    action_label = _AI_ACTION_LABELS.get(action_now, action_now)
-    sd = payload.get("snooze_days")
-    if action_now == "snooze" and isinstance(sd, int) and 1 <= sd <= 90:
-        action_label = f"{action_label} ~{_short_duration(sd * 86400)}"
-
     description = (payload.get("description") or "").strip()
-    # `reply` is optional and only present when the AI had something to say
-    # back to the user. When it's set, the timeline renders the verdict as a
-    # chat bubble (with the standing description as an aside); when it's not,
-    # the verdict collapses to a compact one-line entry (action + priority +
-    # description). See templates/_timeline_event.html.
+    # `reply` is optional — present only when the AI had something to say
+    # back to the user. The verdict bubble always shows `description` as a
+    # recessed aside; when `reply` is present it sits above as the body.
+    # See templates/_timeline_event.html.
     reply = (payload.get("reply") or "").strip()
     return {
         "description":      description,
         "description_html": _md(description),
         "reply":            reply,
         "reply_html":       _md(reply) if reply else "",
-        "action_now":       action_now,
-        "action_label":     action_label,
         "priority_level": priority_level,
         "priority_score": priority_score,
         "model":          payload.get("model") or "",

@@ -255,10 +255,10 @@
 
     {# Shared timeline popover — chronological event log. Renders in both
        modes (even before the first AI verdict). The partial renders one
-       <li> per event: user_chat and reply-bearing ai_verdicts as full chat
-       bubbles, everything else (incl. reply-less "re-assessed" verdicts) as
-       muted one-liners. Manual mode: no composer, title "Thread". AI mode:
-       composer + "Thread × AI". #}
+       <li> per event: ai_verdict + user_chat as full chat bubbles (in a
+       verdict, the description is a recessed aside; a reply, if any, sits
+       above it), others as muted one-liners. Manual mode: no composer,
+       title "Thread". AI mode: composer + "Thread × AI". #}
     {% set thread_id = n.id %}
     <div class="action-popover ai-verdict-popover" popover id="pop-timeline-{{ n.id }}"
          data-kind="ai" data-thread-id="{{ n.id }}"

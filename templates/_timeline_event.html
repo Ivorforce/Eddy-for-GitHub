@@ -9,39 +9,26 @@
      thread_id — string (unused here, but kept for hx-target conventions
                  in the parent popover)
 
-   user_chat renders as a full chat bubble (blue-tinted, left). ai_verdict
-   renders as a bubble (purple-tinted, right) *when it carries a reply* — a
-   conversational turn — and otherwise collapses to a compact one-line
-   "AI re-assessed" entry: priority tag + standing description. Comment /
-   review / user_action kinds are always one-line muted entries so a busy
-   thread doesn't push the composer off-screen. Author badges (member,
-   first-time, self) use the same macro as the Repo column. #}
+   ai_verdict + user_chat render as full chat bubbles (purple-tinted right
+   for AI, blue-tinted left for user). In an ai_verdict the standing
+   `description` always sits as a recessed aside; a `reply`, when present,
+   sits above it as the bubble body (with a hairline divider between them).
+   Comment / review / user_action kinds collapse to one-line muted entries
+   so a busy thread doesn't push the composer off-screen. Author badges
+   (member, first-time, self) use the same macro as the Repo column. #}
 {% from "_macros.html" import author_chip %}
 <li class="timeline-event kind-{{ ev.kind }} src-{{ ev.source }}{% if ev.superseded %} review-superseded{% endif %}">
   {% if ev.kind == 'ai_verdict' %}
-    {% if ev.verdict.reply_html %}
-    {# Conversational turn — full bubble; the standing description rides
-       along as a muted aside under the reply. #}
     <div class="timeline-bubble bubble-ai">
       <div class="timeline-bubble-head">
         <span class="timeline-actor">AI</span>
         <span class="ai-verdict-priority-tag" style="--imp: {{ '%.3f' % ev.verdict.priority_score }}">{{ ev.verdict.priority_level }} · {{ '%.2f' % ev.verdict.priority_score }}</span>
         <span class="timeline-age">{{ ev.age_text }}</span>
       </div>
-      <div class="timeline-bubble-body">{{ ev.verdict.reply_html }}</div>
+      {% if ev.verdict.reply_html %}<div class="timeline-bubble-body">{{ ev.verdict.reply_html }}</div>{% endif %}
       {% if ev.verdict.description %}<div class="timeline-bubble-aside">{{ ev.verdict.description_html }}</div>{% endif %}
       {% if ev.verdict.model %}<div class="timeline-bubble-meta">{{ ev.verdict.model }}</div>{% endif %}
     </div>
-    {% else %}
-    {# No reply — silent re-assessment. Compact line: AI · action · priority · take. #}
-    <div class="timeline-line timeline-verdict-line">
-      <span class="timeline-actor-mini">AI</span>
-      <span class="timeline-verdict-action">{{ ev.verdict.action_label }}</span>
-      <span class="ai-verdict-priority-tag" style="--imp: {{ '%.3f' % ev.verdict.priority_score }}">{{ ev.verdict.priority_level }} · {{ '%.2f' % ev.verdict.priority_score }}</span>
-      <span class="timeline-summary"{% if ev.verdict.description %} title="{{ ev.verdict.description }}"{% endif %}>{{ ev.verdict.description_html }}</span>
-      <span class="timeline-age">{{ ev.age_text }}</span>
-    </div>
-    {% endif %}
   {% elif ev.kind == 'user_chat' %}
     <div class="timeline-bubble bubble-user">
       <div class="timeline-bubble-head">
