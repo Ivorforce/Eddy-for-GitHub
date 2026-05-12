@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GitHub Triage</title>
+  <title>Triage for GitHub</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icon.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/pico.min.css') }}">
   <script src="{{ url_for('static', filename='vendor/htmx.min.js') }}" defer></script>
@@ -421,7 +421,7 @@
       background: none;
       border: none;
       margin: 0;
-      padding: 0.1rem 0.5rem;
+      padding: 0.15rem 0.55rem;
       cursor: pointer;
       line-height: 1;
       color: var(--pico-muted-color);
@@ -431,8 +431,8 @@
       justify-content: center;
     }
     td.actions .action-segment svg {
-      width: 0.95rem;
-      height: 0.95rem;
+      width: 0.9rem;
+      height: 0.9rem;
       display: block;
     }
     td.actions .action-segment + .action-segment {
@@ -470,7 +470,7 @@
       border: 1px solid var(--pico-muted-border-color);
       border-radius: 0.4rem;
       margin: 0;
-      padding: 0.08rem 0.34rem;
+      padding: 0.13rem 0.39rem;
       cursor: pointer;
       line-height: 1;
       color: var(--pico-muted-color);
@@ -480,7 +480,7 @@
       font-size: 0.6rem;
       white-space: nowrap;
     }
-    td.actions .row2-btn svg { width: 0.95rem; height: 0.95rem; display: block; }
+    td.actions .row2-btn svg { width: 0.9rem; height: 0.9rem; display: block; }
     td.actions .row2-btn:hover { background: rgba(140, 149, 159, 0.18); color: var(--pico-color); }
     /* Track — slot background like .action-group above; filled when tracked. */
     td.actions .track-btn { background: rgba(140, 149, 159, 0.08); }
@@ -725,7 +725,7 @@
     }
     .ai-verdict-main:hover,
     .ai-verdict-rerun:not(.current):hover { background: rgba(137, 87, 229, 0.13); }
-    /* Brain glyph leading the take label. */
+    /* AI sparkle leading the take label. */
     .ai-verdict-pill-group .ai-pill-icon {
       width: 0.85em;
       height: 0.85em;
