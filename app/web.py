@@ -1983,6 +1983,30 @@ def backfetch_issues():
     return _table_response(error)
 
 
+@app.post("/track-link")
+def track_link():
+    """Add a synthetic row for a pasted github.com issue / PR / discussion URL
+    (the single-item cousin of /backfetch/issues). No-op if a row already
+    covers that thread."""
+    url = (request.values.get("url") or "").strip()
+    if not url:
+        return _table_response("Paste a GitHub issue / PR / discussion link")
+    token = app.config["GITHUB_TOKEN"]
+    error: str | None = None
+    conn = db.connect()
+    try:
+        try:
+            github.track_link(conn, token, url)
+        except ValueError as e:
+            error = str(e)
+        except Exception as e:
+            log.exception("track-link failed")
+            error = f"Couldn't add link: {e}"
+    finally:
+        conn.close()
+    return _table_response(error)
+
+
 def _apply_action(
     thread_id: str,
     action: str,

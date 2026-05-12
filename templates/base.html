@@ -1271,6 +1271,23 @@
       pointer-events: none;
     }
     .backfill-menu .bf-section:first-child { padding-top: 0.15rem; }
+    /* "Track a link" row: a paste-a-URL form sitting in the dropdown. */
+    .backfill-menu .bf-link-form { padding: 0.1rem 0.5rem 0.3rem; }
+    .backfill-menu .bf-link-form form {
+      display: flex; gap: 0.3rem; margin: 0;
+    }
+    .backfill-menu .bf-link-form input,
+    .backfill-menu .bf-link-form button {
+      margin: 0; height: auto; font-size: 0.78rem; padding: 0.2rem 0.4rem;
+    }
+    .backfill-menu .bf-link-form input { flex: 1; min-width: 14rem; }
+    .backfill-menu .bf-link-form button {
+      width: auto; padding-inline: 0.6rem; transition: background-color 0.15s, border-color 0.15s;
+    }
+    /* Brief green confirmation after a successful add (button text → ✓). */
+    .backfill-menu .bf-link-form button.flash-ok {
+      background-color: #2e9e44; border-color: #2e9e44; color: #fff;
+    }
     /* Toggle row checkmark: hidden by default, revealed when .on is set
        (server-rendered for initial state, htmx flips it on response). */
     .options-toggle .check { visibility: hidden; margin-inline-end: 0.15rem; }

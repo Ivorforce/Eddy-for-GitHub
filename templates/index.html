@@ -17,6 +17,19 @@
       <li><a href="#" hx-post="/backfetch/issues?scope=involved&amp;n=50"   hx-include="#filters" hx-target="#notifications-table" onclick="this.closest('details').open=false">Involved — latest 50</a></li>
       <li><a href="#" hx-post="/backfetch/issues?scope=involved&amp;n=200"  hx-include="#filters" hx-target="#notifications-table" onclick="this.closest('details').open=false">Involved — latest 200</a></li>
       <li><a href="#" hx-post="/backfetch/issues?scope=involved&amp;n=1000" hx-include="#filters" hx-target="#notifications-table" onclick="this.closest('details').open=false">Involved — latest 1000 (slow)</a></li>
+      <li class="bf-section">Track a link</li>
+      <li class="bf-link-form">
+        <form hx-post="/track-link" hx-include="#filters" hx-target="#notifications-table"
+              hx-on::after-request="if (event.detail.successful) {
+                this.querySelector('input').value = '';
+                const b = this.querySelector('button');
+                clearTimeout(b._t); b.classList.add('flash-ok'); b.textContent = '✓';
+                b._t = setTimeout(() => { b.classList.remove('flash-ok'); b.textContent = b.dataset.label; }, 1100);
+              }">
+          <input type="url" name="url" required placeholder="github.com/owner/repo/issues/123" aria-label="GitHub issue, PR or discussion link">
+          <button type="submit" data-label="Add">Add</button>
+        </form>
+      </li>
     </ul>
   </details>
   {# Seed of a global-settings menu. Each toggle posts to /settings/* and

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import time
 from typing import Any
@@ -308,6 +309,96 @@ def backfetch_issues(
     return len(items)
 
 
+# github.com/{owner}/{repo}/{issues|pull|discussions}/{n} — tolerates trailing
+# path (/files, /commits), query, and fragment (#issuecomment-…).
+_ITEM_HTML_URL_RE = re.compile(
+    r"^https?://github\.com/([^/\s]+)/([^/\s]+)/(issues|pull|discussions)/(\d+)\b"
+)
+
+
+def track_link(conn: sqlite3.Connection, token: str, url: str) -> str:
+    """Resolve a pasted github.com issue / PR / discussion URL into a synthetic
+    notification row (id "q_<node_id>", reason "manual", unread=0) and enrich
+    it — the single-item cousin of backfetch_issues. Returns "added", or
+    "exists" when a real or synthetic row already covers that thread; raises
+    ValueError on a malformed or unreachable URL.
+    """
+    m = _ITEM_HTML_URL_RE.match(url.strip())
+    if not m:
+        raise ValueError("Not a GitHub issue / PR / discussion link")
+    owner, repo, kind, number = m.group(1), m.group(2), m.group(3), int(m.group(4))
+    headers = _auth_headers(token)
+
+    if kind == "discussions":
+        # No REST endpoint for discussions — one GraphQL hop for id/title/url.
+        r = _session.post(
+            _GRAPHQL_URL,
+            headers={**headers, "Content-Type": "application/json"},
+            json={"query": _DISCUSSION_STUB_QUERY,
+                  "variables": {"owner": owner, "name": repo, "number": number}},
+            timeout=20,
+        )
+        r.raise_for_status()
+        disc = (((r.json().get("data") or {}).get("repository") or {})
+                .get("discussion"))
+        if not disc or not disc.get("id"):
+            raise ValueError(f"Discussion {owner}/{repo}#{number} not found")
+        node_id, title = disc["id"], disc.get("title") or ""
+        updated_at = disc.get("updatedAt") or ""
+        html_url = disc.get("url") or f"https://github.com/{owner}/{repo}/discussions/{number}"
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/discussions/{number}"
+        subject_type = "Discussion"
+    else:
+        # /issues/{n} resolves PRs too; `pull_request` in the payload says which.
+        r = _session.get(
+            f"https://api.github.com/repos/{owner}/{repo}/issues/{number}",
+            headers=headers, timeout=30,
+        )
+        if r.status_code == 404:
+            raise ValueError(f"{owner}/{repo}#{number} not found")
+        r.raise_for_status()
+        it = r.json()
+        node_id, title = it.get("node_id"), it.get("title") or ""
+        updated_at = it.get("updated_at") or ""
+        is_pr = "pull_request" in it
+        html_url = it.get("html_url") or f"https://github.com/{owner}/{repo}/{kind}/{number}"
+        api_url = (it.get("pull_request") or {}).get("url") if is_pr else it.get("url")
+        subject_type = "PullRequest" if is_pr else "Issue"
+        if not node_id or not api_url:
+            raise ValueError("Unexpected GitHub response")
+
+    # Already covered by a real notification or an earlier synthetic row? Leave
+    # it — adding the link means "show me this", not "resurrect this".
+    if conn.execute(
+        "SELECT 1 FROM notifications WHERE html_url = ?", (html_url,)
+    ).fetchone():
+        return "exists"
+
+    now = int(time.time())
+    synth = {
+        "id": "q_" + node_id,
+        "unread": False,
+        "reason": "manual",  # ∈ INVOLVED_REASONS — a deliberate inclusion
+        "updated_at": updated_at,
+        "last_read_at": None,
+        "subject": {
+            "type": subject_type, "title": title, "url": api_url,
+            "latest_comment_url": None,
+        },
+        "repository": {
+            "full_name": f"{owner}/{repo}",
+            "html_url": f"https://github.com/{owner}/{repo}",
+        },
+    }
+    _upsert(conn, synth, now)
+    conn.execute(
+        "UPDATE notifications SET details_fetched_at = NULL WHERE id = ?",
+        (synth["id"],),
+    )
+    _enrich(conn, token)
+    return "added"
+
+
 def _compute_review_state(reviews: list[dict]) -> str | None:
     """Latest non-comment review per author wins. Returns
     'changes_requested' | 'approved' | None.
@@ -420,6 +511,16 @@ query($owner: String!, $name: String!, $number: Int!) {
       }
       reactionGroups { content reactors { totalCount } }
     }
+  }
+}
+"""
+
+# Just enough to mint a synthetic row for a pasted discussion link (no REST
+# endpoint exists); _enrich re-fetches the full thread via _DISCUSSION_QUERY.
+_DISCUSSION_STUB_QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    discussion(number: $number) { id title url updatedAt }
   }
 }
 """
