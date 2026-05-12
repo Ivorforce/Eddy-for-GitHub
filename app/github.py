@@ -506,7 +506,7 @@ query($owner: String!, $name: String!, $number: Int!) {
           isMinimized
           minimizedReason
           reactionGroups { content reactors { totalCount } }
-          replies(first: 100) { nodes { author { login } } }
+          replies(last: 3) { totalCount nodes { author { login } bodyText createdAt } }
         }
       }
       reactionGroups { content reactors { totalCount } }
@@ -599,17 +599,27 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
     comment_total = comments.get("totalCount") or 0
     logins: set[str] = set()
     comment_history: list[dict] = []
-    for c in comments.get("nodes") or []:
+    nodes = comments.get("nodes") or []
+    # A discussion's substance often lives in the reply sub-threads, not the
+    # top-level comments — so each comment carries its reply tail (sampled
+    # like review threads: last few, verbatim & truncated) plus a total
+    # `reply_count` so a gap is visible. Bodies only on the most-recent
+    # _DISCUSSION_REPLY_BODY_CAP comments — beyond that a 100-comment
+    # discussion is an obvious `look` and count-only is enough. Commenter
+    # counting now sees only the sampled replies' authors, a minor undercount
+    # on heavily-replied threads (top-level authors dominate the figure).
+    bodied_from = max(0, len(nodes) - _DISCUSSION_REPLY_BODY_CAP)
+    for i, c in enumerate(nodes):
         login = (c.get("author") or {}).get("login")
         if login:
             logins.add(login)
-        for rep in ((c.get("replies") or {}).get("nodes")) or []:
+        replies = c.get("replies") or {}
+        reply_nodes = replies.get("nodes") or []
+        for rep in reply_nodes:
             rl = (rep.get("author") or {}).get("login")
             if rl:
                 logins.add(rl)
-        # Top-level comments only — replies still flow through commenter
-        # counting above, but their bodies aren't in the AI context yet.
-        comment_history.append({
+        entry = {
             "database_id": c.get("databaseId"),
             "user": {"login": login},
             "author_association": c.get("authorAssociation"),
@@ -617,7 +627,13 @@ def fetch_discussion(token: str, api_url: str | None) -> dict | None:
             "edited_at": c.get("lastEditedAt"),
             "body": c.get("bodyText") or "",
             **_comment_node_extras(c),
-        })
+        }
+        reply_count = replies.get("totalCount") or len(reply_nodes)
+        if reply_count:
+            entry["reply_count"] = reply_count
+            if i >= bodied_from and reply_nodes:
+                entry["replies_sample"] = [_sampled_reply(r) for r in reply_nodes]
+        comment_history.append(entry)
 
     # State flows through the same field as Issues so _type_state can
     # branch on it. 'answered' wins over 'closed' — an answered then
@@ -854,21 +870,37 @@ def _condense_check_rollup(rollup: dict | None) -> dict | None:
     return out
 
 
-# Per-comment body cap inside review-thread samples (these are fetched dozens
-# at a time, unlike the item body's generous 32k guardrail), and how many
-# unresolved threads carry comment bodies — beyond that they're count-only; a
-# PR with that many open threads is already an obvious `look`.
-_REVIEW_COMMENT_TRUNC = 600
+# Per-comment body cap inside sampled threads — review threads and discussion
+# reply threads come dozens at a time, unlike the item body's generous 32k
+# guardrail. The *_BODY_CAP figures bound how many threads/comments actually
+# carry sampled bodies; beyond that they're count-only (a PR/discussion that
+# busy is already an obvious `look`).
+_SAMPLED_COMMENT_TRUNC = 600
 _REVIEW_THREAD_BODY_CAP = 12
+_DISCUSSION_REPLY_BODY_CAP = 12
+
+
+def _truncate_body(c: dict) -> str:
+    body = (c.get("bodyText") or "").strip()
+    if len(body) > _SAMPLED_COMMENT_TRUNC:
+        body = body[:_SAMPLED_COMMENT_TRUNC] + "…[truncated]"
+    return body
 
 
 def _review_thread_comment(c: dict) -> dict:
     """One sampled review-thread comment → {author, body}; body is bodyText
     (markup stripped), truncated."""
-    body = (c.get("bodyText") or "").strip()
-    if len(body) > _REVIEW_COMMENT_TRUNC:
-        body = body[:_REVIEW_COMMENT_TRUNC] + "…[truncated]"
-    return {"author": (c.get("author") or {}).get("login"), "body": body}
+    return {"author": (c.get("author") or {}).get("login"), "body": _truncate_body(c)}
+
+
+def _sampled_reply(c: dict) -> dict:
+    """One sampled discussion reply → {author, created_at, body}; body is
+    bodyText (markup stripped), truncated."""
+    return {
+        "author": (c.get("author") or {}).get("login"),
+        "created_at": c.get("createdAt"),
+        "body": _truncate_body(c),
+    }
 
 
 def _condense_review_threads(node) -> dict | None:
@@ -1484,6 +1516,13 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
                 payload["reactions"] = c["reactions"]
             if c.get("minimized_reason"):
                 payload["minimized_reason"] = c["minimized_reason"]
+            # Discussion comments only: reply sub-thread tail rides along (a
+            # re-fetch UPDATEs the payload, so later replies propagate — but
+            # like a body edit it doesn't re-add the `comment` kind to `nk`).
+            if c.get("reply_count"):
+                payload["reply_count"] = c["reply_count"]
+            if c.get("replies_sample"):
+                payload["replies_sample"] = c["replies_sample"]
             db.write_thread_event(
                 conn,
                 thread_id=row["id"],
