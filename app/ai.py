@@ -51,24 +51,24 @@ log = logging.getLogger(__name__)
 # flags, recent activity, user preferences) and cheaping out on thinking
 # tokens shows up immediately as worse rationales. Thinking is the single
 # biggest controllable slice of a call's cost (~40% of a cache-warm call),
-# so it's skipped on re-judgments where the only thing that's changed since
-# the last verdict is a code push — see _should_think.
+# so it's skipped on the one boring re-judgment — a Re-ask folding in a fresh
+# code push / metadata churn and nothing else — see _should_think.
 DEFAULT_MODEL = "claude-haiku-4-5"
 DEFAULT_MAX_TOKENS = 8192
 DEFAULT_THINKING_BUDGET = 4000
 DEFAULT_DAILY_CAP_USD = 2.0
 
-# Event kinds that, arriving since the last verdict, warrant a fresh
-# deliberation pass. A re-judgment with none of these new since the prior
-# verdict is a code-push / label-churn re-ask (a head-commit or metadata
-# change re-enriched the details, which is the only other thing that
-# re-enables Re-ask) — and the current PR file list + diff stats +
-# last_commit are right there in the prompt, so the model doesn't need a
-# scratchpad to see them. `body_edit` is in the set: the model only ever
-# sees the *current* body, never the diff, so an edit it hasn't seen could
-# be a substantial reframe and gets the full pass. Mirrors
-# web._VERDICT_INVALIDATING_KINDS (which drives the Re-ask button's enabled
-# state) — same concept, kept local to dodge the ai↔web import cycle.
+# Event kinds that, arriving since the last verdict, mark a re-judgment as
+# substantive — there's new discussion / state / a reframed body to weigh, so
+# it gets a thinking pass. The *only* no-thinking re-judgment is one with none
+# of these since the verdict but a details re-enrichment (a head-commit or
+# metadata change) — the user re-asked to fold in a fresh diff, and the current
+# PR file list + diff stats + last_commit are right there in the prompt, no
+# scratchpad needed (see _should_think). `body_edit` is in the set: the model
+# only ever sees the *current* body, never the diff, so an edit it hasn't seen
+# could be a substantial reframe. Mirrors web._VERDICT_INVALIDATING_KINDS
+# (which drives the Re-ask button's enabled state) — same concept, kept local
+# to dodge the ai↔web import cycle.
 _THINKING_REQUIRED_KINDS = ("comment", "review", "lifecycle", "user_chat", "body_edit")
 
 # Per-1M-token prices in USD. Cache writes are ~1.25× input on a 5-minute
@@ -826,34 +826,42 @@ def _should_think(
 
     On for first judgments (`summary`) and chats (`chat` — the user typed
     something that has to be weighed against surface signals). For a Re-ask
-    (`re_evaluate`): on only if a `comment` / `review` / `lifecycle` /
-    `user_chat` event landed since the cached verdict. Re-ask is otherwise
-    re-enabled solely by a details re-enrichment (a code push or label/
-    metadata churn) — and the model can read the new file list / diff stats
-    / last_commit straight out of the prompt without deliberating, so a
-    no-thinking call is both cheaper and (with tool use forced, which the
-    thinking path can't do) more robust. Worst case is a slightly weaker
-    `description` on a tracked PR the user is already re-reviewing — cheap,
-    and recoverable with another Re-ask, which by then sees a `code` push as
-    the only delta again... so it stays no-thinking; the recovery lever is
-    really "the user looks". Defaults to thinking on any unexpected mode."""
+    (`re_evaluate`) there's exactly one no-thinking case: the verdict's
+    details were re-enriched since (a code push or label/metadata churn) and
+    no `comment` / `review` / `lifecycle` / `user_chat` / `body_edit` event
+    landed — i.e. the user re-asked just to fold in a fresh diff, and the new
+    file list / diff stats / last_commit are already in the prompt, nothing to
+    deliberate over (and tool use can be forced, which the thinking path
+    can't). Everything else thinks — including a Re-ask with *nothing* new
+    since the verdict: the pill's rerun button is greyed out then, so reaching
+    for the popover's "↻ Re-ask" anyway signals "I want a deeper take", which
+    is exactly what the thinking pass buys. Defaults to thinking on any
+    unexpected mode."""
     if invocation_mode != "re_evaluate":
         return True
     row = conn.execute(
-        "SELECT ai_verdict_at FROM notifications WHERE id = ?", (thread_id,)
+        "SELECT ai_verdict_at, details_fetched_at FROM notifications WHERE id = ?",
+        (thread_id,),
     ).fetchone()
     verdict_at = row["ai_verdict_at"] if row else None
     if not verdict_at:
         return True  # no prior verdict to anchor on — treat as a fresh pass
     placeholders = ",".join("?" for _ in _THINKING_REQUIRED_KINDS)
-    n = conn.execute(
+    has_substantive_event = conn.execute(
         f"""
-        SELECT COUNT(*) AS n FROM thread_events
+        SELECT 1 FROM thread_events
          WHERE thread_id = ? AND ts > ? AND kind IN ({placeholders})
+         LIMIT 1
         """,
         (thread_id, verdict_at, *_THINKING_REQUIRED_KINDS),
-    ).fetchone()["n"]
-    return n > 0
+    ).fetchone() is not None
+    if has_substantive_event:
+        return True
+    details_at = row["details_fetched_at"] if row else None
+    reenriched_since = details_at is not None and details_at > verdict_at
+    # No substantive event and a re-enrichment since → the cheap "fold in the
+    # fresh diff" Re-ask: skip thinking. Otherwise (incl. nothing-new) → think.
+    return not reenriched_since
 
 
 class AIError(RuntimeError):
