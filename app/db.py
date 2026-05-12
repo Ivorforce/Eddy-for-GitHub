@@ -289,6 +289,18 @@ SCHEMA_V26 = """
 ALTER TABLE notifications ADD COLUMN throttle_until INTEGER;
 """
 
+# Drop the `unarchived` user_action events. A Done thread that new GitHub
+# activity resurfaces no longer logs one — the activity that triggered it is
+# already in the timeline and `notifications.action` going NULL is the state
+# record, so the marker carried no signal (and got filtered out of every
+# consumer anyway). A *user*-triggered un-archive is the `undone` event,
+# which stays.
+SCHEMA_V27 = """
+DELETE FROM thread_events
+ WHERE kind = 'user_action'
+   AND json_extract(payload_json, '$.action') = 'unarchived';
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -407,6 +419,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V26)
             _set_version(conn, 26)
             version = 26
+        if version < 27:
+            conn.executescript(SCHEMA_V27)
+            _set_version(conn, 27)
+            version = 27
     finally:
         conn.close()
 

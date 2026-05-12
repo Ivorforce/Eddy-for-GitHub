@@ -760,7 +760,6 @@ _USER_ACTION_LABELS = {
     "muted":            "Muted",
     "done":             "Archived",
     "undone":           "Restored from archive",
-    "unarchived":       "Resurfaced — new activity",
     "kept_unread":      "Kept unread",
     "unmuted":          "Unmuted",
     "snoozed":          "Snoozed",

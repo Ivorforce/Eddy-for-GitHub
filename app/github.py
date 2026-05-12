@@ -1293,18 +1293,15 @@ def _upsert(
             payload={"action": "read_on_github"},
         )
     if resurfaced:
+        # New activity arrived on a Done/Snoozed thread — bring it back. No
+        # thread_event marker for it: whatever triggered the re-delivery is
+        # already in the timeline (a comment / review / lifecycle event), and
+        # `action` going NULL is the state record. A *user*-triggered
+        # un-archive is the separate `_apply_action` path, which logs `undone`.
         conn.execute(
             "UPDATE notifications SET action = NULL, actioned_at = NULL, "
             "action_source = NULL, snooze_until = NULL WHERE id = ?",
             (item["id"],),
-        )
-        db.write_thread_event(
-            conn,
-            thread_id=item["id"],
-            ts=now,
-            kind="user_action",
-            source="github",
-            payload={"action": "unarchived"},
         )
 
 
@@ -1435,11 +1432,11 @@ def _apply_mute_filter(
         try:
             now = int(time.time())
             if prev_action in ("done", "snoozed") and not prev_ignored:
-                # _upsert just resurfaced it (action→NULL, snooze cleared,
-                # 'unarchived' logged) — undo: archive on GitHub again and
-                # restore the prior hidden state. A snoozed thread keeps its
-                # original deadline, so absorbed activity can't push it past
-                # the wake time or downgrade it to a plain Done.
+                # _upsert just resurfaced it (action→NULL, snooze cleared) —
+                # undo: archive on GitHub again and restore the prior hidden
+                # state. A snoozed thread keeps its original deadline, so
+                # absorbed activity can't push it past the wake time or
+                # downgrade it to a plain Done.
                 mark_done(token, thread_id)
                 if prev_action == "snoozed":
                     conn.execute(
