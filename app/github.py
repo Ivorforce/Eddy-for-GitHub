@@ -522,6 +522,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       isDraft
       merged
       mergeStateStatus
+      reviewDecision
       additions
       deletions
       changedFiles
@@ -553,6 +554,17 @@ query($owner: String!, $name: String!, $number: Int!) {
             messageHeadline
             committedDate
             author { name user { login } }
+            statusCheckRollup {
+              state
+              contexts(first: 100) {
+                totalCount
+                nodes {
+                  __typename
+                  ... on CheckRun { name conclusion status }
+                  ... on StatusContext { context state }
+                }
+              }
+            }
           }
         }
       }
@@ -629,6 +641,51 @@ def _parse_lifecycle_events(nodes) -> list[dict]:
             "created_at": n.get("createdAt"),
             "reason":     ((n.get("stateReason") or "").lower() or None),
         })
+    return out
+
+
+# CheckRun.conclusion values that count as a failed check for triage — the
+# branch-protection blockers plus the ones a human reads as "went wrong".
+# NEUTRAL / SKIPPED / SUCCESS / STALE don't block (STALE means a newer run
+# superseded it).
+_CHECK_FAIL_CONCLUSIONS = frozenset({
+    "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE",
+})
+
+
+def _condense_check_rollup(rollup: dict | None) -> dict | None:
+    """statusCheckRollup → {state, failing?, pending?} or None.
+
+    `state` is GitHub's rollup verdict lowercased (success / failure / pending
+    / error / expected); `failing` / `pending` are context-name lists, present
+    only when non-empty. None when the repo runs no checks (rollup is null).
+    Context names are capped at the GraphQL 100 — rarely hit; undercounts if so.
+    """
+    if not rollup:
+        return None
+    failing: list[str] = []
+    pending: list[str] = []
+    for ctx in (rollup.get("contexts") or {}).get("nodes") or []:
+        if ctx.get("__typename") == "CheckRun":
+            name = ctx.get("name")
+            if (ctx.get("status") or "").upper() != "COMPLETED":
+                pending.append(name)
+            elif (ctx.get("conclusion") or "").upper() in _CHECK_FAIL_CONCLUSIONS:
+                failing.append(name)
+        else:  # StatusContext
+            name = ctx.get("context")
+            st = (ctx.get("state") or "").upper()
+            if st in ("PENDING", "EXPECTED"):
+                pending.append(name)
+            elif st in ("FAILURE", "ERROR"):
+                failing.append(name)
+    out: dict = {"state": (rollup.get("state") or "").lower() or None}
+    failing = [n for n in failing if n]
+    pending = [n for n in pending if n]
+    if failing:
+        out["failing"] = failing
+    if pending:
+        out["pending"] = pending
     return out
 
 
@@ -770,6 +827,7 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
     # review requests). Kept in details_json (not a popped bonus key) so the
     # AI context builder and the UI can read it without a dedicated column.
     last_commit = None
+    checks = None
     commits_node = pr.get("commits") or {}
     commit_nodes = commits_node.get("nodes") or []
     if commit_nodes:
@@ -783,6 +841,7 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
                 "author":       (gh_author.get("user") or {}).get("login") or gh_author.get("name"),
                 "total":        commits_node.get("totalCount") or 0,
             }
+        checks = _condense_check_rollup(c.get("statusCheckRollup"))
 
     # State: GraphQL OPEN/CLOSED/MERGED → REST 'open'/'closed'. _type_state
     # checks merged + draft *before* state, so a merged PR ends up correctly
@@ -810,6 +869,14 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "draft": pr.get("isDraft"),
         "merged": pr.get("merged"),
         "mergeable_state": merge_status,
+        # GitHub's branch-protection-aware review verdict: 'approved' /
+        # 'changes_requested' / 'review_required'; None when the repo doesn't
+        # require reviews. Distinct from the _review_state we derive ourselves
+        # (that's "what reviewers said", this is "does it satisfy the gate").
+        "review_decision": (pr.get("reviewDecision") or "").lower() or None,
+        # Condensed status-check rollup off the head commit: {state, failing?,
+        # pending?} or None when no checks run. See _condense_check_rollup.
+        "checks": checks,
         "additions": pr.get("additions"),
         "deletions": pr.get("deletions"),
         "changed_files": pr.get("changedFiles"),

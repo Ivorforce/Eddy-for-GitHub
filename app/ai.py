@@ -303,6 +303,11 @@ def _summarize_details(d: dict, subject_type: str) -> dict:
         out["deletions"] = d.get("deletions")
         out["changed_files"] = d.get("changed_files")
         out["mergeable_state"] = d.get("mergeable_state")
+        # Why a "blocked" PR is blocked: GitHub's review verdict (approved /
+        # changes_requested / review_required) + the CI rollup ({state,
+        # failing?, pending?}). Both None-dropped below when absent.
+        out["review_decision"] = d.get("review_decision")
+        out["checks"] = d.get("checks")
         # Latest head commit — "when did the code last change", distinct from
         # updatedAt (which also moves on comments / labels). {abbrev_oid,
         # message, committed_at, author, total}. None until first enrichment.
