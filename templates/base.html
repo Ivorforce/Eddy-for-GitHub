@@ -1242,7 +1242,14 @@
       border-bottom: 1px solid var(--pico-muted-border-color);
     }
     .toolbar h1 { margin: 0; flex: 1; font-size: 1.35rem; font-weight: 600; }
-    .brand-logo { width: 2.3rem; height: 2.3rem; flex-shrink: 0; color: var(--pico-h1-color, currentColor); }
+    /* Brand mark: two concentric faces (spiral-eyes default, slightly smaller
+       dot-eyes alt). Hovering the mark swaps to the alt face for as long as
+       you're on it, then back — no transition. */
+    .brand-logo-wrap { position: relative; display: inline-flex; width: 2.3rem; height: 2.3rem; flex-shrink: 0; }
+    .brand-logo { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--pico-h1-color, currentColor); }
+    .brand-logo-alt { opacity: 0; }
+    .brand-logo-wrap:hover .brand-logo-primary { opacity: 0; }
+    .brand-logo-wrap:hover .brand-logo-alt     { opacity: 1; }
 
     /* Refresh as a small icon button — auto-fetch on tab focus carries most
        of the load, so the manual control stays quiet next to the status dot. */
