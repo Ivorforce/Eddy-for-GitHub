@@ -54,6 +54,12 @@
       color: white;
       background: #6e7781; /* default for Discussion / Release / not-yet-enriched */
     }
+    .type-pill .type-icon {
+      width: 0.92em;
+      height: 0.92em;
+      vertical-align: -0.13em;
+      margin-right: 0.2em;
+    }
 
     /* Activity column ("Reception" / "Age") — age pill on top, then a 2-col
        stat grid: popularity (▲ ▼) | engagement (👥). AI mode collapses it to
@@ -141,6 +147,10 @@
     .type-pill.state-closed_pr           { background: #cf222e; }
     .type-pill.state-closed,
     .type-pill.state-closed_not_planned  { background: #6e7781; }
+    /* Open discussions read grey, not "open = green" — matches github.com,
+       where an open discussion is a neutral conversation, not a tracked
+       work item. Closed/answered keep their state colour above. */
+    .type-pill.type-discussion.state-open { background: #6e7781; }
 
     /* repo cell — owner above, name below, author below that, all clickable.
        Pinned to 11rem on all three width axes so the column doesn't reflow

@@ -1,3 +1,4 @@
+{%- from "_macros.html" import type_icon -%}
 <tr class="{% if not n.unread %}read{% endif %}{% if n.action == 'done' %} done{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_tracked %} is-tracked-row{% endif %}"
     data-author="{{ n.author_login or '' }}"
     data-repo="{{ n.repo }}"
@@ -119,8 +120,8 @@
       <span class="item-title{% if n.is_tracked %} is-tracked{% endif %}" title="{{ n.title }}"><span class="item-title-text">{{ n.title_html }}</span></span>
     {% endif %}
     <div class="meta-row">
-      <span class="type-pill state-{{ n.type_state }}"
-            title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ n.type_label }}</span>
+      <span class="type-pill type-{{ n.type|lower }} state-{{ n.type_state }}"
+            title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ type_icon(n.type, n.type_state) }}{{ n.type_label }}</span>
       {% if n.category %}
       <span class="category-pill" title="Discussion category">{{ n.category }}</span>
       {% endif %}
