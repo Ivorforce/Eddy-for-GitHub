@@ -1758,11 +1758,24 @@
       htmx.ajax("POST", "/refresh?auto=1", { source: "#filters", target, swap: "innerHTML" });
     });
 
-    // Plain-left-click on a popover trigger opens its popover. Modifier
+    // Plain-left-click on a popover trigger toggles its popover. Modifier
     // clicks (cmd/ctrl/shift/alt) and middle-click fall through to the
     // browser's native link behavior — for entity-name triggers (which are
-    // <a href=...>), that opens GitHub in a new tab. For the item-level
-    // ••• button (no href), modifier-clicks just do nothing, which is fine.
+    // <a href=...>), that opens GitHub in a new tab.
+    //
+    // The trigger sits *outside* the popover element, so clicking it while
+    // the popover is open first runs the popover's light-dismiss (closing
+    // it), *then* this handler. A naive togglePopover() here would re-open
+    // what the light-dismiss just closed, so the trigger could never close
+    // its own popover. Snapshot the open state on pointerdown (before the
+    // light-dismiss fires) and use it to decide. (Native `popovertarget`
+    // buttons don't need this — the UA coordinates invoker + light-dismiss.)
+    let popoverTriggerWasOpen = false;
+    document.addEventListener("pointerdown", (e) => {
+      const trigger = e.target.closest("[data-popover-target]");
+      const pop = trigger && document.getElementById(trigger.dataset.popoverTarget);
+      popoverTriggerWasOpen = !!(pop && pop.matches(":popover-open"));
+    });
     document.addEventListener("click", (e) => {
       const trigger = e.target.closest("[data-popover-target]");
       if (!trigger) return;
@@ -1770,10 +1783,9 @@
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       e.preventDefault();
       const pop = document.getElementById(trigger.dataset.popoverTarget);
-      if (pop && typeof pop.showPopover === "function") {
-        // togglePopover() makes the trigger idempotent for repeat clicks.
-        pop.togglePopover();
-      }
+      if (!pop || typeof pop.showPopover !== "function") return;
+      if (popoverTriggerWasOpen) { try { pop.hidePopover(); } catch (_) {} return; }
+      pop.showPopover();
     });
 
     // Entity (person/repo/org) track toggles broadcast a single
