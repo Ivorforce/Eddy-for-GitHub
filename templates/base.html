@@ -680,11 +680,17 @@
       overflow: hidden;
     }
     /* Outdated: a verdict exists but new activity (or a re-poll) landed
-       after it. Dashed border signals "this take is behind the thread". */
+       after it. Dashed border signals "this take is behind the thread";
+       the suggested action (pill text) and its echoes in the Actions
+       column (the dashed rings) dim a touch more — they read "maybe,
+       re-ask first" rather than "do this now". Re-ask makes it crisp again. */
     .ai-verdict-pill-group.outdated {
       border-style: dashed;
       opacity: 0.85;
     }
+    .ai-verdict-pill-group.outdated .ai-verdict-take { opacity: 0.82; }
+    tr.ai-outdated td.actions .action-segment.ai-suggests,
+    tr.ai-outdated td.actions .row2-btn.ai-suggests { outline-color: rgba(137, 87, 229, 0.55); }
     .ai-verdict-main,
     .ai-verdict-rerun {
       background: none;
