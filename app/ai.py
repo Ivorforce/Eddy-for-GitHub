@@ -96,18 +96,19 @@ TOOL_DEF: dict = {
         "properties": {
             "action_now": {
                 "type": "string",
-                "enum": ["look", "ignore", "mute", "archive", "snooze"],
+                "enum": ["look", "ignore", "mute", "archive", "snooze", "snooze_quiet"],
                 "description": (
                     "What you suggest the user do — see system prompt §Output fields / §Cost asymmetry. "
-                    "'look' (open the link and judge for themselves); "
-                    "'ignore' (mark read without engaging — the row stays visible; for a live thread with nothing for them right now); "
-                    "'mute' (the full opt-out — unsubscribe, never resurfaces; the 'I never want to see this again'); "
-                    "'archive' (the thread is *finished* — merged PR, closed/answered issue, a release you've noted; NOT 'park it for now', "
-                    "because Done auto-resurfaces on the next GitHub activity, so archiving a still-active thread just bounces it back in a day or two); "
-                    "'snooze' (nothing to do *now* but it won't stay quiet — hide it until ~snooze_days out; blocked-on-someone, dated event). "
-                    "For 'quiet the churn but stay subscribed' (the middle ground between ignore and a full mute) use `subscription_changes`, not this. "
-                    "Advisory only — the user takes their own row actions; nothing auto-applies. "
-                    "Prefer 'look' over 'ignore' when uncertain, and never 'archive' something still active; reach for 'snooze' only with a concrete reason it'll be quiet until then. "
+                    "Row stays visible for 'look' and 'ignore'; 'archive' / 'snooze' / 'snooze_quiet' / 'mute' hide it (back on activity / on the timer or activity / on the timer only / never). "
+                    "'look' (open the link and judge for themselves — the summary can't do the thread justice, or you can't tell if it's noise); "
+                    "'ignore' (mark read, keep the row visible — a live thread with nothing for them this minute; the right call over 'archive' whenever the row should stay in view); "
+                    "'archive' (the user's part is done and the next move, if any, is someone else's — and they're fine if nothing ever happens again; Done auto-resurfaces on new activity, so the ball coming back brings the row back. NOT 'park it for now'); "
+                    "'snooze' (the user's waiting on something and wants a nudge if it hasn't happened by ~snooze_days — a teammate's reply, a dated release, a review due before a meeting; new activity resurfaces it sooner); "
+                    "'snooze_quiet' (the thread's a firehose — hide it AND unsubscribe for ~snooze_days, then it comes back re-subscribed for a fresh look; re-doing it each time is a periodic digest. New activity does NOT bring it back early — that's the point. For a flood where even subscription_changes wouldn't quiet it, or when there's just nothing to wait for); "
+                    "'mute' (the full opt-out — hides the row like 'archive' AND unsubscribes for good, never resurfaces; the 'I never want to see this again'). "
+                    "For 'quiet the churn but stay subscribed and visible' (a partial, ongoing filter) use `subscription_changes`, not this. "
+                    "All advisory — the user acts (or not) themselves, so don't agonise: when the call is clear, make it (including 'archive' on a finished thread and 'mute' on a plainly-irrelevant one). "
+                    "Only when you genuinely can't decide, lean toward the cheaper error: 'look'/'ignore' (row stays visible) over 'archive'/'snooze' (row hidden, but comes back) over 'snooze_quiet'/'mute' (hidden AND unsubscribed) — and don't 'archive' a thread where prolonged silence would matter ('snooze' it instead, which has the timer). "
                     "On a re-judgment, may be omitted to keep your last verdict's value (see system prompt §Output fields)."
                 ),
             },
@@ -116,9 +117,9 @@ TOOL_DEF: dict = {
                 "minimum": 1,
                 "maximum": 90,
                 "description": (
-                    "Only when action_now is 'snooze': roughly how many days until the thread is worth another look "
-                    "(your best estimate — e.g. a review the user is waiting on a teammate for, a release dated ~3 weeks out). "
-                    "Ignored for any other action_now."
+                    "With action_now 'snooze' or 'snooze_quiet': how many days (1-90) until the row should come back — "
+                    "for 'snooze', when 'still waiting' should become 'go chase it' (e.g. a review the user awaits a teammate on, a release ~3 weeks out); "
+                    "for 'snooze_quiet', the gap between digests. Ignored for any other action_now."
                 ),
             },
             "set_tracked": {
@@ -1055,8 +1056,9 @@ def judge(
         # Fill omitted standing fields from the prior verdict — the schema
         # only drops them from `required` when `has_prior`, so this is the
         # AI's deliberate "keep my last value". `snooze_days` rides with
-        # `action_now`: inherited together if `action_now` is inherited; if
-        # `action_now` is fresh, the model supplies `snooze_days` alongside.
+        # `action_now`: inherited together if `action_now` is inherited
+        # (incl. either snooze flavour); if `action_now` is fresh, the model
+        # supplies `snooze_days` alongside.
         if has_prior:
             for k in ("action_now", "priority_score", "description", "snooze_days"):
                 if k not in verdict and k in prior_verdict:

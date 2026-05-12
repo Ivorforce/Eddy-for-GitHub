@@ -453,7 +453,7 @@
       {# Native popover (no Pico <details> styling to fight) — anchored to the
          trigger like the AI-pill popover. Clicking a duration posts and the
          whole <tr> (popover included) is swapped away. #}
-      <button type="button" class="row2-btn snooze-btn{% if ai_act == 'snooze' %} ai-suggests{% endif %}"
+      <button type="button" class="row2-btn snooze-btn{% if ai_act in ['snooze', 'snooze_quiet'] %} ai-suggests{% endif %}"
               popovertarget="pop-snooze-{{ n.id }}"
               style="anchor-name: --pop-snooze-{{ n.id }}"
               aria-label="Snooze" title="Snooze — hide until N days pass (or new activity, whichever first)"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm7-3.25v2.992l2.028.812a.75.75 0 0 1-.557 1.392l-2.5-1A.751.751 0 0 1 7 8.25v-3.5a.75.75 0 0 1 1.5 0Z"/></svg><span class="disclosure" aria-hidden="true">▾</span></button>
@@ -464,7 +464,7 @@
            style="position-anchor: --pop-snooze-{{ n.id }}">
         {% set qv = 'js:{quiet: document.getElementById("snzq-' ~ n.id ~ '").classList.contains("on")}' %}
         {% if n.ai_verdict and n.ai_verdict.snooze_days %}
-        <button type="button" class="snooze-ai" hx-post="/set/{{ n.id }}/snooze?days={{ n.ai_verdict.snooze_days }}" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters" title="AI's suggestion">~{{ n.ai_verdict.snooze_days }}d · AI</button>
+        <button type="button" class="snooze-ai" hx-post="/set/{{ n.id }}/snooze?days={{ n.ai_verdict.snooze_days }}" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters" title="AI's suggestion{% if n.ai_verdict.snooze_quiet %} — quiet (unsubscribe for the duration){% endif %}">~{{ n.ai_verdict.snooze_days }}d · AI{% if n.ai_verdict.snooze_quiet %} · quiet{% endif %}</button>
         {% endif %}
         <button type="button" hx-post="/set/{{ n.id }}/snooze?days=1"  hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 day</button>
         <button type="button" hx-post="/set/{{ n.id }}/snooze?days=3"  hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">3 days</button>
@@ -474,7 +474,7 @@
         <button type="button" hx-post="/set/{{ n.id }}/snooze?days=60" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">2 months</button>
         <button type="button" hx-post="/set/{{ n.id }}/snooze?days=180" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">6 months</button>
         <button type="button" hx-post="/set/{{ n.id }}/snooze?days=365" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">12 months</button>
-        <button type="button" class="snooze-quiet-opt" id="snzq-{{ n.id }}" onclick="this.classList.toggle('on')" title="Unsubscribe on GitHub for the duration; resubscribe on wake"><span class="check" aria-hidden="true">✓</span>unsubscribe while snoozed</button>
+        <button type="button" class="snooze-quiet-opt{% if n.ai_verdict and n.ai_verdict.snooze_quiet %} on{% endif %}" id="snzq-{{ n.id }}" onclick="this.classList.toggle('on')" title="Unsubscribe on GitHub for the duration; resubscribe on wake{% if n.ai_verdict and n.ai_verdict.snooze_quiet %} — AI suggests this{% endif %}"><span class="check" aria-hidden="true">✓</span>unsubscribe while snoozed</button>
       </div>
       {% endif %}
     </div>

@@ -1316,10 +1316,14 @@ def _ai_verdict_dict(
 
     priority_level, priority_score = _verdict_priority(verdict)
 
-    # snooze_days is meaningful only with action_now == "snooze"; validate it
-    # to the route's accepted range so the picker shortcut can post it safely.
+    # snooze_days rides with either snooze flavour; validate it to the route's
+    # accepted range so the picker shortcut can post it safely. snooze_quiet
+    # (action_now == "snooze_quiet") pre-checks the "unsubscribe while snoozed"
+    # toggle in the snooze popover (the user can still untick it).
+    is_snooze = action_now in ("snooze", "snooze_quiet")
     sd = verdict.get("snooze_days")
-    snooze_days = sd if (action_now == "snooze" and isinstance(sd, int) and 1 <= sd <= 90) else None
+    snooze_days = sd if (is_snooze and isinstance(sd, int) and 1 <= sd <= 90) else None
+    snooze_quiet = action_now == "snooze_quiet"
 
     age_text = _humanize_age(int(time.time()) - at)
 
@@ -1349,7 +1353,8 @@ def _ai_verdict_dict(
     return {
         "verdict":         verdict,
         "action_now":      action_now,
-        "snooze_days":     snooze_days,   # None unless action_now == "snooze"
+        "snooze_days":     snooze_days,   # None unless action_now is a snooze flavour
+        "snooze_quiet":    snooze_quiet,  # True iff action_now == "snooze_quiet"
         "set_tracked":     set_tracked,
         "priority_level":  priority_level,
         "priority_score":  priority_score,
@@ -1510,14 +1515,18 @@ def _row_to_dict(
         # Actions-column button — but only while the suggestion isn't already
         # in effect (so the ring always reads "do this", never "undo this").
         # `look` has no button (its affordance is the title link), so it never
-        # rings anything.
+        # rings anything. Both snooze flavours ring the one Snooze button — once
+        # the row is snoozed (either flavour) we stop nagging; the quiet/loud
+        # distinction surfaces as the pre-checked "unsubscribe" toggle inside
+        # the popover (av["snooze_quiet"]), not the ring.
         action = av["action_now"]
         action_in_effect = {
             "ignore":  (not d["unread"]) and (not d["ignored"])
                        and d["action"] not in ("done", "snoozed"),
             "archive": d["action"] == "done" and not d["ignored"],
             "mute":    d["action"] == "done" and bool(d["ignored"]),
-            "snooze":  bool(d.get("snooze_until")),
+            "snooze":       bool(d.get("snooze_until")),
+            "snooze_quiet": bool(d.get("snooze_until")),
         }.get(action, True)  # 'look' / unknown → treat as "nothing to ring"
         av["action_pending"] = action if not action_in_effect else None
         st = av["set_tracked"]
