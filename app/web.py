@@ -1232,14 +1232,15 @@ def _recency_summary(rows, after: int, *, description_html) -> dict | None:
     return {"text": " · ".join(parts), "tip_html": tip_html}
 
 
-def _attach_timeline(
-    d: dict, conn: sqlite3.Connection, *,
+def _build_timeline(
+    thread_id: str, conn: sqlite3.Connection, *,
+    cur_repo: str | None = None,
     tracked_people=frozenset(), notes_people: dict | None = None,
-) -> None:
-    """Mutate `d` in place: attach the `timeline` list (for the popover) and
-    `ai_uptodate` (drives the re-run button's enabled/green state). Called
-    only in AI mode — the popover doesn't render in manual mode, so the
-    per-row thread_events query is wasted there."""
+) -> list:
+    """The formatted, coalesced event list for the timeline popover. Lazily
+    fetched (GET /timeline/<id>, on popover-open) rather than rendered into
+    every table row: a busy table can carry thousands of thread_events, and
+    their per-event markdown rendering would otherwise ride every table swap."""
     rows = conn.execute(
         """
         SELECT ts, kind, source, payload_json
@@ -1247,13 +1248,13 @@ def _attach_timeline(
          WHERE thread_id = ?
          ORDER BY ts ASC, id ASC
         """,
-        (d["id"],),
+        (thread_id,),
     ).fetchall()
     now = int(time.time())
     user_login = app.config.get("USER_LOGIN")
     timeline = [
         _format_event_for_render(
-            r, now, user_login=user_login, cur_repo=d.get("repo"),
+            r, now, user_login=user_login, cur_repo=cur_repo,
             tracked_people=tracked_people, notes_people=notes_people,
         )
         for r in rows
@@ -1265,8 +1266,15 @@ def _attach_timeline(
     timeline = _coalesce_user_actions(timeline)
     timeline = _mark_superseded_reviews(timeline)
     timeline = _mark_superseded_verdicts(timeline)
-    d["timeline"] = timeline
+    return timeline
 
+
+def _attach_verdict_status(d: dict, conn: sqlite3.Connection) -> None:
+    """Mutate `d`: set `ai_uptodate` (drives the re-run button's enabled /
+    green state and the row's outdated border) and `recency` (the AI pill's
+    "+N reviews · +N comments since the last verdict" segment). Both derive
+    only from thread_events newer than the cached verdict — a cheap slice;
+    the full event list is fetched separately and lazily by _build_timeline."""
     verdict = d.get("ai_verdict")
     if not verdict:
         # No assessment yet — "not up to date" so the trigger button invites
@@ -1275,9 +1283,16 @@ def _attach_timeline(
         d["recency"] = None
         return
     after = verdict.get("at") or 0
-    has_new_context = any(
-        r["ts"] > after and r["kind"] in _VERDICT_INVALIDATING_KINDS for r in rows
-    )
+    rows = conn.execute(
+        """
+        SELECT ts, kind, payload_json
+          FROM thread_events
+         WHERE thread_id = ? AND ts > ?
+         ORDER BY ts ASC, id ASC
+        """,
+        (d["id"], after),
+    ).fetchall()
+    has_new_context = any(r["kind"] in _VERDICT_INVALIDATING_KINDS for r in rows)
     d["ai_uptodate"] = not verdict.get("stale") and not has_new_context
     d["recency"] = _recency_summary(rows, after, description_html=verdict.get("description_html"))
 
@@ -1556,10 +1571,11 @@ def _load_notifications():
             "ORDER BY COALESCE(effective_updated_at, updated_at) DESC"
         ).fetchall()
         out = [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
-        # Both modes render the timeline popover; AI mode also needs
-        # ai_uptodate. Attach unconditionally.
+        # The timeline popover's event list is fetched lazily (GET /timeline
+        # /<id> on open) — see _build_timeline. Eagerly attach only the cheap
+        # verdict-derived bits the row itself shows (pill recency, re-run state).
         for d in out:
-            _attach_timeline(d, conn, tracked_people=t_p, notes_people=n_p)
+            _attach_verdict_status(d, conn)
         return out
     finally:
         conn.close()
@@ -1797,7 +1813,7 @@ def _load_one(thread_id: str) -> dict | None:
         if not row:
             return None
         d = _row_to_dict(row, t_p, t_r, t_o, n_p, n_r, n_o)
-        _attach_timeline(d, conn, tracked_people=t_p, notes_people=n_p)
+        _attach_verdict_status(d, conn)
         return d
     finally:
         conn.close()
@@ -1831,6 +1847,30 @@ def list_view():
         "_table.html", notifications=rows, error=None, filters=f, sort=f["sort"],
         triage_mode=_get_triage_mode(),
     )
+
+
+@app.get("/timeline/<thread_id>")
+def thread_timeline(thread_id: str):
+    """Render just the popover's event-list <li>s. The row template ships the
+    <ol> empty; HTMX fetches this on popover-open (re-fetched each open, so a
+    new chat / verdict / activity shows without a table refresh). Keeps the
+    formatted, markdown-rendered timeline out of every table swap — the win
+    behind making the popover lazy. Renders in both triage modes."""
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT repo FROM notifications WHERE id = ?", (thread_id,)
+        ).fetchone()
+        if not row:
+            return ("", 404)
+        timeline = _build_timeline(
+            thread_id, conn, cur_repo=row["repo"],
+            tracked_people=_tracked_people(),
+            notes_people=_entity_notes("people", "login"),
+        )
+    finally:
+        conn.close()
+    return render_template("_timeline_list.html", timeline=timeline, thread_id=thread_id)
 
 
 @app.post("/settings/quiet_bystanders")

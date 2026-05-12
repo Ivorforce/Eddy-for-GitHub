@@ -1,0 +1,7 @@
+{# Contents of the timeline popover's <ol class="timeline-list"> — one <li>
+   per (coalesced) thread_events row. Fetched lazily by GET /timeline/<id>
+   on popover-open and swapped into the empty <ol> the row template ships;
+   not rendered inline with the table (see web._build_timeline).
+   Context: timeline — list of display dicts from web._build_timeline;
+            thread_id — string (passed through to _timeline_event.html). #}
+{% for ev in timeline %}{% include "_timeline_event.html" %}{% endfor %}

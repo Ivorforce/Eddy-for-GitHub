@@ -258,23 +258,28 @@
     {% endif %}
 
     {# Shared timeline popover — chronological event log. Renders in both
-       modes (even before the first AI verdict). The partial renders one
-       <li> per event: ai_verdict + user_chat as full chat bubbles (in a
-       verdict, the description is a recessed aside; a reply, if any, sits
-       above it), others as muted one-liners. Manual mode: no composer,
-       title "Thread". AI mode: composer + "Thread × AI". #}
-    {% set thread_id = n.id %}
+       modes (even before the first AI verdict). The event list is fetched
+       lazily on first open (GET /timeline/<id>; re-fetched each open) so it
+       stays out of every table swap — each event renders as one <li>:
+       ai_verdict + user_chat as full chat bubbles (in a verdict, the
+       description is a recessed aside; a reply, if any, sits above it),
+       others as muted one-liners. Manual mode: no composer, title "Thread".
+       AI mode: composer + "Thread × AI". #}
     <div class="action-popover ai-verdict-popover" popover id="pop-timeline-{{ n.id }}"
          data-kind="ai" data-thread-id="{{ n.id }}"
          style="position-anchor: --pop-timeline-{{ n.id }}">
       <div class="popover-title">
         <span class="popover-kind">Thread{% if triage_mode == 'ai' %} × AI{% endif %}</span>
       </div>
-      <ol class="timeline-list" id="timeline-{{ n.id }}">
-        {% for ev in n.timeline %}
-          {% include "_timeline_event.html" %}
-        {% endfor %}
-      </ol>
+      {# Shipped empty; HTMX fills it on popover-open and on every reopen
+         (cheap, and reflects fresh chat/verdict/activity without a table
+         refresh). The chat composer below appends into this same <ol>. #}
+      <ol class="timeline-list" id="timeline-{{ n.id }}"
+          hx-get="/timeline/{{ n.id }}"
+          hx-trigger="toggle[newState=='open'] from:#pop-timeline-{{ n.id }}"
+          hx-target="this" hx-swap="innerHTML"
+          hx-on::before-request="this.setAttribute('aria-busy', 'true')"
+          hx-on::after-request="this.removeAttribute('aria-busy')"></ol>
       {% if triage_mode == 'ai' %}
       {# Composer. Two acts: Note (Enter — saves a user_chat event, no AI
          call; the AI sees it next time it judges this thread) and the AI
