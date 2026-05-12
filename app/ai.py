@@ -97,13 +97,16 @@ TOOL_DEF: dict = {
                 "type": "string",
                 "enum": ["look", "ignore", "mute", "archive", "snooze"],
                 "description": (
-                    "What you suggest the user do with this thread. "
-                    "'look' (open the link), 'ignore' (mark read without engaging), "
-                    "'mute' (silence further updates), 'archive' (nothing left to do), "
-                    "'snooze' (nothing to do *now* but it won't stay quiet — hide it until ~snooze_days from now; "
-                    "blocked-on-someone, scheduled-for-later). "
+                    "What you suggest the user do — see system prompt §Output fields / §Cost asymmetry. "
+                    "'look' (open the link and judge for themselves); "
+                    "'ignore' (mark read without engaging — the row stays visible; for a live thread with nothing for them right now); "
+                    "'mute' (the full opt-out — unsubscribe, never resurfaces; the 'I never want to see this again'); "
+                    "'archive' (the thread is *finished* — merged PR, closed/answered issue, a release you've noted; NOT 'park it for now', "
+                    "because Done auto-resurfaces on the next GitHub activity, so archiving a still-active thread just bounces it back in a day or two); "
+                    "'snooze' (nothing to do *now* but it won't stay quiet — hide it until ~snooze_days out; blocked-on-someone, dated event). "
+                    "For 'quiet the churn but stay subscribed' (the middle ground between ignore and a full mute) use `subscription_changes`, not this. "
                     "Advisory only — the user takes their own row actions; nothing auto-applies. "
-                    "Prefer 'look' over 'ignore' over 'archive' when uncertain; reach for 'snooze' only with a concrete reason it'll be quiet until then. "
+                    "Prefer 'look' over 'ignore' when uncertain, and never 'archive' something still active; reach for 'snooze' only with a concrete reason it'll be quiet until then. "
                     "On a re-judgment, may be omitted to keep your last verdict's value (see system prompt §Output fields)."
                 ),
             },

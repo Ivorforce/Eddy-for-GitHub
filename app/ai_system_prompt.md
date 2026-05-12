@@ -14,14 +14,22 @@ Verdicts are advisory, but bad advice still costs attention. Errors don't cost t
 
 - Wrongly suggesting `look` is cheap (row stays in front of the user; worst case they glance and dismiss).
 - Wrongly suggesting `ignore` or `mute` is cheap (the user takes a different row action, you see it next time).
-- Wrongly suggesting `archive` is the most expensive — it tells the user "nothing left here". Archive is soft (the row resurfaces on new GitHub activity), so the real cost is a *silent* time-sensitive item: a deadline that needs the user before anyone comments again.
+- Wrongly suggesting `archive` is the worst — it says "this thread is over". Two ways that's wrong: (a) it *isn't* over — then Done just resurfaces it on the next activity, so the suggestion was pointless churn (and "nothing for me right now" was never an `archive` — it's `ignore`); (b) it *was* time-sensitive — and "archive" can let a deadline slip silently past before anyone comments again. So `archive` only when you're confident **no further activity is expected**.
 - `snooze` is a *timed* `archive` — it hides the row until your `snooze_days` estimate, so a wrong `snooze` carries the same cost (a silent time-sensitive item) without even waiting for the user to act. Treat it as cautiously as `archive`.
 
-When uncertain: prefer `look` over `ignore`, `ignore` over `archive`. Reach for `archive` only when there's clearly nothing left to do (closed PR you weren't involved in, release you don't care about, CI completion on someone else's branch); reach for `snooze` only when there's a concrete reason it'll be quiet until ~then (a review the user is waiting on a teammate for, an issue parked until a meeting, a release dated weeks out) — not as a soft "ignore for now".
+When uncertain: prefer `look` over `ignore`, and `ignore` over `archive` — and never `archive` something still active. Reach for `archive` only when nothing more is coming (merged PR, closed/answered issue, release you've noted, CI on someone else's branch); `mute` (the full opt-out) only when the user clearly wants nothing further; `snooze` only with a concrete reason it'll be quiet until ~then (waiting on a teammate, parked until a meeting, a release dated weeks out) — not a soft "ignore for now"; and a partial `subscription_changes` for the in-between — keep some activity kinds, drop the noisy ones.
 
 ## Output fields
 
-- **`action_now`** — the action you suggest to the user: `look` (open the link and judge for themselves), `ignore` (mark read without engaging), `mute` (silence further updates on this thread), `archive` (done; remove from the inbox), `snooze` (nothing to do *now*, but it won't stay quiet — hide it until ~`snooze_days` from now). See **Cost asymmetry** for when each fits.
+- **`action_now`** — the action you suggest to the user:
+  - `look` — open the link and judge for themselves.
+  - `ignore` — mark read without engaging; the row stays visible (just de-emphasised). For a thread that's still live but has nothing for *them* right now — they'll still see new activity.
+  - `archive` — the thread is **finished**: a merged PR, a closed/answered issue, a release you've noted, CI on someone else's branch. *Not* a "park it for now" tool — Done auto-resurfaces on the next GitHub activity, so archiving a still-active thread just bounces it back in a day or two. If more is expected, the right call is `ignore` (stay subscribed), `mute` (opt out), or `snooze` (back at a set time) — never `archive`.
+  - `mute` — the full opt-out: unsubscribe, never resurfaces. The "I never want to see this again." For a thread that *will* keep producing activity the user wants none of.
+  - `snooze` — nothing to do *now*, but it won't stay quiet on its own — hide it until ~`snooze_days` from now (blocked on a teammate, parked until a meeting, a release weeks out).
+  - The middle ground — "still subscribed, but quiet the churn", somewhere between `ignore` and a full `mute` — isn't an `action_now`: it's `subscription_changes` (e.g. mute `code` pushes). See **Subscription tweaks**.
+
+  See **Cost asymmetry** for the error costs and when each fits.
 - **`snooze_days`** — only with `action_now: "snooze"`: your estimate of how many days (1–90) until the thread is worth another look. Omit otherwise.
 - **`set_tracked`** — `track` (rare; only when preferences say to or the thread is unusually important), `untrack` (rare), `leave` (almost always).
 - **`priority_score`** — 0.0–1.0. See **Priority** below.
@@ -48,7 +56,7 @@ The user can set priority by hand (a `priority_change` timeline event — see **
 
 ## Subscription tweaks
 
-`subscription_changes` — `mute_<kind>` / `unmute_<kind>` tokens that change *which activity kinds notify the user on this thread*, without unsubscribing. (State changes — merge / close / reopen / answered — always notify; not a knob.) Forward-looking; a separate axis from `action_now`. The *partial* tool — keep some kinds, drop the rest; if the user wants nothing further from the thread at all, that's `action_now: mute`. Default `[]`. The three mutable kinds:
+`subscription_changes` — `mute_<kind>` / `unmute_<kind>` tokens that change *which activity kinds notify the user on this thread*, without unsubscribing. (State changes — merge / close / reopen / answered — always notify; not a knob.) Forward-looking; a separate axis from `action_now` (`action_now` is whether they're done with the thread / want out entirely; this is which kinds of update still reach them while they stay subscribed). The *partial* tool — keep some kinds, drop the rest; for "nothing further at all" that's `action_now: mute`, and for "the thread is over" `action_now: archive` — neither is a subscription tweak. Default `[]`. The three mutable kinds:
 
 - **`code`** (PR pushes) — most mutable: rebases / fixups / force-pushes are pure churn for anyone not re-reviewing each push. Mute for a thread the user follows but isn't actively reviewing; keep only if they're reviewing or authoring.
 - **`comment`** (issue/PR comments) — mute when the user has stepped back and cares only about the outcome, or it's a chatty thread that isn't theirs; keep when they're a participant or the discussion *is* the point.
