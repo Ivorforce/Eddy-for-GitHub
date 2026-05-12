@@ -22,7 +22,7 @@
     {# A verdict a later judgment has overridden — collapsed to a bare thin
        purple rule (the preceding event's time already locates it); hover
        reproduces the bubble's content. Marks "AI last looked here". #}
-    <div class="timeline-verdict-line" data-tip-html="{{ ev.verdict.tip_html|forceescape }}" aria-label="AI: {{ ev.verdict.description }}">
+    <div class="timeline-verdict-line" data-tip-html="{{ ev.verdict.tip_html|forceescape }}">
       <span class="timeline-verdict-rule" aria-hidden="true"></span>
     </div>
   {% elif ev.kind == 'ai_verdict' %}

@@ -732,6 +732,9 @@
       white-space: nowrap;
       font-weight: 400;
       color: var(--pico-muted-color);
+      /* Safari pops a native tooltip for ellipsis-clipped text; let hovers
+         fall through to the button so only its data-tip-html tooltip shows. */
+      pointer-events: none;
     }
     .ai-verdict-rerun {
       display: inline-flex;
@@ -802,6 +805,7 @@
       white-space: nowrap;
       font-weight: 400;
       color: var(--pico-muted-color);
+      pointer-events: none;       /* see .ai-verdict-desc — dodge Safari's clipped-text tooltip */
     }
     .thread-note-btn {
       display: inline-flex;
