@@ -13,7 +13,23 @@
        --pico-color redefinition (Pico rebinds --pico-color to the link
        primary inside `a` selectors, which is fine for ordinary links but
        wrong when we want the anchor to read as content text). */
-    :root { --content-color: var(--pico-color); }
+    :root {
+      --content-color: var(--pico-color);
+      /* Semantic accent + state palette — GitHub-ish hues named by role, so
+         the literals live in one place. `-rgb` companions exist where a colour
+         also appears as an alpha wash: rgba(var(--x-rgb), α). Greys still use
+         Pico's --pico-*; the rgba(140,149,159,…) family is left as-is. */
+      --ai-accent: #a371f7;          --ai-accent-rgb: 163, 113, 247;        /* AI affordances + suggestion rings */
+      --accent-amber: #eaa54a;       --accent-amber-rgb: 234, 165, 74;      /* tracked / favorited / note (bright) */
+      --accent-amber-deep: #bf8700;  --accent-amber-deep-rgb: 191, 135, 0;  /* same role, deeper — fills, badges */
+      --accent-blue: #4493f8;        --accent-blue-rgb: 73, 147, 248;       /* "yours" / self / user-chat / info */
+      --state-good: #1a7f37;         --state-good-rgb: 26, 127, 55;         /* approved · reopened · member · idle */
+      --state-good-emphasis: #1f883d;                                       /* solid green bg (open-PR pill, confirm) */
+      --state-good-muted: #5b8c64;                                          /* diff "+N" */
+      --state-bad: #cf222e;          --state-bad-rgb: 207, 34, 46;          /* closed PR · error */
+      --state-bad-muted: #a8676b;                                           /* changes-requested · closed lifecycle · diff "-N" */
+      --state-merged: #8957e5;                                              /* terminal-positive purple — merged PR · answered */
+    }
     main.container { max-width: 1400px; padding: 1rem 1.25rem 0; }
     table { font-size: 0.86rem; }
     th, td { vertical-align: middle; }
@@ -118,8 +134,8 @@
        restores the visual gap between +N and −M that the parent meta-row's
        gap would otherwise collapse since the two spans are now one item. */
     .diff-stats { display: inline-flex; gap: 0.4rem; }
-    .stat-add { color: #5b8c64; }
-    .stat-del { color: #a8676b; }
+    .stat-add { color: var(--state-good-muted); }
+    .stat-del { color: var(--state-bad-muted); }
     td.activity .activity-stats .stat { min-width: 2.5rem; }
     /* Item creation age — spans both grid columns as a header so the 2x2
        reactions/comments grid below stays clean. Color comes inline from a
@@ -139,12 +155,12 @@
       grid-column: 1 / -1;
       justify-content: center;
     }
-    .type-pill.state-open                { background: #1f883d; }
+    .type-pill.state-open                { background: var(--state-good-emphasis); }
     .type-pill.state-draft               { background: #57606a; }
     .type-pill.state-merged,
     .type-pill.state-closed_completed,
-    .type-pill.state-answered            { background: #8250df; }
-    .type-pill.state-closed_pr           { background: #cf222e; }
+    .type-pill.state-answered            { background: var(--state-merged); }
+    .type-pill.state-closed_pr           { background: var(--state-bad); }
     .type-pill.state-closed,
     .type-pill.state-closed_not_planned  { background: #6e7781; }
     /* Open discussions read grey, not "open = green" — matches github.com,
@@ -227,9 +243,9 @@
        spacing from its parent's `gap`). Margin gives them breathing
        room so the icon doesn't crash into the name. */
     .ai-verdict-popover .author-icon { margin-right: 0.18rem; }
-    .author-icon.icon-member    { color: #1a7f37; }
-    .author-icon.icon-firsttime { color: #bf8700; }
-    .author-icon.icon-self      { color: #4493f8; }
+    .author-icon.icon-member    { color: var(--state-good); }
+    .author-icon.icon-firsttime { color: var(--accent-amber-deep); }
+    .author-icon.icon-self      { color: var(--accent-blue); }
     .author-icon.icon-generic   { opacity: 0.55; }
 
     /* Entity name = popover trigger. Reads as content (body color), not as
@@ -241,7 +257,7 @@
     a.entity-trigger { color: var(--content-color); }
     .repo-owner.entity-trigger { color: var(--pico-muted-color); }
     .author-login.entity-trigger { font-weight: 500; }
-    .entity-trigger.is-tracked { color: #eaa54a; }
+    .entity-trigger.is-tracked { color: var(--accent-amber); }
     /* Hover affordance — all three triggers respond the same way: lift to
        full body color (the org is muted at rest, so its plain underline is
        too faint to read as interactive on its own) and underline. Tracked
@@ -250,7 +266,7 @@
        feels sluggish for a hover cue — snap both at once. */
     a.entity-trigger { transition: none; }
     .entity-trigger:hover { color: var(--pico-color); text-decoration: underline; }
-    .entity-trigger.is-tracked:hover { color: #eaa54a; }
+    .entity-trigger.is-tracked:hover { color: var(--accent-amber); }
     /* Item title is the longest piece of free-text prose on the row, so it
        reads as text rather than as a styled link: inherits body color (NOT
        Pico's anchor-scoped --pico-color, which is the link primary blue —
@@ -283,7 +299,7 @@
     a.item-title:hover .item-title-text { text-decoration: underline; }
     a.item-title.is-tracked,
     a.item-title.is-tracked:hover,
-    span.item-title.is-tracked { color: #eaa54a; }
+    span.item-title.is-tracked { color: var(--accent-amber); }
 
     /* Row-level highlights, in increasing priority:
          context-track: any of org/repo/author tracked → subtle warm-yellow
@@ -297,10 +313,10 @@
     tr[data-tracked-author="true"]:not(.is-tracked-row):not(.is-yours-row) td:first-child,
     tr[data-tracked-repo="true"]:not(.is-tracked-row):not(.is-yours-row) td:first-child,
     tr[data-tracked-org="true"]:not(.is-tracked-row):not(.is-yours-row) td:first-child {
-      box-shadow: inset 1.5px 0 0 rgba(234, 165, 74, 0.55);
+      box-shadow: inset 1.5px 0 0 rgba(var(--accent-amber-rgb), 0.55);
     }
-    tr.is-yours-row td:first-child   { box-shadow: inset 3px 0 0 #4493f8; }
-    tr.is-tracked-row td:first-child { box-shadow: inset 3px 0 0 #eaa54a; }
+    tr.is-yours-row td:first-child   { box-shadow: inset 3px 0 0 var(--accent-blue); }
+    tr.is-tracked-row td:first-child { box-shadow: inset 3px 0 0 var(--accent-amber); }
 
     /* Action popover panel — shared chrome for org / repo / person / item.
        Anchored below its trigger via CSS Anchor Positioning (anchor-name on
@@ -363,7 +379,7 @@
       width: 0.95em;
       height: 0.95em;
       flex-shrink: 0;
-      color: #eaa54a;
+      color: var(--accent-amber);
     }
     .action-popover form { margin: 0 0 0.35rem; }
     .action-popover textarea {
@@ -467,13 +483,13 @@
       color: var(--pico-color);
     }
     td.actions .action-segment.seg-ignore.active {
-      background: rgba(26, 127, 55, 0.22);   /* muted green */
+      background: rgba(var(--state-good-rgb), 0.22);   /* muted green */
     }
     td.actions .action-segment.seg-done.active {
-      background: rgba(191, 135, 0, 0.26);   /* amber — archived */
+      background: rgba(var(--accent-amber-deep-rgb), 0.26);   /* amber — archived */
     }
     td.actions .action-segment.seg-mute.active {
-      background: rgba(207, 34, 46, 0.22);   /* red — silenced */
+      background: rgba(var(--state-bad-rgb), 0.22);   /* red — silenced */
     }
 
     /* Row 2 of the Actions cell — Track + Snooze (+ "Note…" in manual mode).
@@ -505,14 +521,14 @@
     /* Track — slot background like .action-group above; filled when tracked. */
     td.actions .track-btn { background: rgba(140, 149, 159, 0.08); }
     td.actions .track-btn.active {
-      background: rgba(234, 165, 74, 0.20);
-      color: #eaa54a;
+      background: rgba(var(--accent-amber-rgb), 0.20);
+      color: var(--accent-amber);
     }
     /* Snooze trigger — no fill (it's an action, not a state); the snoozed
        state shows the wake countdown amber-filled, like the Done segment. */
     td.actions .snooze-btn { background: none; }
     td.actions .snooze-btn.active {
-      background: rgba(191, 135, 0, 0.26);
+      background: rgba(var(--accent-amber-deep-rgb), 0.26);
       color: var(--pico-color);
     }
     /* Quiet snooze (also unsubscribed) — muted grey, not amber: it's not a
@@ -557,7 +573,7 @@
     .snooze-pop button:hover { background: rgba(140, 149, 159, 0.16); }
     .snooze-pop .snooze-ai {
       font-weight: 600;
-      color: #a371f7;   /* matches the AI brain accent */
+      color: var(--ai-accent);   /* matches the AI brain accent */
       margin-bottom: 0.15rem;
       padding-bottom: 0.25rem;
       border-bottom: 1px solid var(--pico-muted-border-color);
@@ -585,8 +601,8 @@
       line-height: 1;
     }
     td.actions .action-segment.seg-mute-caret.has-muted {
-      background: rgba(191, 135, 0, 0.18);
-      color: #d29922;   /* same amber as the note / partial-state accents */
+      background: rgba(var(--accent-amber-deep-rgb), 0.18);
+      color: var(--accent-amber-deep);   /* same amber as the note / partial-state accents */
     }
     /* Purple dotted inset ring — the AI *suggests* this action / subscription
        change and the user hasn't done it yet. Dashed (not solid) so it reads
@@ -600,7 +616,7 @@
        eat it. */
     td.actions .action-segment.ai-suggests,
     td.actions .row2-btn.ai-suggests {
-      outline: 1.5px dashed rgba(137, 87, 229, 0.85);
+      outline: 1.5px dashed rgba(var(--ai-accent-rgb), 0.85);
       outline-offset: -2px;
     }
     /* Inline ▾ after an icon — signals "opens a menu" on buttons that aren't
@@ -649,20 +665,20 @@
        only. */
     .mutekind-pop .mutekind-opt.ai-mute,
     .mutekind-pop .mutekind-opt.ai-unmute {
-      outline: 1.5px dashed rgba(137, 87, 229, 0.7);
+      outline: 1.5px dashed rgba(var(--ai-accent-rgb), 0.7);
       outline-offset: -2px;
     }
     /* ✦ apply-the-AI's-subscription-suggestion row (inherits .snooze-pop
        button layout). Purple while there's something to apply; greyed once
        it's done (the JS flips .done + disabled in lockstep with the options). */
     .mutekind-pop .mutekind-apply {
-      color: #a371f7;
+      color: var(--ai-accent);
       font-weight: 600;
       border-bottom: 1px solid var(--pico-muted-border-color);
       margin-bottom: 0.1rem;
       padding-bottom: 0.25rem;
     }
-    .mutekind-pop .mutekind-apply:hover { background: rgba(137, 87, 229, 0.14); }
+    .mutekind-pop .mutekind-apply:hover { background: rgba(var(--ai-accent-rgb), 0.14); }
     .mutekind-pop .mutekind-apply.done,
     .mutekind-pop .mutekind-apply:disabled {
       color: var(--pico-muted-color);
@@ -684,8 +700,8 @@
       display: flex;
       width: 100%;
       margin: 0 0 0.25rem;
-      background: rgba(137, 87, 229, 0.08);
-      border: 1px solid rgba(137, 87, 229, 0.30);
+      background: rgba(var(--ai-accent-rgb), 0.08);
+      border: 1px solid rgba(var(--ai-accent-rgb), 0.30);
       border-radius: 0.4rem;
       overflow: hidden;
     }
@@ -699,7 +715,7 @@
       opacity: 0.85;
     }
     tr.ai-outdated td.actions .action-segment.ai-suggests,
-    tr.ai-outdated td.actions .row2-btn.ai-suggests { outline-color: rgba(137, 87, 229, 0.55); }
+    tr.ai-outdated td.actions .row2-btn.ai-suggests { outline-color: rgba(var(--ai-accent-rgb), 0.55); }
     .ai-verdict-main,
     .ai-verdict-rerun {
       background: none;
@@ -719,7 +735,7 @@
       gap: 0.3rem;                /* sparkle icon → description echo */
       padding: 0.14rem 0.5rem;
       letter-spacing: 0.01em;
-      border-right: 1px solid rgba(137, 87, 229, 0.30);
+      border-right: 1px solid rgba(var(--ai-accent-rgb), 0.30);
     }
     .ai-verdict-take {
       flex-shrink: 0;
@@ -742,7 +758,7 @@
       align-items: center;
       justify-content: center;
       padding: 0.14rem 0.4rem;
-      color: #a371f7;  /* purple "run the AI" affordance */
+      color: var(--ai-accent);  /* purple "run the AI" affordance */
     }
     .ai-verdict-rerun svg { width: 0.82rem; height: 0.82rem; }
     .ai-verdict-rerun.current,
@@ -752,14 +768,14 @@
       color: var(--pico-muted-color);   /* greyed — assessment is current, nothing to do */
     }
     .ai-verdict-main:hover,
-    .ai-verdict-rerun:not(.current):hover { background: rgba(137, 87, 229, 0.13); }
+    .ai-verdict-rerun:not(.current):hover { background: rgba(var(--ai-accent-rgb), 0.13); }
     /* AI sparkle leading the take label. */
     .ai-verdict-pill-group .ai-pill-icon {
       width: 0.85em;
       height: 0.85em;
       margin-right: 0.3rem;
       vertical-align: -0.12em;
-      color: #a371f7;
+      color: var(--ai-accent);
     }
 
     /* Manual-mode counterpart of the AI strip: left = activity / state
@@ -816,7 +832,7 @@
       color: var(--pico-muted-color);
     }
     .thread-note-btn svg { width: 0.82rem; height: 0.82rem; }
-    .thread-note-btn.has-note { color: #d29922; }   /* a saved note — same amber as the note / tracked accents */
+    .thread-note-btn.has-note { color: var(--accent-amber-deep); }   /* a saved note — same amber as the note / tracked accents */
     .thread-pill-main:hover,
     .thread-note-btn:hover { background: rgba(140, 149, 159, 0.16); }
     .thread-pill-group .thread-pill-icon {
@@ -1004,8 +1020,8 @@
        color (it's the noisiest state and rarely a singleton anyway —
        coalescing usually folds it into a comment_group line). */
     .ai-verdict-popover .timeline-line .review-state { font-weight: 500; }
-    .ai-verdict-popover .timeline-line .state-approved          { color: #1a7f37; }
-    .ai-verdict-popover .timeline-line .state-changes-requested { color: #a8676b; }
+    .ai-verdict-popover .timeline-line .state-approved          { color: var(--state-good); }
+    .ai-verdict-popover .timeline-line .state-changes-requested { color: var(--state-bad-muted); }
     .ai-verdict-popover .timeline-line .state-dismissed         { color: var(--pico-muted-color); }
     .ai-verdict-popover .timeline-line .state-pending           { color: var(--pico-muted-color); }
     /* Lifecycle verbs (merged / closed / reopened / draft↔ready). Same
@@ -1013,9 +1029,9 @@
        consistently — merged purple matches GitHub's convention; closed
        red, reopened green, draft transitions stay neutral. */
     .ai-verdict-popover .timeline-line .lifecycle-verb { font-weight: 500; }
-    .ai-verdict-popover .timeline-line .lifecycle-merged   { color: #8957e5; }
-    .ai-verdict-popover .timeline-line .lifecycle-closed   { color: #a8676b; }
-    .ai-verdict-popover .timeline-line .lifecycle-reopened { color: #1a7f37; }
+    .ai-verdict-popover .timeline-line .lifecycle-merged   { color: var(--state-merged); }
+    .ai-verdict-popover .timeline-line .lifecycle-closed   { color: var(--state-bad-muted); }
+    .ai-verdict-popover .timeline-line .lifecycle-reopened { color: var(--state-good); }
     .ai-verdict-popover .timeline-age {
       font-size: 0.65rem;
       color: var(--pico-muted-color);
@@ -1030,13 +1046,13 @@
       background: rgba(140, 149, 159, 0.06);
     }
     .ai-verdict-popover .timeline-bubble.bubble-user {
-      background: rgba(31, 122, 207, 0.08);
-      border-color: rgba(31, 122, 207, 0.25);
+      background: rgba(var(--accent-blue-rgb), 0.08);
+      border-color: rgba(var(--accent-blue-rgb), 0.25);
       margin-left: 1rem;
     }
     .ai-verdict-popover .timeline-bubble.bubble-ai {
-      background: rgba(137, 87, 229, 0.05);
-      border-color: rgba(137, 87, 229, 0.22);
+      background: rgba(var(--ai-accent-rgb), 0.05);
+      border-color: rgba(var(--ai-accent-rgb), 0.22);
       margin-right: 1rem;
     }
     .ai-verdict-popover .timeline-bubble-head {
@@ -1087,10 +1103,10 @@
       flex: 1;
       height: 0;
       margin: 0 0.1rem;
-      border-top: 1px solid rgba(137, 87, 229, 0.4);
+      border-top: 1px solid rgba(var(--ai-accent-rgb), 0.4);
     }
     .ai-verdict-popover .timeline-verdict-line:hover .timeline-verdict-rule {
-      border-top-color: rgba(137, 87, 229, 0.75);
+      border-top-color: rgba(var(--ai-accent-rgb), 0.75);
     }
     /* Inside the hover tooltip: the superseded verdict's content, mirroring
        the live bubble's hierarchy (priority tag · reply over a hairline ·
@@ -1183,9 +1199,9 @@
        the verdict pill / bubble, so the AI action reads as distinct from
        the neutral Note in either state. */
     .ai-verdict-popover .ai-chat-form-buttons .ai-rejudge-btn {
-      background: rgba(137, 87, 229, 0.12);
-      border-color: rgba(137, 87, 229, 0.42);
-      color: #a371f7;
+      background: rgba(var(--ai-accent-rgb), 0.12);
+      border-color: rgba(var(--ai-accent-rgb), 0.42);
+      color: var(--ai-accent);
     }
     /* In-flight state. Popover stays open so the user can see the new
        chat bubble appear when the response arrives (same visual idiom
@@ -1290,7 +1306,7 @@
     }
     /* Brief green confirmation after a successful add (button text → ✓). */
     .backfill-menu .bf-link-form button.flash-ok {
-      background-color: #2e9e44; border-color: #2e9e44; color: #fff;
+      background-color: var(--state-good-emphasis); border-color: var(--state-good-emphasis); color: #fff;
     }
     /* Toggle row checkmark: hidden by default, revealed when .on is set
        (server-rendered for initial state, htmx flips it on response). */
@@ -1307,12 +1323,12 @@
       cursor: help;
       transition: background-color 0.15s ease;
     }
-    .status-dot.status-idle    { background: #1a7f37; }
+    .status-dot.status-idle    { background: var(--state-good); }
     .status-dot.status-loading {
-      background: #bf8700;
+      background: var(--accent-amber-deep);
       animation: status-pulse 0.9s ease-in-out infinite;
     }
-    .status-dot.status-error   { background: #cf222e; }
+    .status-dot.status-error   { background: var(--state-bad); }
     @keyframes status-pulse {
       0%, 100% { opacity: 1; transform: scale(1); }
       50%      { opacity: 0.4; transform: scale(0.65); }
@@ -1383,7 +1399,7 @@
       text-decoration: none;
     }
     .preset-tab.active {
-      background: rgba(73, 147, 248, 0.16);
+      background: rgba(var(--accent-blue-rgb), 0.16);
       color: var(--pico-color);
       font-weight: 600;
     }
@@ -1448,8 +1464,8 @@
        reuses the .is-yours-row accent; warm-yellow stays reserved for
        "tracked". */
     details.filter-dropdown:has(input[type="checkbox"]:checked) > summary {
-      background: rgba(73, 147, 248, 0.16);
-      border-color: #4493f8;
+      background: rgba(var(--accent-blue-rgb), 0.16);
+      border-color: var(--accent-blue);
       color: var(--pico-color);
       font-weight: 600;
     }
@@ -1505,14 +1521,14 @@
        scan and flickered on hover. GitHub-style: unread is what stands
        out, read stays at full readability. */
     tr:not(.read):not(.bucket-separator) > td {
-      background-color: rgba(73, 147, 248, 0.08);
+      background-color: rgba(var(--accent-blue-rgb), 0.08);
     }
     /* Done rows (locally archived; visible only with Show archived on)
        get a parallel red-ish tint so they read as a distinct class from
        the active inbox without disappearing. Overrides the unread blue
        in the rare case both apply (manual mark-done on an unread row). */
     tr.done:not(.bucket-separator) > td {
-      background-color: rgba(207, 34, 46, 0.06);
+      background-color: rgba(var(--state-bad-rgb), 0.06);
     }
     tr.action-error { outline: 1px solid var(--pico-color-red-500); }
 
@@ -1544,7 +1560,7 @@
       transition: opacity 0.08s ease-out;
     }
     .custom-tooltip.shown { opacity: 1; }
-    .custom-tooltip .mention { color: #eaa54a; }
+    .custom-tooltip .mention { color: var(--accent-amber); }
 
     /* Inline GitHub-markdown bits (see app/ghmd.py): `code` spans in titles /
        chat bubbles / the AI tooltip, plus #ref and @mention links. */
