@@ -61,13 +61,13 @@ DEFAULT_DAILY_CAP_USD = 2.0
 # Event kinds that, arriving since the last verdict, mark a re-judgment as
 # substantive — there's new discussion / state / a reframed body to weigh, so
 # it gets a thinking pass. The *only* no-thinking re-judgment is one with none
-# of these since the verdict but a details re-enrichment (a head-commit or
-# metadata change) — the user re-asked to fold in a fresh diff, and the current
-# PR file list + diff stats + last_commit are right there in the prompt, no
-# scratchpad needed (see _should_think). `body_edit` is in the set: the model
-# only ever sees the *current* body, never the diff, so an edit it hasn't seen
-# could be a substantial reframe. Mirrors web._VERDICT_INVALIDATING_KINDS
-# (which drives the Re-ask button's enabled state) — same concept, kept local
+# of these since the verdict but a `code` push — the user re-asked to fold in
+# a fresh diff, and the current PR file list + diff stats + last_commit are
+# right there in the prompt, no scratchpad needed (see _should_think).
+# `body_edit` is in the set: the model only ever sees the *current* body,
+# never the diff, so an edit it hasn't seen could be a substantial reframe.
+# Subset of web._VERDICT_INVALIDATING_KINDS (which adds `code`) — a code-only
+# Re-ask still invalidates the verdict, just doesn't earn thinking. Kept local
 # to dodge the ai↔web import cycle.
 _THINKING_REQUIRED_KINDS = ("comment", "review", "lifecycle", "user_chat", "body_edit")
 
@@ -388,11 +388,9 @@ def _load_timeline(conn: sqlite3.Connection, thread_id: str) -> list[dict]:
     return out
 
 
-# Kinds whose payloads we summarize in `changes_since_last_verdict`. `code`
-# pushes aren't here (no per-push event — derived from `item.last_commit`),
-# and `ai_verdict` is the cutoff, not content.
+# `ai_verdict` is the cutoff, not content.
 def _changes_since_last_verdict(
-    conn: sqlite3.Connection, thread_id: str, last_commit: dict | None
+    conn: sqlite3.Connection, thread_id: str
 ) -> dict | None:
     """Mechanical histogram of timeline events after the most recent
     `ai_verdict` event (a `skip` counts — it writes one too), so a re-judgment
@@ -431,6 +429,10 @@ def _changes_since_last_verdict(
     priority_changes: list = []
     user_chats = 0
     body_edited = False
+    # Per-push diff totals since the verdict — lets the model compare its prior
+    # framing ("small fix") against the current scope without us hoarding
+    # per-file history. Ordered oldest→newest so a series reads as a trajectory.
+    code_pushes: list[dict] = []
     for r in rows:
         try:
             p = json.loads(r["payload_json"])
@@ -456,17 +458,20 @@ def _changes_since_last_verdict(
             priority_changes.append(p.get("to"))
         elif k == "user_chat":
             user_chats += 1
-    code_pushed = False
-    if last_commit:
-        committed = db.iso_to_unix(last_commit.get("committed_at"))
-        if committed is not None and committed > last_verdict_ts:
-            code_pushed = True
+        elif k == "code":
+            push = {
+                "committed_at":  p.get("committed_at"),
+                "additions":     p.get("additions"),
+                "deletions":     p.get("deletions"),
+                "changed_files": p.get("changed_files"),
+            }
+            code_pushes.append({pk: pv for pk, pv in push.items() if pv is not None})
     out = {
         "new_comments":     new_comments or None,
         "new_reviews":      new_reviews or None,
         "lifecycle":        lifecycle or None,
         "body_edited":      body_edited or None,
-        "code_pushed":      code_pushed or None,
+        "code_pushes":      code_pushes or None,
         "user_actions":     user_actions or None,
         "priority_changes": priority_changes or None,
         "user_chats":       user_chats or None,
@@ -676,7 +681,7 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
     # Re-judgments only: an explicit, derived delta against the last verdict so
     # the model doesn't reconstruct it from the flat timeline every time. Omit
     # the key entirely on a first judgment (no prior verdict to diff against).
-    changes = _changes_since_last_verdict(conn, thread_id, item.get("last_commit"))
+    changes = _changes_since_last_verdict(conn, thread_id)
     if changes is not None:
         ctx["changes_since_last_verdict"] = changes
     # Append "(<age> ago)" to every ISO timestamp so the model doesn't subtract
@@ -841,21 +846,20 @@ def _should_think(
 
     On for first judgments (`summary`) and chats (`chat` — the user typed
     something that has to be weighed against surface signals). For a Re-ask
-    (`re_evaluate`) there's exactly one no-thinking case: the verdict's
-    details were re-enriched since (a code push or label/metadata churn) and
-    no `comment` / `review` / `lifecycle` / `user_chat` / `body_edit` event
-    landed — i.e. the user re-asked just to fold in a fresh diff, and the new
-    file list / diff stats / last_commit are already in the prompt, nothing to
-    deliberate over (and tool use can be forced, which the thinking path
-    can't). Everything else thinks — including a Re-ask with *nothing* new
-    since the verdict: the pill's rerun button is greyed out then, so reaching
-    for the popover's "↻ Re-ask" anyway signals "I want a deeper take", which
-    is exactly what the thinking pass buys. Defaults to thinking on any
+    (`re_evaluate`) there's exactly one no-thinking case: a `code` event
+    landed since the verdict and nothing in `_THINKING_REQUIRED_KINDS` did —
+    i.e. the user re-asked to fold in a fresh push, and the new file list /
+    diff stats / last_commit are already in the prompt, nothing to deliberate
+    over (and tool use can be forced, which the thinking path can't).
+    Everything else thinks — including a Re-ask with *nothing* new since the
+    verdict: the pill's rerun button is greyed out then, so reaching for the
+    popover's "↻ Re-ask" anyway signals "I want a deeper take", which is
+    exactly what the thinking pass buys. Defaults to thinking on any
     unexpected mode."""
     if invocation_mode != "re_evaluate":
         return True
     row = conn.execute(
-        "SELECT ai_verdict_at, details_fetched_at FROM notifications WHERE id = ?",
+        "SELECT ai_verdict_at FROM notifications WHERE id = ?",
         (thread_id,),
     ).fetchone()
     verdict_at = row["ai_verdict_at"] if row else None
@@ -872,11 +876,14 @@ def _should_think(
     ).fetchone() is not None
     if has_substantive_event:
         return True
-    details_at = row["details_fetched_at"] if row else None
-    reenriched_since = details_at is not None and details_at > verdict_at
-    # No substantive event and a re-enrichment since → the cheap "fold in the
+    has_code_push = conn.execute(
+        "SELECT 1 FROM thread_events "
+        "WHERE thread_id = ? AND ts > ? AND kind = 'code' LIMIT 1",
+        (thread_id, verdict_at),
+    ).fetchone() is not None
+    # No substantive event and a code push since → the cheap "fold in the
     # fresh diff" Re-ask: skip thinking. Otherwise (incl. nothing-new) → think.
-    return not reenriched_since
+    return not has_code_push
 
 
 class AIError(RuntimeError):

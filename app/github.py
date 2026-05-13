@@ -1741,12 +1741,37 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
 
         # 'code' push: a PR head commit oid that differs from the one we last
         # saw. First enrichment (baseline_head_oid still NULL) captures the oid
-        # without counting it as new — same shape as baseline_comments.
+        # without counting it as new — same shape as baseline_comments. When
+        # the oid does shift, record a thread_event keyed on the new oid (so a
+        # re-fetch of the same head is idempotent) carrying the diff totals at
+        # this point in time — that's what lets a later judgment compare
+        # "small fix" against the current `additions`/`deletions`/`changed_files`
+        # and reframe scope without us hoarding per-file history.
         new_oid = None
         if row["type"] == "PullRequest":
             new_oid = (details.get("last_commit") or {}).get("abbrev_oid")
             if new_oid and row["baseline_head_oid"] and new_oid != row["baseline_head_oid"]:
                 nk.add("code")
+                lc = details.get("last_commit") or {}
+                committed_at = lc.get("committed_at")
+                payload = {
+                    "oid":           new_oid,
+                    "prev_oid":      row["baseline_head_oid"],
+                    "committed_at":  committed_at,
+                    "author":        lc.get("author"),
+                    "additions":     details.get("additions"),
+                    "deletions":     details.get("deletions"),
+                    "changed_files": details.get("changed_files"),
+                }
+                db.write_thread_event(
+                    conn,
+                    thread_id=row["id"],
+                    ts=db.iso_to_unix(committed_at) or now,
+                    kind="code",
+                    source="github",
+                    external_id=new_oid,
+                    payload={k: v for k, v in payload.items() if v is not None},
+                )
         # Discussion close / reopen / answered isn't a GraphQL timeline event
         # (Discussion has no timelineItems) — detect it by diffing the `state`
         # we last stored against the fresh one, and synthesize a lifecycle

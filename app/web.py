@@ -137,7 +137,7 @@ _ROW_COLS = (
     "id, repo, type, title, reason, html_url, link_url, updated_at, "
     "effective_updated_at, "
     "unread, ignored, action, action_source, "
-    "details_json, details_fetched_at, "
+    "details_json, "
     "seen_reasons, baseline_comments, muted_kinds, "
     "pr_reactions_json, unique_commenters, unique_reviewers, "
     "pr_review_state, baseline_review_state, "
@@ -809,8 +809,7 @@ def _verdict_render_dict(
 ) -> dict:
     """Display-ready bits of an ai_verdict event's payload, for rendering
     inside the timeline list. Distinct from _ai_verdict_dict, which shapes
-    the *cached* verdict for the row pill (and adds stale logic that
-    doesn't apply to historical entries)."""
+    the *cached* verdict for the row pill."""
     priority_level, priority_score = _verdict_priority(payload)
 
     def _md(text):
@@ -895,6 +894,25 @@ def _coalesce_body_edits(events: list[dict]) -> list[dict]:
             and out[-1].get("kind") == "body_edit"
         ):
             out[-1] = ev   # replace older edit with newer
+        else:
+            out.append(ev)
+    return out
+
+
+def _coalesce_code_pushes(events: list[dict]) -> list[dict]:
+    """Adjacent `code` pushes collapse to the latest — same pattern as
+    body_edits. The latest payload's diff totals describe the PR as it
+    stands now, which is what the user sees if they click through; the
+    in-between snapshots aren't displayable. The pill's "+N code pushes"
+    delta is where the count gets surfaced."""
+    out: list[dict] = []
+    for ev in events:
+        if (
+            ev.get("kind") == "code"
+            and out
+            and out[-1].get("kind") == "code"
+        ):
+            out[-1] = ev
         else:
             out.append(ev)
     return out
@@ -1171,6 +1189,24 @@ def _format_event_for_render(
     elif kind == "body_edit":
         out["actor"] = payload.get("editor") or "?"
         out["summary"] = "edited the description"
+    elif kind == "code":
+        out["actor"] = payload.get("author") or "?"
+        adds = payload.get("additions")
+        dels = payload.get("deletions")
+        n_files = payload.get("changed_files")
+        # Diff snippet is "+A/−D (N files)" when totals are present; the row
+        # falls back to bare "pushed code" if the GraphQL response didn't
+        # include the per-PR totals (rare; mostly forks we can't read fully).
+        parts = []
+        if isinstance(adds, int) or isinstance(dels, int):
+            parts.append(f"+{adds or 0}/−{dels or 0}")
+        if isinstance(n_files, int) and n_files:
+            parts.append(f"{n_files} file{'' if n_files == 1 else 's'}")
+        out["summary"] = (
+            f"pushed code {parts[0]} ({parts[1]})" if len(parts) == 2
+            else f"pushed code {parts[0]}" if parts
+            else "pushed code"
+        )
     elif kind == "mention":
         # A GitHub notification re-delivery whose reason was mention /
         # team_mention. The comment that triggered it is already in the
@@ -1195,11 +1231,12 @@ def _format_event_for_render(
 # Event kinds that constitute "new context the AI hasn't seen" — a verdict
 # made before any of these arrived is out of date. Row-state user_actions
 # (read/done/mute) are the user's *response* to a verdict, not new context,
-# so they don't count; neither does `visited`. (`code` pushes aren't here —
-# they re-enable Re-ask via the verdict going `stale` when details
-# re-enrich; `body_edit` is, since a reframed description is real new
-# context.) Mirrors ai._THINKING_REQUIRED_KINDS.
-_VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat", "body_edit")
+# so they don't count; neither does `visited`. `code` is in the set: a push
+# can change scope ("small fix" → +500/-50) and the per-event diff totals
+# let a re-judgment reframe. Superset of ai._THINKING_REQUIRED_KINDS — a
+# code-only re-judgment invalidates the verdict but runs thinking-off (the
+# fresh diff is already in the prompt; no scratchpad to earn).
+_VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat", "body_edit", "code")
 
 
 def _recency_summary(
@@ -1217,7 +1254,7 @@ def _recency_summary(
     body_edits, and comments — in importance order. Returns None when
     there's no activity AND no description to show on top — i.e. the
     tooltip would be empty."""
-    comments = reviews = mentions = body_edits = user_comments = 0
+    comments = reviews = mentions = body_edits = user_comments = pushes = 0
     review_states: list[str] = []
     lifecycle_verbs: list[str] = []
     for r in rows:
@@ -1252,8 +1289,10 @@ def _recency_summary(
             mentions += 1
         elif kind == "body_edit":
             body_edits += 1
+        elif kind == "code":
+            pushes += 1
 
-    has_activity = bool(comments or reviews or mentions or body_edits or lifecycle_verbs)
+    has_activity = bool(comments or reviews or mentions or body_edits or lifecycle_verbs or pushes)
     if not has_activity and not description_html:
         return None
 
@@ -1284,6 +1323,10 @@ def _recency_summary(
     for verb in lifecycle_verbs:
         parts.append(verb)
         detail.append(verb)
+    if pushes:
+        label = "code pushed" if pushes == 1 else f"+{pushes} code pushes"
+        parts.append(label)
+        detail.append(label)
     if body_edits:
         label = "description edited" if body_edits == 1 else f"{body_edits} description edits"
         parts.append(label)
@@ -1337,6 +1380,7 @@ def _build_timeline(
     timeline = _coalesce_recurring_actions(timeline)
     timeline = _coalesce_user_actions(timeline)
     timeline = _coalesce_body_edits(timeline)
+    timeline = _coalesce_code_pushes(timeline)
     timeline = _coalesce_comments(timeline)
     timeline = _mark_superseded_reviews(timeline)
     return timeline
@@ -1344,7 +1388,7 @@ def _build_timeline(
 
 _PILL_EVENT_KINDS = (
     "mention", "user_action", "comment", "review",
-    "lifecycle", "body_edit", "user_chat",
+    "lifecycle", "body_edit", "user_chat", "code",
 )
 
 
@@ -1394,7 +1438,7 @@ def _attach_pill_status(d: dict, rows: list) -> None:
             r["kind"] in _VERDICT_INVALIDATING_KINDS and r["ts"] > after_v
             for r in rows
         )
-        d["ai_uptodate"] = not verdict.get("stale") and not has_new_context
+        d["ai_uptodate"] = not has_new_context
         d["recency"] = _recency_summary(
             rows, after_v,
             description_html=verdict.get("description_html"),
@@ -1426,12 +1470,13 @@ def _attach_pill_status(d: dict, rows: list) -> None:
 
 def _ai_verdict_dict(
     verdict_json: str | None, at: int | None, model: str | None,
-    details_fetched_at: int | None, cur_repo: str | None = None,
+    cur_repo: str | None = None,
 ) -> dict | None:
     """Parse the cached verdict + derive UI flags. None if no pending verdict.
-    Stale = the row's details were re-enriched after the verdict was made,
-    so the AI may have judged on outdated state. The user can re-ask before
-    approving."""
+    Out-of-date-ness is computed by _attach_pill_status from thread_events
+    that arrived since `at` (see _VERDICT_INVALIDATING_KINDS) — `code` pushes
+    included, so a fresh diff invalidates without needing `details_fetched_at`
+    as a coarse proxy."""
     if not verdict_json or not at:
         return None
     try:
@@ -1497,7 +1542,6 @@ def _ai_verdict_dict(
         "model":           model or "",
         "at":              at,
         "age_text":        age_text,
-        "stale":           bool(details_fetched_at and details_fetched_at > at),
     }
 
 
@@ -1514,7 +1558,6 @@ def _row_to_dict(
 ) -> dict:
     d = dict(row)
     details_json = d.pop("details_json", None)
-    details_fetched_at = d.pop("details_fetched_at", None)
     seen_reasons_json = d.pop("seen_reasons", None)
     baseline_comments = d.pop("baseline_comments", None)
     ai_verdict_json = d.pop("ai_verdict_json", None)
@@ -1621,7 +1664,7 @@ def _row_to_dict(
 
     # Cached AI verdict (None if Ask AI hasn't been run on this row).
     d["ai_verdict"] = _ai_verdict_dict(
-        ai_verdict_json, ai_verdict_at, ai_verdict_model, details_fetched_at,
+        ai_verdict_json, ai_verdict_at, ai_verdict_model,
         cur_repo=d["repo"],
     )
     # Refine the verdict's subscription suggestion against this row's reality:
