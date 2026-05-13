@@ -30,6 +30,18 @@ log = logging.getLogger(__name__)
 # which adds up when _enrich runs ~20 calls back-to-back.
 _session = requests.Session()
 
+# Authenticated user's GitHub login, set at startup from auth.fetch_identity.
+# _enrich consults this to detect self-authored comments / reviews / body
+# edits — a self-comment proves the user looked at the thread, so the
+# baselines get reset like any other engagement event. None falls back to
+# "no self-authorship detection" (degrades gracefully on identity failures).
+_USER_LOGIN: str | None = None
+
+
+def set_user_login(login: str | None) -> None:
+    global _USER_LOGIN
+    _USER_LOGIN = login
+
 
 def derive_html_url(item: dict[str, Any]) -> str | None:
     """Convert subject.url (api.github.com) to a github.com browser URL."""
@@ -1777,16 +1789,57 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
                     row["id"],
                 ),
             )
-            continue
-
-        # Issues + Discussions: only bonus key is the commenter count.
-        if n_commenters is not None:
+        elif n_commenters is not None:
+            # Issues + Discussions: only bonus key is the commenter count.
             conn.execute(
                 "UPDATE notifications SET unique_commenters = ? WHERE id = ?",
                 (n_commenters, row["id"]),
             )
 
+        # Self-authored activity counts as engagement: if the *latest* comment
+        # / review / body_edit visible right now is the user's own, re-anchor
+        # the since-visit baselines. Runs after the per-type baseline writers
+        # above so the overwrite wins on first enrichment too (the COALESCE
+        # baseline-setters would otherwise pin baselines to old state).
+        if _latest_event_self_authored(
+            comment_history, pr_reviews, body_edited_at, details.get("body_editor")
+        ):
+            _clear_engagement_baselines(conn, row["id"])
+
     return new_kinds
+
+
+def _latest_event_self_authored(
+    comment_history: list[dict],
+    pr_reviews: list[dict],
+    body_edited_at: str | None,
+    body_editor: str | None,
+) -> bool:
+    """True iff the newest among comments / reviews / body-edit visible on
+    the thread is authored by the authenticated user. Used to treat a fresh
+    self-comment (in our app or anywhere on github.com) as an engagement
+    event. A self-comment buried in the middle of a batch doesn't trigger:
+    if someone else has the last word, there *is* new third-party activity
+    worth surfacing in the pill."""
+    if not _USER_LOGIN:
+        return False
+    candidates: list[tuple[int, str | None]] = []
+    for c in comment_history:
+        ts = db.iso_to_unix(c.get("created_at"))
+        if ts is not None:
+            candidates.append((ts, (c.get("user") or {}).get("login")))
+    for r in pr_reviews:
+        ts = db.iso_to_unix(r.get("submitted_at"))
+        if ts is not None:
+            candidates.append((ts, (r.get("user") or {}).get("login")))
+    if body_edited_at:
+        ts = db.iso_to_unix(body_edited_at)
+        if ts is not None:
+            candidates.append((ts, body_editor))
+    if not candidates:
+        return False
+    candidates.sort(key=lambda c: c[0], reverse=True)
+    return candidates[0][1] == _USER_LOGIN
 
 
 def set_subscribed(token: str, thread_id: str) -> None:
@@ -1908,6 +1961,22 @@ def _upsert(
     )
     if reason:
         _accumulate_seen_reason(conn, item["id"], reason)
+    if reason in ("mention", "team_mention") and updated_at:
+        # One mention event per notification update where the delivery reason
+        # is mention / team_mention. external_id = updated_at dedups within
+        # a single re-delivery; a fresh poll with the same updated_at is a
+        # no-op (the dedup index UPDATEs the payload in place). Consumed by
+        # the pill ("+ mentioned" when this event's ts is newer than the
+        # latest engagement) and by the AI timeline.
+        db.write_thread_event(
+            conn,
+            thread_id=item["id"],
+            ts=db.iso_to_unix(updated_at) or now,
+            kind="mention",
+            source="github",
+            external_id=updated_at,
+            payload={"reason": reason},
+        )
     if external_read:
         db.write_thread_event(
             conn,
@@ -1917,6 +1986,10 @@ def _upsert(
             source="github",
             payload={"action": "read_on_github"},
         )
+        # Weak engagement signal (a "Mark all as read" sweep on github.com
+        # would trigger this too) but better than nothing — re-anchor the
+        # since-visit deltas so the pill stops counting from before.
+        _clear_engagement_baselines(conn, item["id"])
     if resurfaced:
         # New activity arrived on a Done/Snoozed thread — bring it back. No
         # thread_event marker for it: whatever triggered the re-delivery is
@@ -1964,6 +2037,36 @@ def _accumulate_seen_reason(
     conn.execute(
         "UPDATE notifications SET seen_reasons = ? WHERE id = ?",
         (json.dumps(sorted(seen)), thread_id),
+    )
+
+
+def _clear_engagement_baselines(
+    conn: sqlite3.Connection, thread_id: str
+) -> None:
+    """Snapshot current activity counters into baselines so post-engagement
+    deltas surface as fresh signals. Called when the user demonstrably looked
+    at the thread: in-app visit, observed read-on-github, or self-authored
+    comment / review / body_edit. Reads details.comments from details_json
+    (0 if not yet enriched); pr_review_state from its own column.
+
+    The "since-visit" mention signal is event-sourced separately — a `mention`
+    thread_event lands per re-delivery with reason in (mention, team_mention),
+    and the row builder compares its ts against the latest engagement event
+    in thread_events. No column to flip here."""
+    row = conn.execute(
+        "SELECT details_json, pr_review_state FROM notifications WHERE id = ?",
+        (thread_id,),
+    ).fetchone()
+    if not row:
+        return
+    try:
+        comments = (json.loads(row["details_json"] or "{}") or {}).get("comments") or 0
+    except (ValueError, TypeError):
+        comments = 0
+    conn.execute(
+        "UPDATE notifications SET baseline_comments = ?, "
+        "baseline_review_state = ? WHERE id = ?",
+        (comments, row["pr_review_state"], thread_id),
     )
 
 

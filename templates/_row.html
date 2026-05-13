@@ -223,7 +223,7 @@
         <button type="button" class="ai-verdict-main"
                 popovertarget="pop-timeline-{{ n.id }}"
                 style="anchor-name: --pop-timeline-{{ n.id }}"
-                {% if n.recency %}data-tip-html="{{ n.recency.tip_html|forceescape }}"{% elif v and v.description %}data-tip-html="{{ v.description_html|forceescape }}"{% endif %}><span class="ai-verdict-take"><svg class="ai-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.53 1.282a.5.5 0 0 1 .94 0l.478 1.306a7.492 7.492 0 0 0 4.464 4.464l1.305.478a.5.5 0 0 1 0 .94l-1.305.478a7.492 7.492 0 0 0-4.464 4.464l-.478 1.305a.5.5 0 0 1-.94 0l-.478-1.305a7.492 7.492 0 0 0-4.464-4.464L1.282 8.47a.5.5 0 0 1 0-.94l1.306-.478a7.492 7.492 0 0 0 4.464-4.464Z"/></svg>{% if not v %}unassessed{% endif %}</span>{% if n.recency %}<span class="ai-verdict-desc">{{ n.recency.text }}</span>{% elif v and v.description %}<span class="ai-verdict-desc">{{ v.description }}</span>{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
+                {% if n.recency %}data-tip-html="{{ n.recency.tip_html|forceescape }}"{% endif %}><span class="ai-verdict-take"><svg class="ai-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.53 1.282a.5.5 0 0 1 .94 0l.478 1.306a7.492 7.492 0 0 0 4.464 4.464l1.305.478a.5.5 0 0 1 0 .94l-1.305.478a7.492 7.492 0 0 0-4.464 4.464l-.478 1.305a.5.5 0 0 1-.94 0l-.478-1.305a7.492 7.492 0 0 0-4.464-4.464L1.282 8.47a.5.5 0 0 1 0-.94l1.306-.478a7.492 7.492 0 0 0 4.464-4.464Z"/></svg>{% if not v %}unassessed{% endif %}</span>{% if n.recency and n.recency.text %}<span class="ai-verdict-desc">{{ n.recency.text }}</span>{% elif v and v.description %}<span class="ai-verdict-desc">{{ v.description }}</span>{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
                 {% if n.ai_uptodate %}
                 disabled
                 aria-disabled="true"
@@ -240,18 +240,19 @@
                 {% endif %}><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z"/></svg></button>
       </span>
     {% else %}
-      {# Manual mode — thread pill group, mirroring the AI split pill. Left
-         half = activity / state summary (headline + truncated subtext, full
-         breakdown on hover); clicking it opens the same timeline popover.
-         Right half = a note icon opening the per-thread note popover —
-         tinted with a hover preview when a note exists. #}
+      {# Manual mode — thread pill group, mirroring the AI split pill.
+         Left half = a muted comma-separated activity/state line; clicking
+         opens the timeline popover. The bold `placeholder` slot stays
+         empty except for the "never visited" case (the manual analogue
+         of AI mode's "unassessed"). Right half = a note icon opening the
+         per-thread note popover — tinted when a note exists. #}
       {% set tp = n.thread_pill %}
       <span class="thread-pill-group">
         <button type="button" class="thread-pill-main"
                 popovertarget="pop-timeline-{{ n.id }}"
                 style="anchor-name: --pop-timeline-{{ n.id }}"
-                {% if tp.tip %}data-tip="{{ tp.tip }}"{% endif %}
-                aria-label="Thread timeline"><span class="thread-pill-headline"><svg class="thread-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.75 2.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-6a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>{{ tp.headline or '' }}</span>{% if tp.subtext %}<span class="thread-pill-subtext">{{ tp.subtext }}</span>{% endif %}</button><button type="button" class="thread-note-btn{% if n.note_user %} has-note{% endif %}"
+                {% if tp.tip_html %}data-tip-html="{{ tp.tip_html|forceescape }}"{% endif %}
+                aria-label="Thread timeline"><span class="thread-pill-headline{% if tp.never_visited %} never-visited{% endif %}"><svg class="thread-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.75 2.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-6a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg></span>{% if tp.text %}<span class="thread-pill-subtext kind-{{ tp.text_kind }}">{{ tp.text }}</span>{% endif %}</button><button type="button" class="thread-note-btn{% if n.note_user %} has-note{% endif %}"
                 popovertarget="pop-item-{{ n.id }}"
                 style="anchor-name: --pop-item-{{ n.id }}"
                 data-tip="{{ n.note_user or 'Add a personal note' }}"

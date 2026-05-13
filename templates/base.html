@@ -854,7 +854,7 @@
       min-width: 0;
       display: flex;
       align-items: baseline;
-      gap: 0.7rem;
+      gap: 0.3rem;                /* icon → muted text; matches the AI pill */
       padding: 0.14rem 0.5rem;
       letter-spacing: 0.01em;
       border-right: 1px solid rgba(140, 149, 159, 0.55);  /* match the priority picker's band divider */
@@ -867,9 +867,13 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       font-weight: 400;
-      color: var(--pico-muted-color);
       pointer-events: none;       /* see .ai-verdict-desc — dodge Safari's clipped-text tooltip */
     }
+    /* Tri-state: bright = "new since visit"; amber = the user's note (matches
+       the note button's saved-note tint); muted = standing facts / fallback. */
+    .thread-pill-subtext.kind-activity { color: var(--pico-color); }
+    .thread-pill-subtext.kind-note     { color: var(--accent-amber); }
+    .thread-pill-subtext.kind-muted    { color: var(--pico-muted-color); }
     .thread-note-btn {
       display: inline-flex;
       align-items: center;
@@ -887,6 +891,12 @@
       margin-right: 0.3rem;
       vertical-align: -0.12em;
       color: var(--pico-muted-color);
+    }
+    /* Tinted on threads the user has never engaged with — parallel to AI
+       mode's "unassessed" word, but compact: same icon slot, accent color
+       carries the meaning. */
+    .thread-pill-headline.never-visited .thread-pill-icon {
+      color: var(--accent-amber);
     }
 
     /* Pulse the pill while an AI request is in flight on this row (Ask AI

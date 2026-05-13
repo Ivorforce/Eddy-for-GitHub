@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 
 from flask import Flask, Response, make_response, render_template, request
-from markupsafe import Markup
+from markupsafe import Markup, escape
 
 from . import ai, db, events, ghmd, github, settings
 
@@ -548,10 +548,6 @@ def _is_author(details: dict) -> bool:
     return (details.get("user") or {}).get("login") == user_login
 
 
-def _mentioned_since(seen: set[str]) -> bool:
-    return "mention" in seen or "team_mention" in seen
-
-
 _ACTION_LABELS = {
     "assigned": "Assigned",
     "review_you": "Review you",
@@ -587,50 +583,72 @@ _REASON_FALLBACK_LABELS = {
 }
 
 
-def _thread_pill(d: dict) -> dict:
-    """Activity / state summary for the manual-mode relevance pill: one
-    headline (the most action-defining signal), an optional truncated subtext
-    (the remaining signals, ' · '-joined), and an optional full-breakdown
-    tooltip. All derived from baseline diffs / current state — never from the
-    thread_events log — so the indicators persist across user actions.
+def _note_html(note: str | None) -> Markup | None:
+    """Plain-text note → HTML for the tooltip's top section. Newlines
+    become <br>. Notes have never been markdown-rendered elsewhere; keep
+    it that way so a stray `*` in a legacy note doesn't suddenly italicize."""
+    if not note:
+        return None
+    note = note.strip()
+    if not note:
+        return None
+    return Markup("<br>").join(escape(line) for line in note.splitlines())
 
-    Priority is action-defining over merely-blocking: "Review you" tells you
-    what to do; "Conflicts" only says something is broken (still listed in the
-    subtext). When nothing fires, fall back to the GitHub `reason` so the row
-    still shows why it's here; if even that is empty, headline is None and the
-    pill renders icon-only."""
-    # (rank, text)
-    candidates: list[tuple[int, str]] = []
 
+def _thread_pill(d: dict, recency: dict | None) -> dict:
+    """Build the manual-mode pill from the row + a `recency` dict (the
+    same `_recency_summary` output the AI pill uses, with last_engaged_at
+    as anchor and the note html as top section). Activity wins over the
+    standing take; standing take is note > merge_state > action_needed >
+    pr_review_state > reason fallback. Tooltip is taken straight from
+    `recency.tip_html` — note on top, "Since last visit: …" below the
+    hairline — exactly the shape the AI pill uses for its own description
+    + "Since this assessment: …" tooltip."""
+    never_visited = d.get("last_engaged_at") is None
+    activity_text = recency.get("text") if recency else None
+    tip_html = recency.get("tip_html") if recency else None
+
+    if activity_text:
+        return {
+            "never_visited": never_visited,
+            "text": activity_text,
+            "text_kind": "activity",
+            "tip_html": tip_html,
+        }
+
+    # No activity → the visible muted line shows the standing take.
+    note = (d.get("note_user") or "").strip()
+    if note:
+        line = note.splitlines()[0].strip()
+        if line:
+            label = f"{line[:40]}{'…' if len(line) > 40 else ''}"
+            return {
+                "never_visited": never_visited,
+                "text": label,
+                "text_kind": "note",
+                "tip_html": tip_html,
+            }
+
+    standing: list[str] = []
     merge = d.get("merge_state")
     if merge:
-        candidates.append((3 if merge[1] == "danger" else 5, merge[0]))
-
+        standing.append(merge[0])
     action = d.get("action_needed")
     if action:
-        candidates.append((1, _ACTION_LABELS[action]))
-
-    if d.get("mentioned_since"):
-        candidates.append((2, "Mentioned"))
-
+        standing.append(_ACTION_LABELS[action])
     rs = d.get("pr_review_state")
     if rs in _REVIEW_LABELS:
-        candidates.append((4, _REVIEW_LABELS[rs]))
-
-    interest = (d.get("meta") or {}).get("interest") or {}
-    new_c = interest.get("new_comments") or 0
-    if new_c:
-        candidates.append((6, f"+{new_c} comment{'' if new_c == 1 else 's'}"))
-
-    candidates.sort(key=lambda c: c[0])
-    texts = [t for _, t in candidates]
-    if not texts:
+        standing.append(_REVIEW_LABELS[rs])
+    if not standing:
         fallback = _REASON_FALLBACK_LABELS.get(d.get("reason") or "")
-        return {"headline": fallback or None, "subtext": None, "tip": None}
+        if fallback:
+            standing.append(fallback)
+
     return {
-        "headline": texts[0],
-        "subtext": " · ".join(texts[1:]) or None,
-        "tip": " · ".join(texts) if len(texts) > 1 else None,
+        "never_visited": never_visited,
+        "text": ", ".join(standing) if standing else None,
+        "text_kind": "muted",
+        "tip_html": tip_html,
     }
 
 
@@ -1153,6 +1171,15 @@ def _format_event_for_render(
     elif kind == "body_edit":
         out["actor"] = payload.get("editor") or "?"
         out["summary"] = "edited the description"
+    elif kind == "mention":
+        # A GitHub notification re-delivery whose reason was mention /
+        # team_mention. The comment that triggered it is already in the
+        # timeline (kind='comment'); this event just anchors *when* the
+        # mention landed so the pill can compare against the latest
+        # engagement.
+        out["actor"] = "GitHub"
+        team = (payload.get("reason") == "team_mention")
+        out["summary"] = "mentioned your team" if team else "mentioned you"
     elif kind == "priority_change":
         out["actor"] = "You"
         to_val = payload.get("to")
@@ -1175,14 +1202,21 @@ def _format_event_for_render(
 _VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat", "body_edit")
 
 
-def _recency_summary(rows, after: int, *, description_html) -> dict | None:
-    """Non-AI "what's landed since the last verdict" recap for the AI-mode
-    pill: GitHub activity (comments / reviews / lifecycle) with ts > `after`,
-    summarised type-by-type in importance order (reviews, lifecycle, comments).
-    None when there's nothing new — the pill segment is then absent. The hover
-    repeats the verdict's standing take (`description_html`) above the
-    breakdown so it reads as "the take, plus what's happened since."""
-    comments = reviews = 0
+def _recency_summary(
+    rows, after: int, *, description_html, since_prefix: str
+) -> dict | None:
+    """Shared by both pills: walks `thread_events` rows past the `after`
+    anchor (AI: last verdict ts; manual: last engagement ts), buckets the
+    activity by kind, and returns an inline `text` plus tooltip
+    `tip_html`. The hover is a structured two-section block — the
+    `description_html` (verdict description / user note) on top, then a
+    hairline, then `since_prefix` + the activity breakdown below.
+
+    Counts mentions, reviews (with state breakdown), lifecycle verbs,
+    body_edits, and comments — in importance order. Returns None when
+    there's no activity AND no description to show on top — i.e. the
+    tooltip would be empty."""
+    comments = reviews = mentions = body_edits = 0
     review_states: list[str] = []
     lifecycle_verbs: list[str] = []
     for r in rows:
@@ -1206,14 +1240,31 @@ def _recency_summary(rows, after: int, *, description_html) -> dict | None:
                 action = ""
             if action:
                 lifecycle_verbs.append(_LIFECYCLE_LABEL.get(action, (action, ""))[0])
-    if not (comments or reviews or lifecycle_verbs):
+        elif kind == "mention":
+            mentions += 1
+        elif kind == "body_edit":
+            body_edits += 1
+
+    has_activity = bool(comments or reviews or mentions or body_edits or lifecycle_verbs)
+    if not has_activity and not description_html:
         return None
+
+    desc_part = (
+        Markup('<div class="tip-recency-desc">{}</div>').format(description_html)
+        if description_html else Markup("")
+    )
+    if not has_activity:
+        # Description-only tooltip (top section, no hairline).
+        return {"text": None, "tip_html": desc_part}
 
     def _plural(n: int, noun: str) -> str:
         return f"+{n} {noun}{'' if n == 1 else 's'}"
 
     parts: list[str] = []        # inline pill text — plain counts
     detail: list[str] = []       # hover line — counts + review-state notes
+    if mentions:
+        parts.append("+ mentioned")
+        detail.append("+ mentioned")
     if reviews:
         parts.append(_plural(reviews, "review"))
         cr = sum(1 for s in review_states if s == "CHANGES_REQUESTED")
@@ -1225,17 +1276,17 @@ def _recency_summary(rows, after: int, *, description_html) -> dict | None:
     for verb in lifecycle_verbs:
         parts.append(verb)
         detail.append(verb)
+    if body_edits:
+        label = "description edited" if body_edits == 1 else f"{body_edits} description edits"
+        parts.append(label)
+        detail.append(label)
     if comments:
         parts.append(_plural(comments, "comment"))
         detail.append(_plural(comments, "comment"))
 
-    desc_part = (
-        Markup('<div class="tip-recency-desc">{}</div>').format(description_html)
-        if description_html else Markup("")
-    )
-    tip_html = desc_part + Markup('<div class="tip-recency-since">since the last assessment: {}</div>').format(
-        ", ".join(detail))
-    return {"text": " · ".join(parts), "tip_html": tip_html}
+    tip_html = desc_part + Markup('<div class="tip-recency-since">{}{}</div>').format(
+        since_prefix, ", ".join(detail))
+    return {"text": ", ".join(parts), "tip_html": tip_html}
 
 
 def _build_timeline(
@@ -1282,32 +1333,62 @@ def _build_timeline(
     return timeline
 
 
-def _attach_verdict_status(d: dict, conn: sqlite3.Connection) -> None:
-    """Mutate `d`: set `ai_uptodate` (drives the re-run button's enabled /
-    green state and the row's outdated border) and `recency` (the AI pill's
-    "+N reviews · +N comments since the last verdict" segment). Both derive
-    only from thread_events newer than the cached verdict — a cheap slice;
-    the full event list is fetched separately and lazily by _build_timeline."""
-    verdict = d.get("ai_verdict")
-    if not verdict:
-        # No assessment yet — "not up to date" so the trigger button invites
-        # the first Ask AI click; no verdict ⇒ no recency segment.
-        d["ai_uptodate"] = False
-        d["recency"] = None
-        return
-    after = verdict.get("at") or 0
+def _attach_pill_status(d: dict, conn: sqlite3.Connection) -> None:
+    """Per-row recency for both pills, plus the manual `thread_pill`. One
+    thread_events scan — sliced two ways via the two anchors. Cheap; the
+    full event list is fetched separately and lazily by _build_timeline.
+
+    Sets:
+      - `ai_uptodate`: drives the re-run button's enabled / green state
+        and the row's outdated border.
+      - `recency`: the AI pill's "Since this assessment: …" segment (or
+        the verdict description in the top section when nothing's new).
+      - `thread_pill`: the manual pill's content (activity bright, note
+        amber, standing facts muted; tooltip mirrors the AI shape with
+        "Since last visit: …")."""
     rows = conn.execute(
         """
         SELECT ts, kind, payload_json
           FROM thread_events
-         WHERE thread_id = ? AND ts > ?
+         WHERE thread_id = ?
          ORDER BY ts ASC, id ASC
         """,
-        (d["id"], after),
+        (d["id"],),
     ).fetchall()
-    has_new_context = any(r["kind"] in _VERDICT_INVALIDATING_KINDS for r in rows)
-    d["ai_uptodate"] = not verdict.get("stale") and not has_new_context
-    d["recency"] = _recency_summary(rows, after, description_html=verdict.get("description_html"))
+
+    verdict = d.get("ai_verdict")
+    if verdict:
+        after_v = verdict.get("at") or 0
+        has_new_context = any(
+            r["kind"] in _VERDICT_INVALIDATING_KINDS and r["ts"] > after_v
+            for r in rows
+        )
+        d["ai_uptodate"] = not verdict.get("stale") and not has_new_context
+        d["recency"] = _recency_summary(
+            rows, after_v,
+            description_html=verdict.get("description_html"),
+            since_prefix="Since this assessment: ",
+        )
+    else:
+        # No assessment yet — "not up to date" so the trigger button invites
+        # the first Ask AI click; no verdict ⇒ no recency segment.
+        d["ai_uptodate"] = False
+        d["recency"] = None
+
+    # Prefix is honest about the anchor: a never-visited row's "+5 comments"
+    # counts from the thread's first appearance locally, not from a visit
+    # that hasn't happened — so the tooltip says so.
+    since_prefix = (
+        "Since first notification: "
+        if d.get("last_engaged_at") is None
+        else "Since last visit: "
+    )
+    pill_recency = _recency_summary(
+        rows, d.get("last_engaged_at") or 0,
+        description_html=_note_html(d.get("note_user")),
+        since_prefix=since_prefix,
+    )
+    d["thread_pill"] = _thread_pill(d, pill_recency)
 
 
 def _ai_verdict_dict(
@@ -1395,6 +1476,8 @@ def _row_to_dict(
     notes_people: dict[str, str] | None = None,
     notes_repos: dict[str, str] | None = None,
     notes_orgs: dict[str, str] | None = None,
+    last_mention_at: int | None = None,
+    last_engaged_at: int | None = None,
 ) -> dict:
     d = dict(row)
     details_json = d.pop("details_json", None)
@@ -1463,7 +1546,15 @@ def _row_to_dict(
     d["bucket"] = None
     d["repo_owner"], d["repo_name"] = repo_owner, repo_name
     d["action_needed"] = _action_needed(details, repo_owner, d["reason"], seen)
-    d["mentioned_since"] = _mentioned_since(seen)
+    # Mention indicator is event-sourced via thread_events: a `mention` event
+    # lands per delivery with reason in (mention, team_mention); engagement
+    # events (visit, read_on_github, self-authored comment/review/body_edit)
+    # advance last_engaged_at. The "+ mentioned" pill fires only when a mention
+    # event is newer than the latest engagement. seen_reasons remains the
+    # accumulator for is_involved / _action_needed — those want "ever",
+    # mentioned_since wants "since the user last looked".
+    d["mentioned_since"] = (last_mention_at or 0) > (last_engaged_at or 0)
+    d["last_engaged_at"] = last_engaged_at
     d["is_author"] = _is_author(details)
     # "Involved" = directed at you or an active participant, by any reason
     # GitHub has ever delivered for this thread (current or accumulated), plus
@@ -1478,7 +1569,8 @@ def _row_to_dict(
     # (action or first ingest, baseline NULL means "never engaged").
     baseline_rs = d.pop("baseline_review_state", None)
     d["is_review_new"] = bool(d["pr_review_state"]) and d["pr_review_state"] != baseline_rs
-    d["thread_pill"] = _thread_pill(d)
+    # `thread_pill` is built later by _attach_pill_status — it needs the
+    # thread_events scan to derive the activity-since-visit recency.
 
     # Author info — pulled from cached details_json; null if not yet enriched.
     author = (details.get("user") or {}) if details else {}
@@ -1577,6 +1669,51 @@ def _row_to_dict(
     return d
 
 
+def _engagement_timestamps(
+    conn, thread_ids: list[str]
+) -> tuple[dict[str, int], dict[str, int]]:
+    """One batched scan of thread_events that returns
+    (last_mention_at, last_engaged_at) per thread_id. Empty dicts when the
+    input is empty or the user identity isn't known.
+
+    Engagement = the latest of: in-app visit, observed read-on-github,
+    self-authored comment / review / body_edit. Body_edit payloads use
+    `editor` for the author field (comments/reviews use `author`)."""
+    if not thread_ids:
+        return {}, {}
+    user_login: str | None = app.config.get("USER_LOGIN")
+    mention_at: dict[str, int] = {}
+    engaged_at: dict[str, int] = {}
+    placeholders = ",".join("?" * len(thread_ids))
+    cur = conn.execute(
+        f"SELECT thread_id, kind, ts, payload_json FROM thread_events "
+        f"WHERE thread_id IN ({placeholders}) "
+        f"  AND kind IN ('mention', 'user_action', 'comment', 'review', 'body_edit')",
+        thread_ids,
+    )
+    for r in cur:
+        tid, kind, ts = r["thread_id"], r["kind"], r["ts"]
+        if kind == "mention":
+            if ts > mention_at.get(tid, 0):
+                mention_at[tid] = ts
+            continue
+        try:
+            payload = json.loads(r["payload_json"]) if r["payload_json"] else {}
+        except (ValueError, TypeError):
+            payload = {}
+        engaged = False
+        if kind == "user_action":
+            engaged = payload.get("action") in ("visited", "read_on_github")
+        elif user_login:
+            if kind in ("comment", "review"):
+                engaged = payload.get("author") == user_login
+            elif kind == "body_edit":
+                engaged = payload.get("editor") == user_login
+        if engaged and ts > engaged_at.get(tid, 0):
+            engaged_at[tid] = ts
+    return mention_at, engaged_at
+
+
 def _load_notifications(show_archived: bool = True):
     """Load + hydrate notification rows for the table. `_filter_and_sort`
     remains the source of truth for visibility; `show_archived=False` just
@@ -1595,12 +1732,22 @@ def _load_notifications(show_archived: bool = True):
             f"SELECT {_ROW_COLS} FROM notifications {where}"
             "ORDER BY COALESCE(effective_updated_at, updated_at) DESC"
         ).fetchall()
-        out = [_row_to_dict(r, t_p, t_r, t_o, n_p, n_r, n_o) for r in rows]
+        mention_at, engaged_at = _engagement_timestamps(
+            conn, [r["id"] for r in rows]
+        )
+        out = [
+            _row_to_dict(
+                r, t_p, t_r, t_o, n_p, n_r, n_o,
+                last_mention_at=mention_at.get(r["id"]),
+                last_engaged_at=engaged_at.get(r["id"]),
+            )
+            for r in rows
+        ]
         # The timeline popover's event list is fetched lazily (GET /timeline
         # /<id> on open) — see _build_timeline. Eagerly attach only the cheap
         # verdict-derived bits the row itself shows (pill recency, re-run state).
         for d in out:
-            _attach_verdict_status(d, conn)
+            _attach_pill_status(d, conn)
         return out
     finally:
         conn.close()
@@ -1846,8 +1993,13 @@ def _load_one(thread_id: str) -> dict | None:
         ).fetchone()
         if not row:
             return None
-        d = _row_to_dict(row, t_p, t_r, t_o, n_p, n_r, n_o)
-        _attach_verdict_status(d, conn)
+        mention_at, engaged_at = _engagement_timestamps(conn, [row["id"]])
+        d = _row_to_dict(
+            row, t_p, t_r, t_o, n_p, n_r, n_o,
+            last_mention_at=mention_at.get(row["id"]),
+            last_engaged_at=engaged_at.get(row["id"]),
+        )
+        _attach_pill_status(d, conn)
         return d
     finally:
         conn.close()
@@ -2130,12 +2282,13 @@ def _apply_action(
     the snooze handler itself un-snoozes the row — but a caller can pass
     `snooze_until=<ts>` via `**state` to set it.
 
-    NOTE: baselines (baseline_comments, baseline_review_state) and seen_reasons
-    are intentionally NOT touched here. 'Since last looked' indicators persist
-    through Read so the user can see what they just handled; only fresh
-    notification activity (new comment count, new review state, new mention)
-    shifts them. Done/Unsub remove the row from view, so any staleness there
-    is invisible.
+    NOTE: baselines (baseline_comments, baseline_review_state,
+    mention_since_engaged) and seen_reasons are intentionally NOT touched
+    here. 'Since last looked' indicators persist through plain Read so the
+    user can see what they just handled. The `visited` engagement path
+    (above) calls github._clear_engagement_baselines separately, since
+    visiting *is* the "looked" event. Done/Unsub remove the row from view,
+    so any staleness there is invisible.
     """
     now = int(time.time())
     cols = {
@@ -2189,6 +2342,11 @@ def visit(thread_id: str):
         # _apply_action writes the thread_events row AND updates the
         # notifications columns; one-shot for the state-changing path.
         _apply_action(thread_id, "visited", unread=0, ignored=0)
+        conn = db.connect()
+        try:
+            github._clear_engagement_baselines(conn, thread_id)
+        finally:
+            conn.close()
     else:
         # Already in clean read state — log the visit alone, no
         # notifications.action overwrite (preserves any prior label
@@ -2203,6 +2361,7 @@ def visit(thread_id: str):
                 source="user",
                 payload={"action": "visited"},
             )
+            github._clear_engagement_baselines(conn, thread_id)
         finally:
             conn.close()
     return _render_row(_load_one(thread_id))
