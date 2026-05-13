@@ -486,9 +486,9 @@
     }
 
     /* actions — two rows on orthogonal axes:
-         Row 1 (segmented): Ignore | Snooze | Done — disposition while
+         Row 1 (segmented): Mark read | Snooze | Done — disposition while
            subscribed (left→right releases the user's commitment to
-           revisit). Green for "read but visible" (Ignore), amber for
+           revisit). Green for "read but visible" (Mark read), amber for
            "archived w/ timer" (Snooze; grey when also unsubscribed) and
            "archived" (Done).
          Row 2 (standalone toggles): Track · Mute · ▾ — subscription
@@ -692,7 +692,7 @@
     /* Purple dotted inset ring — the AI *suggests* this action / subscription
        change and the user hasn't done it yet. Dashed (not solid) so it reads
        as a hint, not a state. Goes on whichever Actions-column control matches
-       the verdict (Ignore / Done / Mute / Snooze / Track / the ▾ caret) and
+       the verdict (Mark read / Done / Mute / Snooze / Track / the ▾ caret) and
        composes with the control's own state styling (e.g. amber has-muted +
        ring). Cleared once it's in effect, so it always reads "act on this",
        never "undo this" or "this is special". outline (not box-shadow) to get

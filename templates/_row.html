@@ -364,7 +364,8 @@
   <td class="actions">
     {# Row 1 — disposition while subscribed (left→right releases the user's
        commitment to revisit):
-         Ignore — read but visible (unread=0, ignored=0, action not done/snoozed)
+         Mark read — read but visible (unread=0, ignored=0, action not done/snoozed);
+                     drops the row into the priority-sorted act-on-it queue.
          Snooze — archived w/ wake timer (action='snoozed'); the timer
                   guarantees a return — new activity brings it back sooner.
                   Quiet variant (popover checkbox) also unsubscribes for
@@ -400,8 +401,8 @@
               hx-target="closest tr"
               hx-swap="outerHTML"
               hx-include="#filters"
-              aria-label="Ignore"
-              title="Ignore — mark read, keep visible. Click again to mark unread (local only — GitHub API has no unread)."><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg></button>
+              aria-label="Mark read"
+              title="Mark read — drops the unread highlight; row stays in front of you. Click again to mark unread (local only — GitHub API has no unread)."><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">{% if is_ignored_active %}<path d="M7.467 2.21a.75.75 0 0 1 1.066 0L15 6.5H1L7.467 2.21ZM2.75 7.5A1.75 1.75 0 0 0 1 9.25v3A1.75 1.75 0 0 0 2.75 14h10.5A1.75 1.75 0 0 0 15 12.25v-3a1.75 1.75 0 0 0-1.75-1.75H2.75Z"/>{% else %}<path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2ZM1.5 12.251c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V5.809L8.38 9.397a.75.75 0 0 1-.76 0L1.5 5.809v6.442Zm13-8.181v-.32a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25v.32L8 7.88Z"/>{% endif %}</svg></button>
       {# Snooze — active variant wakes on click; trigger variant opens the
          duration popover and wears an inline ▾ disclosure (Done does not —
          only Snooze opens a menu). Active state shows amber fill (or grey
@@ -428,7 +429,7 @@
               hx-swap="outerHTML"
               hx-include="#filters"
               aria-label="Done"
-              title="Done — archive on GitHub. Hides from view; new activity resurfaces it. Click again (with Show archived on) to revert locally."><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v1.5A1.75 1.75 0 0 1 14.25 6H1.75A1.75 1.75 0 0 1 0 4.25ZM1.75 7a.75.75 0 0 1 .75.75v5.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-5.5a.75.75 0 0 1 1.5 0v5.5A1.75 1.75 0 0 1 13.25 15H2.75A1.75 1.75 0 0 1 1 13.25v-5.5A.75.75 0 0 1 1.75 7Zm0-4.5a.25.25 0 0 0-.25.25v1.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-1.5a.25.25 0 0 0-.25-.25ZM6.25 8h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1 0-1.5Z"/></svg></button>
+              title="Done — handled. Hides the row; new GitHub activity brings it back. (Snooze for a timer; Mute to never resurface.) Click again with Show archived on to revert locally."><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v1.5A1.75 1.75 0 0 1 14.25 6H1.75A1.75 1.75 0 0 1 0 4.25ZM1.75 7a.75.75 0 0 1 .75.75v5.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-5.5a.75.75 0 0 1 1.5 0v5.5A1.75 1.75 0 0 1 13.25 15H2.75A1.75 1.75 0 0 1 1 13.25v-5.5A.75.75 0 0 1 1.75 7Zm0-4.5a.25.25 0 0 0-.25.25v1.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-1.5a.25.25 0 0 0-.25-.25ZM6.25 8h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1 0-1.5Z"/></svg></button>
     </div>
     {% if not n.snooze_until %}
     {# `hx-vals js:` reads the checkbox at click time so all durations honour
