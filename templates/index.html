@@ -38,21 +38,40 @@
   {# Seed of a global-settings menu. Each toggle posts to /settings/* and
      flips its own checkmark client-side (the change affects future polls,
      not the current table — no swap needed). #}
-  <details class="dropdown options-menu">
+  {# data-ai-mode mirrors triage_mode so .ai-dependent rows can grey out
+     reactively without a server re-render. Updated client-side by the AI
+     triage mode toggle's after-request hook below. #}
+  <details class="dropdown options-menu" data-ai-mode="{{ 'on' if triage_mode == 'ai' else 'off' }}">
     <summary role="button" class="secondary outline">Options</summary>
     <ul>
+      <li class="options-section">AI</li>
       {# triage_mode swap re-renders the table (Relevance column content
          differs between modes); the row also flips its own checkmark on
-         success. Endpoint with no `mode` param toggles the current value. #}
+         success and pushes the new state to the dropdown's data-ai-mode so
+         AI-dependent rows below grey out. Endpoint with no `mode` param
+         toggles the current value. #}
       <li>
         <a href="#" class="options-toggle{% if triage_mode == 'ai' %} on{% endif %}"
            hx-post="/settings/triage_mode" hx-target="#notifications-table"
            hx-include="#filters"
-           hx-on::after-request="if (event.detail.successful) this.classList.toggle('on')"
+           hx-on::after-request="if (event.detail.successful) {
+             this.classList.toggle('on');
+             const menu = this.closest('.options-menu');
+             if (menu) menu.dataset.aiMode = this.classList.contains('on') ? 'on' : 'off';
+           }"
            title="An AI triages each thread — Relevance column shows its verdict">
           <span class="check" aria-hidden="true">✓</span> AI triage mode
         </a>
       </li>
+      <li class="ai-dependent">
+        <a href="#" class="options-toggle{% if ai_auto_judge %} on{% endif %}"
+           hx-post="/settings/ai_auto_judge" hx-swap="none"
+           hx-on::after-request="if (event.detail.successful) this.classList.toggle('on')"
+           title="AI auto-triggers for new notifications as they come in.">
+          <span class="check" aria-hidden="true">✓</span> AI auto-judge
+        </a>
+      </li>
+      <li class="options-section">Other</li>
       <li>
         <a href="#" class="options-toggle{% if quiet_bystanders %} on{% endif %}"
            hx-post="/settings/quiet_bystanders" hx-swap="none"

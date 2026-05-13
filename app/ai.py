@@ -39,7 +39,7 @@ from pathlib import Path
 
 import anthropic
 
-from . import db, github
+from . import db, github, settings
 
 log = logging.getLogger(__name__)
 
@@ -886,6 +886,19 @@ def _should_think(
     return not has_code_push
 
 
+# Event kinds that count as "new context the AI hasn't seen yet" — a verdict
+# made before any of these arrived is stale, and on first delivery any of
+# these mean the thread is worth a first verdict. Row-state user_actions
+# (read/done/mute) and `visited` are the user *responding* to a verdict, not
+# new context, so they don't count. Superset of `_THINKING_REQUIRED_KINDS` —
+# a code-only re-judgment is still invalidating, just runs thinking-off (the
+# fresh diff is already in the prompt). Mirrored on the web side by the
+# Re-ask button's enabled / outdated-border logic.
+VERDICT_INVALIDATING_KINDS = (
+    "comment", "review", "lifecycle", "user_chat", "body_edit", "code",
+)
+
+
 class AIError(RuntimeError):
     """Raised when judge() can't proceed.
     Routes catch this and surface via the existing showError HX-Trigger."""
@@ -1114,3 +1127,153 @@ def judge(
         payload={**verdict, "model": model},
     )
     return verdict
+
+
+# Per-pass safety cap. The daily $-cap is the real bound, but a fat eligible
+# list on first-enable could otherwise block the poll thread for minutes —
+# snooze wake and SSE fingerprint checks run in the same loop. Splitting
+# across passes keeps each iteration quick; the next pass picks up whatever
+# this one didn't get to.
+_AUTO_JUDGE_PER_PASS = 20
+
+
+def auto_judge_eligible(
+    conn: sqlite3.Connection,
+    *,
+    user_login: str | None = None,
+    user_teams=None,
+) -> int:
+    """Background pass: judge rows where the Re-assess button would be enabled
+    (stale or absent verdict + new invalidating activity), subject to the
+    `ai_auto_judge_since` watermark and the app's noise suppressors. Returns
+    the number of verdicts written.
+
+    Gated by `triage_mode='ai'` + `ai_auto_judge=True`; either off → no-op.
+    The watermark — set by `web._set_ai_auto_judge` on False→True — makes
+    the toggle prospective: existing un-judged history doesn't get swept on
+    enable. Two additional suppressors over Re-assess: rows currently
+    throttled (`throttle_until > now`) are skipped, and invalidating events
+    are only counted if their ts is past the most recent `absorbed`
+    user_action — so a muted-only re-delivery (`_apply_mute_filter`) doesn't
+    trigger a judgment, but a subsequent directed-reason delivery does.
+    Done / muted / snoozed / synthetic rows are *not* specially excluded:
+    Re-assess works on them, and the suppressors above plus the watermark
+    handle the cost-sensitive cases naturally.
+
+    Each `judge()` call is the same code path as a manual click; the daily
+    cap is enforced inside `judge()`. To avoid log-spamming cap_exceeded
+    rows we pre-check `_spent_today` once and bail before the loop, and
+    break the loop on the first cap_exceeded from `judge()`.
+
+    Safe to call from the poll thread — uses the connection it was passed,
+    no Flask request context required."""
+    if settings.get("triage_mode") != "ai":
+        return 0
+    if not settings.get("ai_auto_judge"):
+        return 0
+    raw_watermark = db.get_meta(conn, "ai_auto_judge_since")
+    if not raw_watermark:
+        return 0
+    try:
+        watermark = int(raw_watermark)
+    except (TypeError, ValueError):
+        log.warning("auto-judge: invalid ai_auto_judge_since=%r; skipping pass", raw_watermark)
+        return 0
+
+    cap = _daily_cap()
+    if _spent_today(conn) >= cap:
+        return 0
+
+    now = int(time.time())
+    kind_placeholders = ",".join("?" * len(VERDICT_INVALIDATING_KINDS))
+    # The inner EXISTS mirrors Re-assess's `ai_uptodate` predicate (event of
+    # an invalidating kind past `ai_verdict_at`) and adds two suppressors:
+    # the absorb-marker check (the event must be newer than the latest
+    # `absorbed` user_action, so muted-kinds re-deliveries don't qualify)
+    # and the watermark (prospective-only on toggle). Throttle is a
+    # row-level skip; muted/done/snoozed/synthetic intentionally aren't —
+    # they naturally don't accumulate post-verdict invalidating activity
+    # while in-state, and the absorb-marker check handles the one edge
+    # case (`_apply_mute_filter` keeping a Done row in Done). Newest
+    # bumped-row first so top-of-inbox gets verdicts before the cap trips.
+    rows = conn.execute(
+        f"""
+        SELECT n.id AS id
+          FROM notifications n
+         WHERE (n.throttle_until IS NULL OR n.throttle_until <= ?)
+           AND EXISTS (
+               SELECT 1 FROM thread_events te
+                WHERE te.thread_id = n.id
+                  AND te.kind IN ({kind_placeholders})
+                  AND te.ts > ?
+                  AND te.ts > COALESCE(n.ai_verdict_at, 0)
+                  AND te.ts > COALESCE((
+                      SELECT MAX(ab.ts) FROM thread_events ab
+                       WHERE ab.thread_id = n.id
+                         AND ab.kind = 'user_action'
+                         AND json_extract(ab.payload_json, '$.action') = 'absorbed'
+                  ), 0)
+           )
+         ORDER BY n.effective_updated_at DESC, n.updated_at DESC
+         LIMIT ?
+        """,
+        (now, *VERDICT_INVALIDATING_KINDS, watermark, _AUTO_JUDGE_PER_PASS),
+    ).fetchall()
+    if not rows:
+        return 0
+
+    judged = 0
+    for r in rows:
+        thread_id = r["id"]
+        # Re-check the predicate right before the call: a manual Ask AI may
+        # have judged this thread between the SELECT and now (no per-thread
+        # lock in `judge()`), and we don't want to double-spend.
+        current = conn.execute(
+            f"""
+            SELECT 1 FROM notifications n
+             WHERE n.id = ?
+               AND (n.throttle_until IS NULL OR n.throttle_until <= ?)
+               AND EXISTS (
+                   SELECT 1 FROM thread_events te
+                    WHERE te.thread_id = n.id
+                      AND te.kind IN ({kind_placeholders})
+                      AND te.ts > ?
+                      AND te.ts > COALESCE(n.ai_verdict_at, 0)
+                      AND te.ts > COALESCE((
+                          SELECT MAX(ab.ts) FROM thread_events ab
+                           WHERE ab.thread_id = n.id
+                             AND ab.kind = 'user_action'
+                             AND json_extract(ab.payload_json, '$.action') = 'absorbed'
+                      ), 0)
+               )
+             LIMIT 1
+            """,
+            (thread_id, now, *VERDICT_INVALIDATING_KINDS, watermark),
+        ).fetchone()
+        if not current:
+            continue
+        has_prior = conn.execute(
+            "SELECT ai_verdict_at FROM notifications WHERE id = ?",
+            (thread_id,),
+        ).fetchone()
+        mode = "re_evaluate" if (has_prior and has_prior["ai_verdict_at"]) else "summary"
+        try:
+            judge(
+                thread_id, conn,
+                user_login=user_login, user_teams=user_teams,
+                invocation_mode=mode,
+            )
+            conn.commit()
+            judged += 1
+        except AIError as e:
+            # cap_exceeded is the only AIError that should halt the pass —
+            # one row failing for any other reason (transient API error,
+            # missing context) shouldn't starve the rest. judge() already
+            # logged the call; we just decide whether to keep going.
+            if "cap" in str(e).lower():
+                log.info("auto-judge: daily cap reached after %d verdict(s)", judged)
+                break
+            log.warning("auto-judge: %s failed: %s", thread_id, e)
+        except Exception:
+            log.exception("auto-judge: %s crashed", thread_id)
+    return judged

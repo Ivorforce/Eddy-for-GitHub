@@ -1330,15 +1330,10 @@ def _format_event_for_render(
     return out
 
 
-# Event kinds that constitute "new context the AI hasn't seen" — a verdict
-# made before any of these arrived is out of date. Row-state user_actions
-# (read/done/mute) are the user's *response* to a verdict, not new context,
-# so they don't count; neither does `visited`. `code` is in the set: a push
-# can change scope ("small fix" → +500/-50) and the per-event diff totals
-# let a re-judgment reframe. Superset of ai._THINKING_REQUIRED_KINDS — a
-# code-only re-judgment invalidates the verdict but runs thinking-off (the
-# fresh diff is already in the prompt; no scratchpad to earn).
-_VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat", "body_edit", "code")
+# Canonical "new context the AI hasn't seen yet" set lives in ai.py — both
+# the Re-ask outdated-border logic here and `ai.auto_judge_eligible` read it
+# so the two paths agree on what counts as activity worth a fresh verdict.
+_VERDICT_INVALIDATING_KINDS = ai.VERDICT_INVALIDATING_KINDS
 
 
 def _recency_summary(
@@ -2026,6 +2021,29 @@ def _get_quiet_bystanders() -> bool:
     return settings.get("quiet_bystanders")
 
 
+def _get_ai_auto_judge() -> bool:
+    return settings.get("ai_auto_judge")
+
+
+def _set_ai_auto_judge(on: bool) -> bool:
+    """Persist the toggle and, on a False→True flip, stamp a fresh
+    `ai_auto_judge_since` watermark in `meta`. The watermark is what makes
+    the toggle *prospective*: `ai.auto_judge_eligible` only considers rows
+    whose latest invalidating activity is newer, so flipping on doesn't
+    sweep the historical un-judged pile. On True→False we leave the
+    watermark alone — the next on-flip overwrites it."""
+    was = _get_ai_auto_judge()
+    coerced = settings.set("ai_auto_judge", bool(on))
+    if coerced and not was:
+        conn = db.connect()
+        try:
+            db.set_meta(conn, "ai_auto_judge_since", str(int(time.time())))
+            conn.commit()
+        finally:
+            conn.close()
+    return coerced
+
+
 def _set_quiet_bystanders(on: bool) -> bool:
     coerced = settings.set("quiet_bystanders", bool(on))
     if not coerced:
@@ -2233,6 +2251,7 @@ def index():
         sort=f["sort"],
         triage_mode=_get_triage_mode(),
         quiet_bystanders=_get_quiet_bystanders(),
+        ai_auto_judge=_get_ai_auto_judge(),
         auto_refresh=_get_auto_refresh(),
         type_labels=TYPE_LABELS_LONG,
         action_labels=ACTION_FILTER_LABELS,
@@ -2273,6 +2292,22 @@ def thread_timeline(thread_id: str):
     finally:
         conn.close()
     return render_template("_timeline_list.html", timeline=timeline, thread_id=thread_id)
+
+
+@app.post("/settings/ai_auto_judge")
+def set_ai_auto_judge():
+    """Toggle background AI judgment on incoming activity. The change
+    affects future polls (and only while triage_mode is 'ai'), so 204 and
+    the dropdown row flips its own checkmark client-side."""
+    requested = (request.values.get("on") or "").strip().lower()
+    if requested in ("1", "true", "on"):
+        new = True
+    elif requested in ("0", "false", "off"):
+        new = False
+    else:
+        new = not _get_ai_auto_judge()
+    _set_ai_auto_judge(new)
+    return ("", 204)
 
 
 @app.post("/settings/quiet_bystanders")

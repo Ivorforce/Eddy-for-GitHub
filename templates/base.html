@@ -1534,6 +1534,16 @@
       padding: 0.5rem 0.5rem 0.15rem;
       pointer-events: none;
     }
+    /* Rows that only make sense while AI triage mode is on grey out and
+       become uninteractive when it isn't. Reactive via data-ai-mode on
+       .options-menu, which the triage_mode toggle's after-request hook
+       updates client-side. The toggle itself isn't .ai-dependent (it's
+       what flips the gate). */
+    .options-menu[data-ai-mode="off"] .ai-dependent .options-toggle {
+      opacity: 0.4;
+      pointer-events: none;
+      cursor: default;
+    }
 
     /* Status dot — green idle, orange pulsing while updating, red on error.
        Hover for details. Replaces the old hx-indicator-only spinner. */

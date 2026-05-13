@@ -51,6 +51,7 @@ SPEC: dict[str, tuple[Any, Callable[[Any], Any]]] = {
     "triage_mode": ("manual", _one_of("manual", "ai")),
     "auto_refresh": ("live", _one_of("live", "hourly", "daily", "manual")),
     "quiet_bystanders": (True, _bool),
+    "ai_auto_judge": (False, _bool),
 }
 
 DEFAULTS = {k: default for k, (default, _) in SPEC.items()}

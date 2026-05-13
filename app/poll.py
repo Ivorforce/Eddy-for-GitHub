@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 
-from . import db, events, github, settings
+from . import ai, db, events, github, settings
 
 log = logging.getLogger(__name__)
 
@@ -96,7 +96,14 @@ def _wake_snoozed(conn, token: str) -> int:
     return woke
 
 
-def run_loop(stop: threading.Event, token: str, wake_interval: int = WAKE_INTERVAL) -> None:
+def run_loop(
+    stop: threading.Event,
+    token: str,
+    *,
+    user_login: str | None = None,
+    user_teams=None,
+    wake_interval: int = WAKE_INTERVAL,
+) -> None:
     """Poll until `stop` is set. Failures are logged; the loop continues.
 
     Wakes every `wake_interval` seconds, reads the persisted `auto_refresh`
@@ -110,6 +117,10 @@ def run_loop(stop: threading.Event, token: str, wake_interval: int = WAKE_INTERV
     (`events.notify_if_changed`) run every wake regardless of mode — snoozes
     must fire on time even in manual mode, and a fingerprint that moves
     (e.g., a snooze auto-woke a thread) needs to push to connected clients.
+
+    `user_login` / `user_teams` flow through to `ai.auto_judge_eligible` so
+    the system prompt's identity block matches what the manual route uses.
+    Both default to None so a stripped-down caller (tests) still works.
     """
     force_full = True
     while True:
@@ -135,6 +146,22 @@ def run_loop(stop: threading.Event, token: str, wake_interval: int = WAKE_INTERV
                 # gate inside notify_if_changed makes this cheap on a no-op poll —
                 # no bump, no client refresh.
                 events.notify_if_changed(conn)
+                # Background AI judgment on rows with fresh activity, gated
+                # by triage_mode + ai_auto_judge inside auto_judge_eligible.
+                # A failure must not kill the loop — the next pass will pick
+                # up where this one left off.
+                try:
+                    n_judged = ai.auto_judge_eligible(
+                        conn, user_login=user_login, user_teams=user_teams,
+                    )
+                    if n_judged:
+                        log.info("auto-judge: %d verdict(s)", n_judged)
+                        # A burst of new verdicts changes what the table
+                        # would render — kick the fingerprint again so
+                        # connected clients refresh.
+                        events.notify_if_changed(conn)
+                except Exception:
+                    log.exception("auto-judge pass failed")
             finally:
                 conn.close()
         except Exception:

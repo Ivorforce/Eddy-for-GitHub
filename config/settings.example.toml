@@ -27,3 +27,12 @@ auto_refresh = "live"
 # and review/lifecycle activity are exempt. See `github._apply_throttle`.
 # Flippable: toolbar Options ▸ "Quiet bystanders".
 quiet_bystanders = true
+
+# AI auto-judge. When `true` *and* triage_mode is "ai", each poll runs the
+# AI verdict in the background on rows with new invalidating activity — no
+# need to click "Ask AI" per thread. Display-only: no suggestions are
+# auto-enacted. Prospective: turning it on stamps an `ai_auto_judge_since`
+# watermark in `meta`; only events after the watermark trigger a judgment,
+# so the existing un-judged pile isn't swept. Honors the daily AI cost cap.
+# Flippable: toolbar Options ▸ "AI auto-judge". See `ai.auto_judge_eligible`.
+ai_auto_judge = false

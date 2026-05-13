@@ -90,6 +90,7 @@ def main() -> int:
     poller = threading.Thread(
         target=poll.run_loop,
         args=(stop, token),
+        kwargs={"user_login": user_login, "user_teams": user_teams},
         daemon=True,
         name="poller",
     )
