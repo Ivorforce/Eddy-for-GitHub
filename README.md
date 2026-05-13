@@ -22,7 +22,19 @@ Revoke any time at https://github.com/settings/applications.
 
 Open http://127.0.0.1:5734.
 
-Headless / CI: set `GITHUB_TOKEN` in `.env` to skip the browser prompt.
+**Restricted orgs.** Some orgs require admin approval before an OAuth App
+can see their private repos or team data — when authorizing, you'll see a
+"Request" button beside them. Until an admin acts, Eddy is limited to
+those orgs' public repos. To skip the gate, set `GITHUB_TOKEN` to a token
+from a `gh` install the org has already approved (or a PAT with broader
+scopes):
+
+```bash
+GITHUB_TOKEN=$(gh auth token) python -m app run
+```
+
+Or paste the value into `.env` to persist it. The same env var doubles as
+the headless / CI escape hatch.
 
 ## Configuration
 
