@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 
-from . import db
+from . import db, settings
 
 API_NOTIFICATIONS = "https://api.github.com/notifications"
 API_SEARCH_ISSUES = "https://api.github.com/search/issues"
@@ -2014,9 +2014,9 @@ THROTTLE_WINDOW_SECONDS = 30 * 60
 
 
 def _quiet_bystanders_enabled(conn: sqlite3.Connection) -> bool:
-    """Whether the bystander-throttle toggle is on. Default on; only the
-    explicit string 'off' disables it."""
-    return (db.get_meta(conn, "quiet_bystanders") or "on").strip().lower() != "off"
+    """Whether the bystander-throttle toggle is on. Setting lives in
+    config/settings.toml; conn arg kept for call-site compatibility."""
+    return settings.get("quiet_bystanders")
 
 
 def drain_throttle_windows(conn: sqlite3.Connection) -> None:

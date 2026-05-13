@@ -1,0 +1,29 @@
+# Eddy settings. Copy to `config/settings.toml` and edit, or let the UI
+# populate it — anything you flip from the toolbar lands here. Defaults live
+# in `app/settings.py` (`DEFAULTS`); missing keys fall back silently, so this
+# file is documentation, not a required template.
+#
+# Hand-edits while the app runs pick up on the next read (mtime-watched).
+# UI writes rewrite the whole file and don't preserve comments — keep
+# annotations in this `.example` file, not your `settings.toml`.
+
+# Triage mode for the Relevance column.
+#   "manual" — rule-based activity/state pill
+#   "ai"     — AI verdict pill + composer in the timeline popover
+# Flippable: toolbar Options ▸ "AI triage mode".
+triage_mode = "manual"
+
+# Auto-poll cadence.
+#   "live"    — 5 min + tab-focus refresh (default)
+#   "hourly"  — wall-clock xx:00
+#   "daily"   — 04:00 local
+#   "manual"  — never auto-polls
+# Flippable: the status pill in the header.
+auto_refresh = "live"
+
+# Bystander throttle. When `true`, bursts of comment/code activity on a
+# thread you're only watching surface once, then a 30-min window freezes the
+# row's slot so it doesn't keep bumping. Directed reasons, tracked threads,
+# and review/lifecycle activity are exempt. See `github._apply_throttle`.
+# Flippable: toolbar Options ▸ "Quiet bystanders".
+quiet_bystanders = true

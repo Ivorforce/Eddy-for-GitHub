@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 
-from . import db, events, github
+from . import db, events, github, settings
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def run_loop(stop: threading.Event, token: str, wake_interval: int = WAKE_INTERV
         try:
             conn = db.connect()
             try:
-                mode = (db.get_meta(conn, "auto_refresh") or "live").strip()
+                mode = settings.get("auto_refresh")
                 last_poll_at = int(db.get_meta(conn, "last_poll_at") or "0")
                 now = int(time.time())
                 if _is_due(mode, last_poll_at, now):

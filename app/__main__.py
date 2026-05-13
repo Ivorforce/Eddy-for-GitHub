@@ -8,7 +8,37 @@ import threading
 
 from dotenv import load_dotenv
 
-from . import auth, db, poll, web
+from . import auth, db, poll, settings, web
+
+
+# One-shot migration: when settings.toml doesn't exist yet, seed it from any
+# `meta` rows we used to use as a key/value store for user toggles, then
+# delete those rows so the meta table goes back to runtime-state-only.
+# Coerce types here (everything in `meta` is TEXT) so settings.init's
+# validators see the right shape.
+_SETTINGS_META_KEYS = ("triage_mode", "auto_refresh", "quiet_bystanders")
+
+
+def _migrate_settings_from_meta() -> dict:
+    out: dict = {}
+    conn = db.connect()
+    try:
+        for k in _SETTINGS_META_KEYS:
+            v = db.get_meta(conn, k)
+            if v is None:
+                continue
+            v = v.strip()
+            if k == "quiet_bystanders":
+                out[k] = v.lower() != "off"
+            else:
+                out[k] = v
+        if out:
+            for k in _SETTINGS_META_KEYS:
+                db.set_meta(conn, k, None)
+            conn.commit()
+    finally:
+        conn.close()
+    return out
 
 
 def main() -> int:
@@ -19,6 +49,7 @@ def main() -> int:
     )
 
     db.init()
+    settings.init(meta_migrate=_migrate_settings_from_meta)
     token = auth.get_token()
     auth.check_scope(token)
 

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from flask import Flask, Response, make_response, render_template, request
 from markupsafe import Markup
 
-from . import ai, db, events, ghmd, github
+from . import ai, db, events, ghmd, github, settings
 
 log = logging.getLogger(__name__)
 
@@ -1640,80 +1640,48 @@ def _filters_from_request() -> dict:
     }
 
 
-# Triage mode (manual / ai) is a user setting, not a filter. It's stored
-# in `meta` so it persists across browser sessions and isn't entangled
-# with the filter URL — bookmarked filter views shouldn't pin a mode.
+# Triage mode (manual / ai), the quiet-bystanders toggle, and the
+# auto-refresh cadence all live in config/settings.toml — see app/settings.py
+# for the spec and migration. Kept as thin wrappers here so call sites read
+# the same way they used to.
 def _get_triage_mode() -> str:
-    conn = db.connect()
-    try:
-        mode = (db.get_meta(conn, "triage_mode") or "manual").strip()
-    finally:
-        conn.close()
-    return mode if mode in ("manual", "ai") else "manual"
+    return settings.get("triage_mode")
 
 
 def _set_triage_mode(mode: str) -> str:
-    if mode not in ("manual", "ai"):
-        mode = "manual"
-    conn = db.connect()
     try:
-        db.set_meta(conn, "triage_mode", mode)
-        conn.commit()
-    finally:
-        conn.close()
-    return mode
+        return settings.set("triage_mode", mode)
+    except ValueError:
+        return settings.set("triage_mode", "manual")
 
 
-# Quiet-bystanders throttle — see github._apply_throttle. Default on; only
-# the explicit string 'off' disables it.
 def _get_quiet_bystanders() -> bool:
-    conn = db.connect()
-    try:
-        return (db.get_meta(conn, "quiet_bystanders") or "on").strip().lower() != "off"
-    finally:
-        conn.close()
+    return settings.get("quiet_bystanders")
 
 
 def _set_quiet_bystanders(on: bool) -> bool:
-    conn = db.connect()
-    try:
-        db.set_meta(conn, "quiet_bystanders", "on" if on else "off")
-        if not on:
-            # Flush in-flight windows so the change is visible immediately
-            # rather than waiting for each thread's window to expire.
+    coerced = settings.set("quiet_bystanders", bool(on))
+    if not coerced:
+        # Flush in-flight windows so the change is visible immediately
+        # rather than waiting for each thread's window to expire.
+        conn = db.connect()
+        try:
             github.drain_throttle_windows(conn)
-        conn.commit()
-    finally:
-        conn.close()
-    return on
+            conn.commit()
+        finally:
+            conn.close()
+    return coerced
 
 
-# Auto-refresh cadence (live / hourly / daily / manual). Live is the default
-# 5-min server poll + tab-focus refresh; the others throttle the auto-fetch
-# rhythm to reduce the compulsive-check pull. See poll.run_loop for the
-# wall-clock alignment, and templates/base.html for the focus-refresh guard.
 AUTO_REFRESH_MODES = ("live", "hourly", "daily", "manual")
 
 
 def _get_auto_refresh() -> str:
-    conn = db.connect()
-    try:
-        mode = (db.get_meta(conn, "auto_refresh") or "live").strip()
-    finally:
-        conn.close()
-    return mode if mode in AUTO_REFRESH_MODES else "live"
+    return settings.get("auto_refresh")
 
 
 def _set_auto_refresh(mode: str) -> str:
-    if mode not in AUTO_REFRESH_MODES:
-        raise ValueError(f"invalid auto_refresh mode: {mode!r}")
-    conn = db.connect()
-    try:
-        db.set_meta(conn, "auto_refresh", mode)
-        conn.commit()
-    finally:
-        conn.close()
-    return mode
+    return settings.set("auto_refresh", mode)
 
 
 def _set_last_poll_at(epoch: int) -> None:
