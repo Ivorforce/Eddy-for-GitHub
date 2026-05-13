@@ -162,6 +162,59 @@
     .diff-stats { display: inline-flex; gap: 0.4rem; }
     .stat-add { color: var(--state-good-muted); }
     .stat-del { color: var(--state-bad-muted); }
+    /* Hover tooltip for .diff-stats: 3-col grid (path | +adds | −dels) so
+       the count columns line up across rows. Path dims its directory portion
+       and brightens the basename — GitHub-style "looks like a path" without
+       the cost of a real tree. */
+    .custom-tooltip .diff-tip-files {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      column-gap: 0.7rem;
+      row-gap: 0.15rem;
+      align-items: baseline;
+    }
+    /* Path is a flex row inside the grid cell. The dir prefix gets the
+       ellipsis (flex-shrink:1 + overflow), the basename stays whole
+       (flex-shrink:0) — same shape macOS Finder uses on a long path: lose
+       the prefix before the meaningful end. min-width:0 on the cell is
+       what lets the grid track actually shrink below content size. */
+    .custom-tooltip .diff-tip-path {
+      display: flex;
+      min-width: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    .custom-tooltip .diff-tip-dir {
+      opacity: 0.55;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      flex: 0 1 auto;
+    }
+    /* Trailing slash is its own non-shrinking span so a truncated dir still
+       reads as a path ("src/com…/foo.py" not "src/com…foo.py"). */
+    .custom-tooltip .diff-tip-sep {
+      opacity: 0.55;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    .custom-tooltip .diff-tip-base {
+      color: #fff;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    .custom-tooltip .diff-tip-files .stat-add,
+    .custom-tooltip .diff-tip-files .stat-del {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    .custom-tooltip .diff-tip-more {
+      grid-column: 1 / -1;
+      margin-top: 0.2rem;
+      opacity: 0.7;
+      font-style: italic;
+    }
     td.activity .activity-stats .stat { min-width: 2.5rem; }
     /* Item creation age — spans both grid columns as a header so the 2x2
        reactions/comments grid below stays clean. Color comes inline from a

@@ -370,8 +370,9 @@ def _format_meta(
         reception:  sentiment polarity (positive max, negative max)
         interest:   attention volume (comments + new, distinct-reacter approximation)
         top_files:  up to 5 most-changed files for diff-label hover tooltip
+        extra_files: count of changed files beyond top_files (0 when all fit)
     Each is None when not applicable so the pill hides."""
-    out = {"complexity": None, "reception": None, "interest": None, "top_files": None}
+    out = {"complexity": None, "reception": None, "interest": None, "top_files": None, "extra_files": 0}
     if not details_json:
         return out
     try:
@@ -398,6 +399,12 @@ def _format_meta(
         )[:5]
         if ranked:
             out["top_files"] = ranked
+            # `changed_files` is the PR's *total* file count; `files` may be
+            # truncated by the GraphQL cap. Fall back to len(files) so the
+            # "… and N more" footer still appears when we just over the cap
+            # but `changed_files` happens to be missing.
+            total = d.get("changed_files") or len(files)
+            out["extra_files"] = max(0, total - len(ranked))
 
     # Reactions: PRs come from the separately-fetched issue-form endpoint;
     # Issues already have them embedded in details_json.

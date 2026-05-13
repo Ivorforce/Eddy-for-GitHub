@@ -135,8 +135,17 @@
           <span class="category-pill" title="Discussion category">{{ n.category }}</span>
           {% endif %}
           {% if m.complexity %}
-            <span class="diff-stats"
-                  title="{% if m.top_files %}{% for f in m.top_files %}{{ f.filename }}  +{{ f.additions or 0 }}/−{{ f.deletions or 0 }}{% if not loop.last %}&#10;{% endif %}{% endfor %}{% else %}{{ m.complexity[0] }} lines added, {{ m.complexity[1] }} lines deleted{% endif %}">
+            {# Build the rich tooltip as a small HTML fragment. Dim-dir /
+               bright-basename styling and right-aligned colored counts make
+               the file list read as structure at a glance; the "… and N more"
+               footer (extra_files in _format_meta) closes the gap between the
+               top-5 cap and the PR's real changedFiles count. #}
+            {% if m.top_files %}
+              {% set diff_tip %}<div class="diff-tip"><div class="diff-tip-files">{% for f in m.top_files %}{% set parts = f.filename.rsplit('/', 1) %}<span class="diff-tip-path">{% if parts|length > 1 %}<span class="diff-tip-dir">{{ parts[0] }}</span><span class="diff-tip-sep">/</span>{% endif %}<span class="diff-tip-base">{{ parts[-1] }}</span></span><span class="stat-add">+{{ f.additions or 0 }}</span><span class="stat-del">−{{ f.deletions or 0 }}</span>{% endfor %}{% if m.extra_files %}<span class="diff-tip-more">… and {{ m.extra_files }} more</span>{% endif %}</div></div>{% endset %}
+            {% else %}
+              {% set diff_tip %}<div class="diff-tip"><div class="diff-tip-files"><span class="diff-tip-path"><span class="diff-tip-base">{{ m.complexity[0] }} lines added, {{ m.complexity[1] }} lines deleted</span></span></div></div>{% endset %}
+            {% endif %}
+            <span class="diff-stats" data-tip-html="{{ diff_tip|forceescape }}">
               <span class="stat-add">+{{ m.complexity[0] }}</span>
               <span class="stat-del">−{{ m.complexity[1] }}</span>
             </span>
