@@ -1203,7 +1203,8 @@ _VERDICT_INVALIDATING_KINDS = ("comment", "review", "lifecycle", "user_chat", "b
 
 
 def _recency_summary(
-    rows, after: int, *, description_html, since_prefix: str
+    rows, after: int, *, description_html, since_prefix: str,
+    user_login: str | None = None,
 ) -> dict | None:
     """Shared by both pills: walks `thread_events` rows past the `after`
     anchor (AI: last verdict ts; manual: last engagement ts), buckets the
@@ -1216,7 +1217,7 @@ def _recency_summary(
     body_edits, and comments — in importance order. Returns None when
     there's no activity AND no description to show on top — i.e. the
     tooltip would be empty."""
-    comments = reviews = mentions = body_edits = 0
+    comments = reviews = mentions = body_edits = user_comments = 0
     review_states: list[str] = []
     lifecycle_verbs: list[str] = []
     for r in rows:
@@ -1225,6 +1226,13 @@ def _recency_summary(
         kind = r["kind"]
         if kind == "comment":
             comments += 1
+            if user_login:
+                try:
+                    author = json.loads(r["payload_json"]).get("author")
+                except (ValueError, TypeError):
+                    author = None
+                if author == user_login:
+                    user_comments += 1
         elif kind == "review":
             reviews += 1
             try:
@@ -1281,8 +1289,9 @@ def _recency_summary(
         parts.append(label)
         detail.append(label)
     if comments:
-        parts.append(_plural(comments, "comment"))
-        detail.append(_plural(comments, "comment"))
+        label = "+ you commented" if user_comments == comments else _plural(comments, "comment")
+        parts.append(label)
+        detail.append(label)
 
     tip_html = desc_part + Markup('<div class="tip-recency-since">{}{}</div>').format(
         since_prefix, ", ".join(detail))
@@ -1377,6 +1386,7 @@ def _attach_pill_status(d: dict, rows: list) -> None:
       - `thread_pill`: the manual pill's content (activity bright, note
         amber, standing facts muted; tooltip mirrors the AI shape with
         "Since last visit: …")."""
+    user_login = app.config.get("USER_LOGIN")
     verdict = d.get("ai_verdict")
     if verdict:
         after_v = verdict.get("at") or 0
@@ -1389,6 +1399,7 @@ def _attach_pill_status(d: dict, rows: list) -> None:
             rows, after_v,
             description_html=verdict.get("description_html"),
             since_prefix="Since this assessment: ",
+            user_login=user_login,
         )
     else:
         # No assessment yet — "not up to date" so the trigger button invites
@@ -1408,6 +1419,7 @@ def _attach_pill_status(d: dict, rows: list) -> None:
         rows, d.get("last_engaged_at") or 0,
         description_html=_note_html(d.get("note_user")),
         since_prefix=since_prefix,
+        user_login=user_login,
     )
     d["thread_pill"] = _thread_pill(d, pill_recency)
 
