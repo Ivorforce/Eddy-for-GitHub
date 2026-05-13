@@ -34,9 +34,9 @@
     table { font-size: 0.86rem; }
     th, td { vertical-align: middle; }
     /* Pico's default td padding is ~1rem vertical, which sets the floor on
-       row height. Halve it so per-column padding-top overrides actually
+       row height. Tighten it so per-column padding-top overrides actually
        show up — bottom padding had been the hidden constraint. */
-    table td { padding: 0.45rem 0.5rem; }
+    table td { padding: 0.3rem 0.5rem; }
     /* Fixed width (a touch over the priority picker's min-width + cell
        padding): the column doesn't grow with content — the thread / AI
        pill's subtext ellipsizes to whatever fits. Keeps the title column
@@ -44,7 +44,6 @@
     td.status {
       white-space: normal;
       vertical-align: top;
-      padding-top: 0.3rem;
       width: 13.5rem;
       max-width: 13.5rem;
       line-height: 1.3;
@@ -64,7 +63,7 @@
       display: flex;
       align-items: stretch;
       gap: 0.55rem;
-      min-height: 2.45rem;
+      min-height: 2.2rem;
     }
     td.title .title-cell-body {
       flex: 1;
@@ -573,7 +572,7 @@
        The "active" segment is a filled tint, not an icon — the fill
        itself signals "you're here". Only one of the four hide-states
        (Done, Snooze, Mute, or none) is ever active at once. */
-    td.actions { white-space: nowrap; width: 1%; vertical-align: middle; }
+    td.actions { white-space: nowrap; width: 1%; vertical-align: top; }
     td.actions .action-group {
       display: flex;
       background: rgba(140, 149, 159, 0.08);
@@ -634,13 +633,13 @@
       display: flex;
       align-items: center;
       gap: 0.25rem;
-      margin-top: 0.15rem;
+      margin-top: 0.22rem;
     }
     td.actions .row2-btn {
       border: 1px solid var(--pico-muted-border-color);
       border-radius: 0.4rem;
       margin: 0;
-      padding: 0.13rem 0.39rem;
+      padding: 0.15rem 0.39rem;
       cursor: pointer;
       line-height: 1;
       color: var(--pico-muted-color);
@@ -690,7 +689,7 @@
        marks the partial-mute state (some kinds silenced), distinct from
        Mute's red. */
     td.actions .mute-caret-btn {
-      padding: 0.13rem 0.38rem;
+      padding: 0.15rem 0.38rem;
       font-size: 0.62rem;
     }
     td.actions .mute-caret-btn.has-muted {
@@ -851,7 +850,7 @@
     .ai-verdict-pill-group {
       display: flex;
       width: 100%;
-      margin: 0 0 0.25rem;
+      margin: 0 0 0.22rem;
       background: rgba(var(--ai-accent-rgb), 0.08);
       border: 1px solid rgba(var(--ai-accent-rgb), 0.30);
       border-radius: 0.4rem;
@@ -938,7 +937,7 @@
     .thread-pill-group {
       display: flex;
       width: 100%;
-      margin: 0 0 0.25rem;
+      margin: 0 0 0.22rem;
       background: rgba(140, 149, 159, 0.07);
       border: 1px solid var(--pico-muted-border-color);
       border-radius: 0.4rem;
@@ -1031,11 +1030,11 @@
     .priority-grid {
       display: grid;
       grid-template-columns: repeat(6, 1fr);
-      grid-template-rows: 1.25rem;
+      grid-template-rows: 1.15rem;
       min-width: 11rem;   /* keep cell pairs wide enough that the band labels
                              ("Medium" is the long one) fit on one line */
       max-width: 100%;
-      margin: 0.3rem 0 0;
+      margin: 0 0 0;
       background: rgba(140, 149, 159, 0.06);
       border: 1px solid var(--pico-muted-border-color);
       border-radius: 0.4rem;
