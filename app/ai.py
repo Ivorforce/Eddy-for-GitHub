@@ -521,7 +521,7 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
         SELECT id, repo, type, title, reason, html_url, link_url,
                updated_at, last_read_at, unread, ignored, action,
                is_tracked, muted_kinds,
-               details_json, seen_reasons,
+               details_json, details_fetched_at, seen_reasons,
                baseline_comments, baseline_review_state, pr_review_state,
                unique_commenters, unique_reviewers, pr_reactions_json
           FROM notifications WHERE id = ?
@@ -558,6 +558,12 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
         item["reactions"] = pr_reactions
     elif details.get("reactions"):
         item["reactions"] = details["reactions"]
+    # When this snapshot was taken — lets the prompt downweight in-flight
+    # fields (pending checks, unknown mergeable_state) as it ages.
+    if item and row["details_fetched_at"]:
+        item["fetched_at"] = datetime.fromtimestamp(
+            row["details_fetched_at"], tz=timezone.utc
+        ).isoformat().replace("+00:00", "Z")
 
     # New comments since baseline. baseline_comments is captured lazily on
     # first enrichment (see app/github.py); a delta here is "what's new
