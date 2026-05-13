@@ -156,8 +156,8 @@
                   {% if label.description %}title="{{ label.description }}"{% endif %}>{{ label.name }}</span>
           {% endfor %}
           {% if n.labels_extra %}
-            <span class="label-more"
-                  title="{% for l in n.labels_extra %}{{ l.name }}{% if not loop.last %}, {% endif %}{% endfor %}">+{{ n.labels_extra|length }} more</span>
+            {% set labels_tip %}<div class="labels-tip">{% for l in n.labels_extra %}<span class="label-pill" style="background:#{{ l.color }};color:{{ l.text_color }}">{{ l.name }}</span>{% endfor %}</div>{% endset %}
+            <span class="label-more" data-tip-html="{{ labels_tip|forceescape }}">+{{ n.labels_extra|length }} more</span>
           {% endif %}
           {% else %}
           <span class="meta-empty" title="No labels, diff, or category">no metadata</span>
