@@ -806,16 +806,6 @@ def _verdict_render_dict(
     description_html = _md(description)
     reply_html = _md(reply) if reply else Markup("")
     model = payload.get("model") or ""
-    # Collapsed (superseded) verdicts render as a thin line whose hover
-    # tooltip reproduces the bubble's hierarchy in miniature — see
-    # templates/_timeline_event.html / the .tip-verdict-* CSS in base.html.
-    tip_parts = [Markup('<span class="tip-verdict-tag">{} · {:.2f}</span>').format(
-        priority_level, priority_score)]
-    if reply:
-        tip_parts.append(Markup('<div class="tip-verdict-reply">{}</div>').format(reply_html))
-    tip_parts.append(Markup('<div class="tip-verdict-desc">{}</div>').format(description_html))
-    if model:
-        tip_parts.append(Markup('<div class="tip-verdict-model">{}</div>').format(model))
     return {
         "description":      description,
         "description_html": description_html,
@@ -824,7 +814,6 @@ def _verdict_render_dict(
         "priority_level": priority_level,
         "priority_score": priority_score,
         "model":          model,
-        "tip_html":       Markup("").join(tip_parts),
     }
 
 
@@ -952,23 +941,22 @@ def _mark_superseded_reviews(events: list[dict]) -> list[dict]:
     return events
 
 
-def _mark_superseded_verdicts(events: list[dict]) -> list[dict]:
-    """Flag every ai_verdict event except the most recent one. A verdict is
-    an opinion about the whole thread so far, not a fact like a comment —
-    later opinions supersede it. The template renders the survivor as a full
-    chat bubble and collapses the rest to a thin hover-line, so the timeline
-    stays readable when a thread gets judged repeatedly; the line's position
-    in the log also marks "AI last looked here". Mutates in place; returns
-    the list."""
-    last_idx = max(
-        (i for i, ev in enumerate(events) if ev.get("kind") == "ai_verdict"),
-        default=None,
-    )
-    if last_idx is not None:
-        for i, ev in enumerate(events):
-            if ev.get("kind") == "ai_verdict" and i != last_idx:
-                ev["verdict_superseded"] = True
-    return events
+def _drop_superseded_verdicts(events: list[dict]) -> list[dict]:
+    """Keep only the latest `ai_verdict` event in the rendered timeline. A
+    verdict is the AI's standing take as of its timestamp; earlier ones are
+    stale opinions, not facts. The DB keeps every verdict (a `skip` lands a
+    fresh row carrying the prior payload, so the survivor here ends up being
+    that row when nothing material has changed); the timeline pares to a
+    single bubble. Attaches `earlier_verdicts_count` to the survivor so the
+    bubble can show a small "↺ N" marker — an affordance signaling history
+    exists. Mutates the survivor in place; returns the filtered list."""
+    verdict_idxs = [i for i, ev in enumerate(events) if ev.get("kind") == "ai_verdict"]
+    if len(verdict_idxs) <= 1:
+        return events
+    last_idx = verdict_idxs[-1]
+    events[last_idx]["earlier_verdicts_count"] = len(verdict_idxs) - 1
+    drop = set(verdict_idxs[:-1])
+    return [ev for i, ev in enumerate(events) if i not in drop]
 
 
 def _coalesce_user_actions(events: list[dict]) -> list[dict]:
@@ -1273,13 +1261,20 @@ def _build_timeline(
         )
         for r in rows
     ]
+    # Order matters: every step that drops events runs before _coalesce_comments,
+    # so a "judge after every comment" or "click through, mark read, archive"
+    # workflow renders as one comment group rather than N chunks split around
+    # noise events. Recurring user_action dedup runs before the dismissal-streak
+    # coalesce so revert pairs (e.g. `done → undone`) become adjacent and cancel.
+    # _mark_superseded_reviews last — it expects comment groups already formed
+    # so the only reviews it sees are the state-bearing ones.
     timeline = _drop_close_after_merge(timeline)
-    timeline = _coalesce_comments(timeline)
+    timeline = _drop_superseded_verdicts(timeline)
     timeline = _coalesce_recurring_actions(timeline)
-    timeline = _coalesce_body_edits(timeline)
     timeline = _coalesce_user_actions(timeline)
+    timeline = _coalesce_body_edits(timeline)
+    timeline = _coalesce_comments(timeline)
     timeline = _mark_superseded_reviews(timeline)
-    timeline = _mark_superseded_verdicts(timeline)
     return timeline
 
 
