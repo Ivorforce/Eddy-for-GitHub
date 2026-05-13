@@ -12,7 +12,7 @@ Re-ask re-runs judge() with the prior verdict still visible in the
 timeline (mode=`re_evaluate`); chat re-runs it with the user's latest
 `user_chat` event appended (mode=`chat`). The cache is never auto-cleared.
 On a re-judgment the model can be economical: `judge_thread` with the
-standing fields (`action_now` / `priority_score` / `description`) omitted
+standing fields (`disposition` / `priority_score` / `description`) omitted
 to keep the last verdict's values, or — on a plain Re-ask — a single
 `skip` call that re-affirms the prior verdict wholesale. Either way
 `_save_verdict` stores the fully-merged result, so the cached verdict is
@@ -94,21 +94,21 @@ TOOL_DEF: dict = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "action_now": {
+            "disposition": {
                 "type": "string",
-                "enum": ["look", "ignore", "mute", "archive", "snooze", "snooze_quiet"],
+                "enum": ["look", "queue", "mute", "done", "snooze", "snooze_quiet"],
                 "description": (
-                    "What you suggest the user do — see system prompt §Output fields / §Cost asymmetry. "
-                    "Row stays visible for 'look' and 'ignore'; 'archive' / 'snooze' / 'snooze_quiet' / 'mute' hide it (back on activity / on the timer or activity / on the timer only / never). "
-                    "'look' (open the link and judge for themselves — the summary can't do the thread justice, or you can't tell if it's noise); "
-                    "'ignore' (mark read, keep the row visible — a live thread with nothing for them this minute; the right call over 'archive' whenever the row should stay in view); "
-                    "'archive' (the user's part is done and the next move, if any, is someone else's — and they're fine if nothing ever happens again; Done auto-resurfaces on new activity, so the ball coming back brings the row back. NOT 'park it for now'); "
+                    "How the row should be dealt with on the inbox-state axis — see system prompt §Output fields / §Cost asymmetry. "
+                    "Row stays visible for 'look' and 'queue'; 'done' / 'snooze' / 'snooze_quiet' / 'mute' hide it (back on activity / on the timer or activity / on the timer only / never). "
+                    "'look' (personal engagement required — the user must open the link before this row is handled, because the summary can't do the thread justice or you can't make a confident triage call without their eyes on it); "
+                    "'queue' (triaged, no personal engagement required — drops the row into the act-on-it queue marked read, at this priority); "
+                    "'done' (the user's part is done and the next move, if any, is someone else's — and they're fine if nothing ever happens again; Done auto-resurfaces on new activity, so the ball coming back brings the row back. NOT 'park it for now'); "
                     "'snooze' (the user's waiting on something and wants a nudge if it hasn't happened by ~snooze_days — a teammate's reply, a dated release, a review due before a meeting; new activity resurfaces it sooner); "
                     "'snooze_quiet' (the thread's a firehose — hide it AND unsubscribe for ~snooze_days, then it comes back re-subscribed for a fresh look; re-doing it each time is a periodic digest. New activity does NOT bring it back early — that's the point. For a flood where even subscription_changes wouldn't quiet it, or when there's just nothing to wait for); "
-                    "'mute' (the full opt-out — hides the row like 'archive' AND unsubscribes for good, never resurfaces; the 'I never want to see this again'). "
+                    "'mute' (the full opt-out — hides the row like 'done' AND unsubscribes for good, never resurfaces; the 'I never want to see this again'). "
                     "For 'quiet the churn but stay subscribed and visible' (a partial, ongoing filter) use `subscription_changes`, not this. "
-                    "All advisory — the user acts (or not) themselves, so don't agonise: when the call is clear, make it (including 'archive' on a finished thread and 'mute' on a plainly-irrelevant one). "
-                    "Only when you genuinely can't decide, lean toward the cheaper error: 'look'/'ignore' (row stays visible) over 'archive'/'snooze' (row hidden, but comes back) over 'snooze_quiet'/'mute' (hidden AND unsubscribed) — and don't 'archive' a thread where prolonged silence would matter ('snooze' it instead, which has the timer). "
+                    "All advisory — the user acts (or not) themselves, so don't agonise: when the call is clear, make it (including 'done' on a finished thread and 'mute' on a plainly-irrelevant one). "
+                    "Two tie-break axes for genuine uncertainty: on visibility, lean visible ('look' / 'queue') over hidden when unsure whether the row needs to stay in view; on engagement, lean 'look' over 'queue' when unsure whether the user's personal attention is required. Don't 'done' a thread where prolonged silence would matter — that's 'snooze''s timer. "
                     "On a re-judgment, may be omitted to keep your last verdict's value (see system prompt §Output fields)."
                 ),
             },
@@ -117,9 +117,9 @@ TOOL_DEF: dict = {
                 "minimum": 1,
                 "maximum": 90,
                 "description": (
-                    "With action_now 'snooze' or 'snooze_quiet': how many days (1-90) until the row should come back — "
+                    "With disposition 'snooze' or 'snooze_quiet': how many days (1-90) until the row should come back — "
                     "for 'snooze', when 'still waiting' should become 'go chase it' (e.g. a review the user awaits a teammate on, a release ~3 weeks out); "
-                    "for 'snooze_quiet', the gap between digests. Ignored for any other action_now."
+                    "for 'snooze_quiet', the gap between digests. Ignored for any other disposition."
                 ),
             },
             "set_tracked": {
@@ -138,7 +138,7 @@ TOOL_DEF: dict = {
                     "How urgently the user should deal with this thread, on a 0.0-1.0 scale. "
                     "See system prompt §Priority for the named bands each range maps to — "
                     "pick a value inside the band that fits, or between bands when it's on the edge. "
-                    "Independent of action_now: 0.9 + 'look' means 'leave it visible and flag it as urgent'. "
+                    "Independent of disposition: 0.9 + 'look' means 'leave it visible and flag it as urgent'. "
                     "On a re-judgment, may be omitted to keep your last verdict's value (see §Output fields)."
                 ),
             },
@@ -165,7 +165,7 @@ TOOL_DEF: dict = {
                 ),
             },
         },
-        "required": ["action_now", "set_tracked", "priority_score", "description"],
+        "required": ["disposition", "set_tracked", "priority_score", "description"],
     },
 }
 
@@ -194,7 +194,7 @@ def _build_tool_def(notif_type: str, muted_kinds, *, has_prior: bool) -> dict:
     when it's currently un-muted on the thread else `unmute_<kind>` (so the
     model can't emit a no-op); it's dropped entirely for types with no
     filterable activity (Release, CheckSuite, …). When `has_prior` — there's
-    a verdict in the timeline this re-judgment can fall back on — `action_now`,
+    a verdict in the timeline this re-judgment can fall back on — `disposition`,
     `priority_score` and `description` come out of `required`: omitting any of
     them keeps that field's value from the last verdict (see §Output fields).
     `set_tracked` stays required (it's your this-turn call on the track flag,
@@ -213,8 +213,8 @@ def _build_tool_def(notif_type: str, muted_kinds, *, has_prior: bool) -> dict:
             "description": (
                 "Forward-looking subscription tweaks for this thread — quiet (or resume) "
                 "individual activity kinds without unsubscribing. Use when one kind dominates "
-                "the churn and another carries the signal; pairs with `action_now: ignore` "
-                "(passive watcher) or `archive` (their part is done). Tokens reflect current "
+                "the churn and another carries the signal; pairs with `disposition: queue` "
+                "(passive watcher) or `done` (their part is over). Tokens reflect current "
                 "state; `mute_<kind>` stops those notifications going forward, `unmute_<kind>` "
                 "resumes them. See system prompt §Subscription tweaks."
             ),
@@ -237,7 +237,7 @@ def _read_system_prompt() -> str:
         log.warning("ai_system_prompt.md not found; using minimal fallback")
         return (
             "You are a GitHub notification triage assistant. "
-            "Call judge_thread exactly once with action_now, set_tracked, priority_score, description."
+            "Call judge_thread exactly once with disposition, set_tracked, priority_score, description."
         )
 
 
@@ -915,7 +915,7 @@ def judge(
     §Invocation modes). Defaults to `summary` for callers that don't supply it.
 
     On a re-judgment (a prior verdict exists) the model may omit
-    `action_now` / `priority_score` / `description` from `judge_thread` — the
+    `disposition` / `priority_score` / `description` from `judge_thread` — the
     merge fills them from `prior_verdict` — and in `re_evaluate` mode may call
     `skip` instead, which re-affirms the prior verdict unchanged. An inherited
     `priority_score` (and `skip`) won't clear a hand-set `priority_user`; a
@@ -1077,18 +1077,18 @@ def judge(
         # Fill omitted standing fields from the prior verdict — the schema
         # only drops them from `required` when `has_prior`, so this is the
         # AI's deliberate "keep my last value". `snooze_days` rides with
-        # `action_now`: inherited together if `action_now` is inherited
-        # (incl. either snooze flavour); if `action_now` is fresh, the model
+        # `disposition`: inherited together if `disposition` is inherited
+        # (incl. either snooze flavour); if `disposition` is fresh, the model
         # supplies `snooze_days` alongside.
         if has_prior:
-            for k in ("action_now", "priority_score", "description", "snooze_days"):
+            for k in ("disposition", "priority_score", "description", "snooze_days"):
                 if k not in verdict and k in prior_verdict:
                     verdict[k] = prior_verdict[k]
         # A fresh priority_score reclaims the displayed priority; an inherited
         # one leaves a user pin alone (see _save_verdict).
         reclaim_priority = "priority_score" in raw
 
-    missing = {"action_now", "set_tracked", "priority_score", "description"} - verdict.keys()
+    missing = {"disposition", "set_tracked", "priority_score", "description"} - verdict.keys()
     if missing:
         raise _fail(f"Verdict missing fields: {sorted(missing)}")
 

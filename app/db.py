@@ -328,6 +328,46 @@ UPDATE ai_calls      SET thread_id = rtrim(thread_id, '=') WHERE thread_id LIKE 
 """
 
 
+# action_now → disposition: `action_now` named *the user's action axis* but
+# read as if the AI's verdict were a command on the AI itself ("ignore this");
+# `disposition` is the legal/medical-records sense — "how the row is dealt
+# with" — and matches the value set (look / queue / done / snooze / mute) as
+# states the row enters, not orders to follow. Value renames sharpen the
+# two-workflow framing the prompt now leans on: `ignore` → `queue` (row exits
+# triage and enters the priority-sorted act-on-it queue, not "dismiss this");
+# `archive` → `done` (already the user_action token and UI label — was the
+# odd one out). Rewrites the cached verdict on every row plus every prior
+# `ai_verdict` event the AI sees on re-judgment; `ai_calls` stays as-is —
+# those are immutable audit records of the API exchange as it happened.
+SCHEMA_V30 = """
+UPDATE notifications
+   SET ai_verdict_json = json_set(
+         json_remove(ai_verdict_json, '$.action_now'),
+         '$.disposition',
+         CASE json_extract(ai_verdict_json, '$.action_now')
+           WHEN 'ignore'  THEN 'queue'
+           WHEN 'archive' THEN 'done'
+           ELSE json_extract(ai_verdict_json, '$.action_now')
+         END
+       )
+ WHERE ai_verdict_json IS NOT NULL
+   AND json_extract(ai_verdict_json, '$.action_now') IS NOT NULL;
+
+UPDATE thread_events
+   SET payload_json = json_set(
+         json_remove(payload_json, '$.action_now'),
+         '$.disposition',
+         CASE json_extract(payload_json, '$.action_now')
+           WHEN 'ignore'  THEN 'queue'
+           WHEN 'archive' THEN 'done'
+           ELSE json_extract(payload_json, '$.action_now')
+         END
+       )
+ WHERE kind = 'ai_verdict'
+   AND json_extract(payload_json, '$.action_now') IS NOT NULL;
+"""
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, isolation_level=None, check_same_thread=False)
@@ -457,6 +497,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V29)
             _set_version(conn, 29)
             version = 29
+        if version < 30:
+            conn.executescript(SCHEMA_V30)
+            _set_version(conn, 30)
+            version = 30
     finally:
         conn.close()
 

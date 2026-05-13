@@ -1483,19 +1483,19 @@ def _ai_verdict_dict(
         verdict = json.loads(verdict_json)
     except (ValueError, TypeError):
         return None
-    action_now = verdict.get("action_now") or "look"
+    disposition = verdict.get("disposition") or "look"
     set_tracked = verdict.get("set_tracked") or "leave"
 
     priority_level, priority_score = _verdict_priority(verdict)
 
     # snooze_days rides with either snooze flavour; validate it to the route's
     # accepted range so the picker shortcut can post it safely. snooze_quiet
-    # (action_now == "snooze_quiet") pre-checks the "unsubscribe while snoozed"
+    # (disposition == "snooze_quiet") pre-checks the "unsubscribe while snoozed"
     # toggle in the snooze popover (the user can still untick it).
-    is_snooze = action_now in ("snooze", "snooze_quiet")
+    is_snooze = disposition in ("snooze", "snooze_quiet")
     sd = verdict.get("snooze_days")
     snooze_days = sd if (is_snooze and isinstance(sd, int) and 1 <= sd <= 90) else None
-    snooze_quiet = action_now == "snooze_quiet"
+    snooze_quiet = disposition == "snooze_quiet"
 
     age_text = _humanize_age(int(time.time()) - at)
 
@@ -1524,9 +1524,9 @@ def _ai_verdict_dict(
 
     return {
         "verdict":         verdict,
-        "action_now":      action_now,
-        "snooze_days":     snooze_days,   # None unless action_now is a snooze flavour
-        "snooze_quiet":    snooze_quiet,  # True iff action_now == "snooze_quiet"
+        "disposition":     disposition,
+        "snooze_days":     snooze_days,   # None unless disposition is a snooze flavour
+        "snooze_quiet":    snooze_quiet,  # True iff disposition == "snooze_quiet"
         "set_tracked":     set_tracked,
         "priority_level":  priority_level,
         "priority_score":  priority_score,
@@ -1692,7 +1692,7 @@ def _row_to_dict(
             + [f"unmute {_MUTE_KIND_LABEL.get(k, k).lower()}" for k in us]
         )
 
-        # action_now / set_tracked surface as a purple ring on the matching
+        # disposition / set_tracked surface as a purple ring on the matching
         # Actions-column button — but only while the suggestion isn't already
         # in effect (so the ring always reads "do this", never "undo this").
         # `look` has no button (its affordance is the title link), so it never
@@ -1700,16 +1700,16 @@ def _row_to_dict(
         # the row is snoozed (either flavour) we stop nagging; the quiet/loud
         # distinction surfaces as the pre-checked "unsubscribe" toggle inside
         # the popover (av["snooze_quiet"]), not the ring.
-        action = av["action_now"]
-        action_in_effect = {
-            "ignore":  (not d["unread"]) and (not d["ignored"])
+        disposition = av["disposition"]
+        in_effect = {
+            "queue":   (not d["unread"]) and (not d["ignored"])
                        and d["action"] not in ("done", "snoozed"),
-            "archive": d["action"] == "done" and not d["ignored"],
+            "done":    d["action"] == "done" and not d["ignored"],
             "mute":    d["action"] == "done" and bool(d["ignored"]),
             "snooze":       bool(d.get("snooze_until")),
             "snooze_quiet": bool(d.get("snooze_until")),
-        }.get(action, True)  # 'look' / unknown → treat as "nothing to ring"
-        av["action_pending"] = action if not action_in_effect else None
+        }.get(disposition, True)  # 'look' / unknown → treat as "nothing to ring"
+        av["action_pending"] = disposition if not in_effect else None
         st = av["set_tracked"]
         track_in_effect = (st == "track" and bool(d["is_tracked"])) \
             or (st == "untrack" and not d["is_tracked"]) \
