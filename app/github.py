@@ -2127,9 +2127,13 @@ def _get_paginated(
     last_modified: str | None,
     max_pages: int = MAX_PAGES_PER_FETCH,
     use_cache: bool = True,
-) -> tuple[list[dict[str, Any]], str | None, int]:
+) -> tuple[list[dict[str, Any]], str | None, int, bool]:
     """GET /notifications with optional If-Modified-Since + page cap.
-    Returns (items, new_last_modified, status). status=304 means no changes.
+    Returns (items, new_last_modified, status, truncated). status=304 means
+    no changes; truncated is True when the page cap was reached AND the last
+    response still advertised a `next` Link — callers that rely on
+    "missing-from-response → mark read" reconciliation need it to know
+    whether their "missing" set is authoritative.
     Pass use_cache=False to skip the conditional header — needed when the
     caller wants a guaranteed re-pull even if the feed's Last-Modified
     matches the bookmark (manual refresh repairing a local desync)."""
@@ -2138,7 +2142,7 @@ def _get_paginated(
         headers["If-Modified-Since"] = last_modified
     r = _session.get(API_NOTIFICATIONS, headers=headers, params=params, timeout=30)
     if r.status_code == 304:
-        return [], last_modified, 304
+        return [], last_modified, 304, False
     r.raise_for_status()
     new_last_modified = r.headers.get("Last-Modified", last_modified)
     items: list[dict[str, Any]] = list(r.json())
@@ -2149,7 +2153,8 @@ def _get_paginated(
         r.raise_for_status()
         items.extend(r.json())
         pages += 1
-    return items, new_last_modified, 200
+    truncated = "next" in r.links and pages >= max_pages
+    return items, new_last_modified, 200, truncated
 
 
 def _fetch_unread(
@@ -2171,16 +2176,17 @@ def _fetch_unread(
     Auto-poll caps the response at ~100 items (PER_PAGE * MAX_PAGES_PER_FETCH);
     a forced fetch goes deeper, capped at ~1000 (PER_PAGE * MAX_PAGES_FORCED),
     matching expectations: auto-refresh stays cheap, manual refresh / app
-    launch is thorough. On a user with thousands of unreads we still only see
-    the most recent window — the "missing from response → mark read" sweep
-    restricts itself to that window (updated_at >= the oldest seen item) so
-    we never wipe long-tail unreads we simply didn't fetch. Deeper
-    reconciliation is a Backfill case."""
+    launch is thorough. When the response wasn't truncated, the "missing
+    from response → mark read" sweep flips every locally-unread row that
+    isn't in the response. When it was (user has more unreads than the
+    cap), the sweep restricts itself to the window we actually covered
+    (updated_at >= the oldest seen item) so we never wipe long-tail unreads
+    we simply didn't fetch. Deeper reconciliation is a Backfill case."""
     last_modified = (
         db.get_meta(conn, "last_modified_unread")
         or db.get_meta(conn, "last_modified")  # fallback to legacy single-key
     )
-    items, new_last_modified, status = _get_paginated(
+    items, new_last_modified, status, truncated = _get_paginated(
         token, {"per_page": PER_PAGE}, last_modified,
         max_pages=MAX_PAGES_FORCED if force else MAX_PAGES_PER_FETCH,
         use_cache=not force,
@@ -2201,25 +2207,23 @@ def _fetch_unread(
         _upsert(conn, item, now, touched)
 
     # Items previously unread but missing from the response were read elsewhere.
-    # Restrict the sweep to the window we actually covered (updated_at >=
-    # oldest seen) so a page-capped response on a huge unread list doesn't
-    # silently wipe the long tail. Skip rows the user explicitly kept-unread.
-    if seen_ids and oldest_seen:
-        placeholders = ",".join(["?"] * len(seen_ids))
-        conn.execute(
-            f"UPDATE notifications SET unread=0 "
-            f"WHERE unread=1 "
-            f"AND COALESCE(action, '') != 'kept_unread' "
-            f"AND id NOT IN ({placeholders}) "
-            f"AND updated_at >= ?",
-            (*seen_ids, oldest_seen),
-        )
-    elif not seen_ids:
-        # Empty response → GitHub has no unreads at all; safe to wipe.
-        conn.execute(
-            "UPDATE notifications SET unread=0 "
-            "WHERE unread=1 AND COALESCE(action, '') != 'kept_unread'"
-        )
+    # Skip rows the user has explicitly kept-unread locally. When the response
+    # was truncated (we hit the page cap and github had more), restrict the
+    # sweep to the time window we actually covered so the long tail we didn't
+    # fetch isn't silently wiped to read.
+    placeholders = ",".join(["?"] * len(seen_ids)) if seen_ids else ""
+    where = ["unread = 1", "COALESCE(action, '') != 'kept_unread'"]
+    args: list[Any] = []
+    if seen_ids:
+        where.append(f"id NOT IN ({placeholders})")
+        args.extend(seen_ids)
+    if truncated and oldest_seen:
+        where.append("updated_at >= ?")
+        args.append(oldest_seen)
+    conn.execute(
+        f"UPDATE notifications SET unread = 0 WHERE {' AND '.join(where)}",
+        tuple(args),
+    )
 
     if new_last_modified:
         db.set_meta(conn, "last_modified_unread", new_last_modified)
@@ -2278,7 +2282,7 @@ def _fetch_combined(
                 db.get_meta(conn, "last_modified_combined")
                 or db.get_meta(conn, "last_modified_all")
             )
-    items, new_last_modified, status = _get_paginated(
+    items, new_last_modified, status, _ = _get_paginated(
         token, params, last_modified, max_pages=1
     )
     if status == 304:
