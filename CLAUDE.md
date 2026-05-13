@@ -77,7 +77,7 @@ In **AI mode**, the verdict's suggestions show as purple inset rings on the matc
 
 **Introspecting one item.** The SQLite DB is `data/notifications.db`. To see exactly what the AI saw and thought for a given thread, look up its `notifications` row by `html_url` (or `id`), then read `ai_calls` for that `thread_id` — `request_json` is the assembled prompt, `response_json` has the model's thinking blocks and tool call.
 
-**Default model:** Haiku 4.5. Configurable via `AI_MODEL`. The system prompt + preferences sit at ~3k tokens after the timeline-interpretation section — still below Haiku's 4096-token cache minimum, so `cache_control` markers don't fire today; they're forward-compatible once preferences grow.
+**Default model:** Haiku 4.5. Configurable via `AI_MODEL`. The system prompt + preferences sit well past Haiku's 4096-token cache minimum, so `cache_control` markers on both fire routinely — typical cached prefix is ~10-12K tokens; cache hits read at 10× cheaper than fresh input. Misses are the 5-min ephemeral TTL expiring between bursts.
 
 **Thinking budget.** Extended thinking (~4k-token budget) on every judgment *except* one case: a Re-ask whose details were re-enriched since the cached verdict (a code push / metadata churn) with no new `comment`/`review`/`lifecycle`/`user_chat`/`body_edit` — that runs thinking-off with `tool_choice` forced (mutually exclusive on the API), since the fresh file list / diff stats / `last_commit` are already in the prompt. A Re-ask with *nothing* new since the verdict still thinks — the pill's rerun is greyed then, so reaching for the popover's "↻ Re-ask" signals "I want a deeper take". Thinking is ~40% of a cache-warm call's cost. See `ai._should_think` / `_THINKING_REQUIRED_KINDS`.
 

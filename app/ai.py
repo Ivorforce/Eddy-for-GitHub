@@ -19,11 +19,11 @@ to keep the last verdict's values, or — on a plain Re-ask — a single
 always complete (and the next re-judgment inherits from a complete base).
 
 Caching note: the system block is split into [system_prompt, prefs] with
-ephemeral cache_control on both. Haiku 4.5's minimum cacheable prefix is
-4096 tokens, so caching only fires once the user's preferences grow large
-enough to push the combined prefix past that bar. The markers are
-forward-compatible — the plumbing is there, the savings show up
-automatically once the prefix qualifies. See ai_calls.cache_read_tokens.
+ephemeral cache_control on both. The system prompt alone sits comfortably
+past Haiku 4.5's 4096-token cache minimum, so caching fires routinely —
+the cached prefix is ~10-12K tokens, cache hits read at 10× cheaper than
+fresh input. Cache misses are the 5-min ephemeral TTL expiring between
+bursts of re-asks. See ai_calls.cache_read_tokens / cache_creation_tokens.
 """
 from __future__ import annotations
 
