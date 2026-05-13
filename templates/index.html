@@ -49,7 +49,7 @@
            hx-post="/settings/triage_mode" hx-target="#notifications-table"
            hx-include="#filters"
            hx-on::after-request="if (event.detail.successful) this.classList.toggle('on')"
-           title="AI triage mode: the Relevance column shows the AI's per-thread verdict (look / queue / done / snooze / mute) instead of the rule-based activity summary.">
+           title="An AI triages each thread — Relevance column shows its verdict">
           <span class="check" aria-hidden="true">✓</span> AI triage mode
         </a>
       </li>
