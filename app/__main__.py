@@ -8,7 +8,7 @@ import threading
 
 from dotenv import load_dotenv
 
-from . import auth, db, github, oauth, poll, settings, web
+from . import ai, auth, db, github, oauth, poll, settings, web
 
 
 # One-shot migration: when settings.toml doesn't exist yet, seed it from any
@@ -50,6 +50,14 @@ def main() -> int:
 
     db.init()
     settings.init(meta_migrate=_migrate_settings_from_meta)
+    # AI triage needs an Anthropic API key (no third-party OAuth exists);
+    # without one, force manual so the UI stays consistent with what we can
+    # actually do. Re-checked at launch only — the user adds the key, restarts.
+    if settings.get("triage_mode") == "ai" and not ai.has_api_key():
+        logging.getLogger(__name__).warning(
+            "ANTHROPIC_API_KEY missing — falling back to manual triage mode"
+        )
+        settings.set("triage_mode", "manual")
     token = auth.get_token()
     if not auth.check_scope(token):
         # Stored token was revoked or its scopes were tightened on github.com.

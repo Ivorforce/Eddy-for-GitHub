@@ -1539,10 +1539,15 @@
        .options-menu, which the triage_mode toggle's after-request hook
        updates client-side. The toggle itself isn't .ai-dependent (it's
        what flips the gate). */
-    .options-menu[data-ai-mode="off"] .ai-dependent .options-toggle {
+    .options-menu[data-ai-mode="off"] .ai-dependent .options-toggle,
+    .options-toggle.disabled {
       opacity: 0.4;
-      pointer-events: none;
       cursor: default;
+    }
+    /* Keep the cursor + visual disabled, but allow hover so the tooltip
+       (explaining *why* it's disabled) still surfaces. */
+    .options-menu[data-ai-mode="off"] .ai-dependent .options-toggle {
+      pointer-events: none;
     }
 
     /* Status dot — green idle, orange pulsing while updating, red on error.

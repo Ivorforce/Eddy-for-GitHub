@@ -58,6 +58,14 @@ DEFAULT_MAX_TOKENS = 8192
 DEFAULT_THINKING_BUDGET = 4000
 DEFAULT_DAILY_CAP_USD = 2.0
 
+
+def has_api_key() -> bool:
+    """Cheap gate for the AI triage UI / launch check. Presence only —
+    a wrong/expired key still passes here and surfaces on first judge as
+    the usual red-toast AIError. Anthropic has no third-party OAuth, so
+    the key has to be supplied as `ANTHROPIC_API_KEY` (typically in .env)."""
+    return bool((os.environ.get("ANTHROPIC_API_KEY") or "").strip())
+
 # Event kinds that, arriving since the last verdict, mark a re-judgment as
 # substantive — there's new discussion / state / a reframed body to weigh, so
 # it gets a thinking pass. The *only* no-thinking re-judgment is one with none

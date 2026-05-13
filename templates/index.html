@@ -50,7 +50,13 @@
          success and pushes the new state to the dropdown's data-ai-mode so
          AI-dependent rows below grey out. Endpoint with no `mode` param
          toggles the current value. #}
+      {# When ANTHROPIC_API_KEY is missing, the toggle is rendered disabled
+         (no hx-post, no after-request hook) with a tooltip explaining why.
+         Anthropic has no third-party OAuth, so the key has to come from the
+         environment — at app launch we also force triage_mode → manual when
+         the key is absent, so this state is internally consistent. #}
       <li>
+        {% if ai_key_present %}
         <a href="#" class="options-toggle{% if triage_mode == 'ai' %} on{% endif %}"
            hx-post="/settings/triage_mode" hx-target="#notifications-table"
            hx-include="#filters"
@@ -62,6 +68,13 @@
            title="An AI triages each thread — Relevance column shows its verdict">
           <span class="check" aria-hidden="true">✓</span> AI triage mode
         </a>
+        {% else %}
+        <a href="#" class="options-toggle disabled" aria-disabled="true"
+           onclick="event.preventDefault()"
+           title="Set ANTHROPIC_API_KEY in .env to enable AI triage.">
+          <span class="check" aria-hidden="true">✓</span> AI triage mode
+        </a>
+        {% endif %}
       </li>
       <li class="ai-dependent">
         <a href="#" class="options-toggle{% if ai_auto_judge %} on{% endif %}"

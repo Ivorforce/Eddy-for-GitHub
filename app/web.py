@@ -2250,6 +2250,7 @@ def index():
         filters=f,
         sort=f["sort"],
         triage_mode=_get_triage_mode(),
+        ai_key_present=ai.has_api_key(),
         quiet_bystanders=_get_quiet_bystanders(),
         ai_auto_judge=_get_ai_auto_judge(),
         auto_refresh=_get_auto_refresh(),
@@ -2346,18 +2347,30 @@ def set_triage_mode():
     """Persist the Relevance-column mode (manual vs ai) and re-render the
     table so the per-row Relevance cells reflect the change. The toggle row
     in the toolbar's Options menu flips its own checkmark client-side. Body
-    field 'mode' is optional — when omitted, flip the current value."""
+    field 'mode' is optional — when omitted, flip the current value.
+
+    Defense-in-depth: refuse to flip to 'ai' without a usable key. The UI
+    gate already disables the toggle in that case, but the POST shouldn't
+    trust the client."""
     requested = (request.values.get("mode") or "").strip()
     new_mode = requested if requested in ("manual", "ai") else (
         "manual" if _get_triage_mode() == "ai" else "ai"
     )
+    error: str | None = None
+    if new_mode == "ai" and not ai.has_api_key():
+        new_mode = "manual"
+        error = "AI triage requires ANTHROPIC_API_KEY in .env."
     _set_triage_mode(new_mode)
     f = _filters_from_request()
     rows = _filter_and_sort(_load_notifications(f["show_archived"]), f)
-    return render_template(
+    body = render_template(
         "_table.html", notifications=rows, error=None, filters=f, sort=f["sort"],
         triage_mode=new_mode,
     )
+    response = make_response(body, 200)
+    if error:
+        response.headers["HX-Trigger"] = json.dumps({"showError": {"message": error}})
+    return response
 
 
 def _table_response(error: str | None) -> "Response":

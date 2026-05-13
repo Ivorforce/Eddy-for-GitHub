@@ -10,6 +10,9 @@
 # Triage mode for the Relevance column.
 #   "manual" — rule-based activity/state pill
 #   "ai"     — AI verdict pill + composer in the timeline popover
+# The "ai" mode requires `ANTHROPIC_API_KEY` in the environment (typically
+# in a local `.env`); without it the UI toggle is disabled and launch falls
+# back to "manual".
 # Flippable: toolbar Options ▸ "AI triage mode".
 triage_mode = "manual"
 
