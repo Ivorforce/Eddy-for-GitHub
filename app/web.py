@@ -197,6 +197,10 @@ _PRIORITY_BANDS = (
     (1.01, "urgent"),
 )
 PRIORITY_LEVELS = tuple(name for _, name in _PRIORITY_BANDS)
+# Where unassessed rows sort in priority order: just under the routine band, so
+# they beat irrelevant + minor (the user has signalled "don't bother") but lose
+# to anything explicitly pinned routine-or-above. Stored nowhere — sort key only.
+_UNASSESSED_SORT_SCORE = 0.29
 _PRIORITY_LEVEL_SCORE = {
     "irrelevant": 0.05, "minor": 0.20, "routine": 0.40,
     "normal":     0.57, "high":  0.75, "urgent":  0.93,
@@ -1771,16 +1775,17 @@ def _filter_and_sort(rows: list[dict], f: dict) -> list[dict]:
         ]
     if f["sort"] == "priority":
         # Highest effective priority first (user pin, else AI verdict — see
-        # _row_to_dict); rows with no assessment yet sink to the bottom
-        # rather than rank as zero. Ties — rare for AI floats, routine among
+        # _row_to_dict). Unassessed rows sort as if scored just below routine
+        # (_UNASSESSED_SORT_SCORE) — they beat irrelevant + minor but lose to
+        # anything explicitly pinned routine-or-above; presumed-low rather
+        # than sunk to the bottom. Ties — rare for AI floats, routine among
         # the six user-pin values — break by actionable-to-you (assigned /
         # review-requested / mentioned), then most-recently-updated. Two
         # stable passes: the recency pass below is preserved within each
         # (score, actionable) group by the main sort.
         rows.sort(key=_eff_updated, reverse=True)
         rows.sort(key=lambda r: (
-            r["priority_score"] is None,
-            -(r["priority_score"] or 0.0),
+            -(r["priority_score"] if r["priority_score"] is not None else _UNASSESSED_SORT_SCORE),
             not (r["action_needed"] or r["mentioned_since"]),
         ))
     elif f["sort"] == "engaged":
