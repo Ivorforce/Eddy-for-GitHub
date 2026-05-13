@@ -1867,16 +1867,21 @@
     // not from the first SSE message — handles the race where a poll lands
     // between page render and EventSource open: the first message's seq
     // would then be > N, and the comparison below triggers a catch-up.
-    let lastSeenSeq = parseInt(document.body.dataset.eventSeq || "0", 10);
-    const sse = new EventSource("/events");
-    sse.addEventListener("message", (e) => {
-      const seq = parseInt(e.data, 10);
-      if (Number.isNaN(seq)) return;
-      if (seq <= lastSeenSeq) return;
-      lastSeenSeq = seq;
-      const target = document.querySelector("#notifications-table");
-      if (!target) return;
-      htmx.ajax("GET", "/list", { source: "#filters", target, swap: "innerHTML" });
+    // Wrapped in DOMContentLoaded because this script runs in <head>, before
+    // <body> is parsed — `document.body` is null until the parser reaches it,
+    // and a bare access here threw, aborting the rest of the script.
+    document.addEventListener("DOMContentLoaded", () => {
+      let lastSeenSeq = parseInt(document.body.dataset.eventSeq || "0", 10);
+      const sse = new EventSource("/events");
+      sse.addEventListener("message", (e) => {
+        const seq = parseInt(e.data, 10);
+        if (Number.isNaN(seq)) return;
+        if (seq <= lastSeenSeq) return;
+        lastSeenSeq = seq;
+        const target = document.querySelector("#notifications-table");
+        if (!target) return;
+        htmx.ajax("GET", "/list", { source: "#filters", target, swap: "innerHTML" });
+      });
     });
 
     // Plain-left-click on a popover trigger toggles its popover. Modifier
