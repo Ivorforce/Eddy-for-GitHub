@@ -1489,7 +1489,8 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
 def fetch_release(token: str, api_url: str | None) -> dict | None:
     """REST fetch for a Release. Returns a payload shaped to slot into the
     same details_json path as Issues (html_url / created_at / user /
-    reactions) so popularity + age pills read it without branching.
+    reactions) so popularity + age pills read it without branching, plus
+    name / tag_name / body / prerelease / draft for the AI context.
 
     Releases use REST not GraphQL because the GraphQL release(tagName: …)
     lookup needs the tag name, and the notification subject only carries
@@ -1514,6 +1515,11 @@ def fetch_release(token: str, api_url: str | None) -> dict | None:
             "avatar_url": user.get("avatar_url"),
         },
         "reactions": rel.get("reactions"),
+        "name": rel.get("name"),
+        "tag_name": rel.get("tag_name"),
+        "body": rel.get("body"),
+        "prerelease": rel.get("prerelease"),
+        "draft": rel.get("draft"),
     }
 
 

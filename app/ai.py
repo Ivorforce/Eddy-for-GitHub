@@ -343,6 +343,10 @@ def _summarize_details(d: dict, subject_type: str) -> dict:
         out["review_threads"] = d.get("review_threads")
     if subject_type == "Discussion":
         out["category"] = d.get("category")
+    if subject_type == "Release":
+        out["name"] = d.get("name")
+        out["tag_name"] = d.get("tag_name")
+        out["prerelease"] = d.get("prerelease")
     # Comment + review bodies are no longer summarized here — they're
     # first-class events in `timeline` (see _load_timeline / thread_events).
     body = d.get("body") or ""
