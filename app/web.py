@@ -836,21 +836,36 @@ def _verdict_render_dict(
 _COMMENT_COALESCE_GAP_SECS = 30 * 86400
 
 
-def _coalesce_visits(events: list[dict]) -> list[dict]:
-    """Keep only the most-recent `visited` user_action in the whole timeline.
-    Repeated link-clicks all carry the same payload, so older ones are
-    redundant noise that pushes the composer down; the latest one — in its
-    true chronological slot — is what answers "what's happened since I last
-    looked here?". The AI still sees every visit (raw thread_events); this
-    only thins the visual popover. Events arrive chronologically, so the
-    last `visited` in the list is the newest."""
-    def is_visit(ev: dict) -> bool:
-        return (
-            ev.get("kind") == "user_action"
-            and (ev.get("payload") or {}).get("action") == "visited"
-        )
-    keep = max((i for i, ev in enumerate(events) if is_visit(ev)), default=None)
-    return [ev for i, ev in enumerate(events) if i == keep or not is_visit(ev)]
+# user_action kinds that repeat verbatim every activity round — clicking
+# through to GitHub again, hitting Mark read again, archiving again. The
+# latest occurrence carries the current state; earlier ones are noise. They
+# each survive in their true chronological slot, just deduped to one. Not
+# listed here: `muted` / `snoozed`, which are stickier states whose paired
+# revert events (`unmuted` / `unsnoozed` / `woken`) tell a real story; and
+# the dismissal reverts themselves, which only matter as part of an
+# adjacent streak (handled by _coalesce_user_actions).
+_RECURRING_ACTIONS = {"visited", "done", "read", "read_on_github"}
+
+
+def _coalesce_recurring_actions(events: list[dict]) -> list[dict]:
+    """For each action in _RECURRING_ACTIONS, keep only its latest occurrence
+    in the whole timeline. The AI still sees every occurrence (raw
+    thread_events); this only thins the visual popover. Events arrive
+    chronologically, so the last occurrence per kind is the newest."""
+    latest_idx: dict[str, int] = {}
+    for i, ev in enumerate(events):
+        if ev.get("kind") != "user_action":
+            continue
+        action = (ev.get("payload") or {}).get("action")
+        if action in _RECURRING_ACTIONS:
+            latest_idx[action] = i
+    keep = set(latest_idx.values())
+    def is_superseded(i: int, ev: dict) -> bool:
+        if ev.get("kind") != "user_action":
+            return False
+        action = (ev.get("payload") or {}).get("action")
+        return action in _RECURRING_ACTIONS and i not in keep
+    return [ev for i, ev in enumerate(events) if not is_superseded(i, ev)]
 
 
 def _coalesce_body_edits(events: list[dict]) -> list[dict]:
@@ -858,8 +873,8 @@ def _coalesce_body_edits(events: list[dict]) -> list[dict]:
     other event of any kind between them). Each one says "the description
     changed"; only the most recent matters — its `at` and `editor` describe
     the body the AI / the user is now looking at, and the in-between states
-    are gone (we never kept them). Unlike _coalesce_visits this only
-    collapses *adjacent* runs — a body_edit is informative in its slot
+    are gone (we never kept them). Unlike _coalesce_recurring_actions this
+    only collapses *adjacent* runs — a body_edit is informative in its slot
     between activity, an old visit isn't."""
     out: list[dict] = []
     for ev in events:
@@ -1260,7 +1275,7 @@ def _build_timeline(
     ]
     timeline = _drop_close_after_merge(timeline)
     timeline = _coalesce_comments(timeline)
-    timeline = _coalesce_visits(timeline)
+    timeline = _coalesce_recurring_actions(timeline)
     timeline = _coalesce_body_edits(timeline)
     timeline = _coalesce_user_actions(timeline)
     timeline = _mark_superseded_reviews(timeline)
