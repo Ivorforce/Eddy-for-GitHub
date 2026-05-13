@@ -19,7 +19,8 @@ API_SEARCH_ISSUES = "https://api.github.com/search/issues"
 # assignee / commenter / mentioned).
 _SEARCH_SCOPES = {"authored": "author:@me", "involved": "involves:@me"}
 PER_PAGE = 50
-MAX_PAGES_PER_FETCH = 2  # ~100 items per fetch — bound poll cost
+MAX_PAGES_PER_FETCH = 2  # ~100 items per fetch — bound auto-poll cost
+MAX_PAGES_FORCED = 20    # ~1000 items on a manual refresh / app launch
 ENRICHMENT_PER_POLL = 20
 
 log = logging.getLogger(__name__)
@@ -2165,37 +2166,56 @@ def _fetch_unread(
     manual refresh whenever the unread feed's Last-Modified matches our
     bookmark — even when local state is desynced — because GitHub's
     Last-Modified reflects the most recent unread item, not whether local
-    truth matches."""
+    truth matches.
+
+    Auto-poll caps the response at ~100 items (PER_PAGE * MAX_PAGES_PER_FETCH);
+    a forced fetch goes deeper, capped at ~1000 (PER_PAGE * MAX_PAGES_FORCED),
+    matching expectations: auto-refresh stays cheap, manual refresh / app
+    launch is thorough. On a user with thousands of unreads we still only see
+    the most recent window — the "missing from response → mark read" sweep
+    restricts itself to that window (updated_at >= the oldest seen item) so
+    we never wipe long-tail unreads we simply didn't fetch. Deeper
+    reconciliation is a Backfill case."""
     last_modified = (
         db.get_meta(conn, "last_modified_unread")
         or db.get_meta(conn, "last_modified")  # fallback to legacy single-key
     )
     items, new_last_modified, status = _get_paginated(
-        token, {"per_page": PER_PAGE}, last_modified, use_cache=not force
+        token, {"per_page": PER_PAGE}, last_modified,
+        max_pages=MAX_PAGES_FORCED if force else MAX_PAGES_PER_FETCH,
+        use_cache=not force,
     )
     if status == 304:
         return 0
 
     now = int(time.time())
     seen_ids: set[str] = set()
+    oldest_seen: str | None = None
     for item in items:
         if not item.get("id"):
             continue
         seen_ids.add(item["id"])
+        u = item.get("updated_at") or ""
+        if u and (oldest_seen is None or u < oldest_seen):
+            oldest_seen = u
         _upsert(conn, item, now, touched)
 
     # Items previously unread but missing from the response were read elsewhere.
-    # Skip rows where the user has explicitly kept-unread locally.
-    if seen_ids:
+    # Restrict the sweep to the window we actually covered (updated_at >=
+    # oldest seen) so a page-capped response on a huge unread list doesn't
+    # silently wipe the long tail. Skip rows the user explicitly kept-unread.
+    if seen_ids and oldest_seen:
         placeholders = ",".join(["?"] * len(seen_ids))
         conn.execute(
             f"UPDATE notifications SET unread=0 "
             f"WHERE unread=1 "
             f"AND COALESCE(action, '') != 'kept_unread' "
-            f"AND id NOT IN ({placeholders})",
-            tuple(seen_ids),
+            f"AND id NOT IN ({placeholders}) "
+            f"AND updated_at >= ?",
+            (*seen_ids, oldest_seen),
         )
-    else:
+    elif not seen_ids:
+        # Empty response → GitHub has no unreads at all; safe to wipe.
         conn.execute(
             "UPDATE notifications SET unread=0 "
             "WHERE unread=1 AND COALESCE(action, '') != 'kept_unread'"
@@ -2209,23 +2229,57 @@ def _fetch_unread(
 
 
 def _fetch_combined(
-    conn: sqlite3.Connection, token: str, touched: list | None = None
+    conn: sqlite3.Connection, token: str, touched: list | None = None,
+    force: bool = False,
 ) -> int:
-    """Fetch the 100 most-recently-updated notifications (read or unread) in
-    a single GET. Each item carries its own `unread` flag, so _upsert
-    reconciles local read-state for everything in this window. If-Modified-
-    Since gives the quiet-poll path a cheap 304.
+    """Fetch up to 100 recent notifications (read or unread). Each item
+    carries its own `unread` flag, so _upsert reconciles local read-state
+    for everything the response contains. Always bounded to one page (100
+    items); deeper history goes through Backfill.
 
-    This replaces the previous unread + since-bookmark pair for the auto-
-    refresh path. The dedicated `/notifications` (unread-only) call still
-    exists for the rarer reconciliation case where a locally-unread item
-    sits outside the latest-100 window — see _has_unread_outside_window."""
-    last_modified = (
-        db.get_meta(conn, "last_modified_combined")
-        or db.get_meta(conn, "last_modified_all")  # legacy single-key fallback
-    )
+    Three modes:
+
+    - **Forced** (manual refresh, app launch) → conditional with
+      `If-Modified-Since` against `last_modified_combined`. The companion
+      forced unread fetch handles read-state reconciliation independently,
+      so combined's only job is to surface new items / activity bumps. A
+      cheap 304 when nothing's changed since the last successful poll.
+
+    - **Auto-poll with unreads** → `?since=<earliest_unread.updated_at>`,
+      no conditional. Filters the response to items whose activity could
+      intersect a locally-unread row; the feed's Last-Modified tracks
+      activity not `last_read_at`, so a 304 would hide silent reads
+      (clicked through on github / mobile with no comment) on rows whose
+      activity hasn't moved. With many unreads spanning a long window the
+      response is still page-capped to 100 — `_has_unread_outside_window`
+      routes the tail to the dedicated unread fetch.
+
+    - **Auto-poll with zero unreads** → conditional same as forced.
+      In-window reconciliation has no work to do, so the 304 is fine.
+
+    Uncaught case in the non-forced paths: user marks-unread on github.com
+    without new activity. Rare; recoverable via manual refresh."""
+    params: dict[str, str | int] = {"per_page": 100, "all": "true"}
+    last_modified = None
+    if force:
+        last_modified = (
+            db.get_meta(conn, "last_modified_combined")
+            or db.get_meta(conn, "last_modified_all")  # legacy single-key fallback
+        )
+    else:
+        earliest_unread = conn.execute(
+            "SELECT MIN(NULLIF(updated_at, '')) AS u FROM notifications "
+            "WHERE unread = 1 AND COALESCE(action, '') != 'kept_unread'"
+        ).fetchone()["u"]
+        if earliest_unread:
+            params["since"] = earliest_unread
+        else:
+            last_modified = (
+                db.get_meta(conn, "last_modified_combined")
+                or db.get_meta(conn, "last_modified_all")
+            )
     items, new_last_modified, status = _get_paginated(
-        token, {"per_page": 100, "all": "true"}, last_modified, max_pages=1
+        token, params, last_modified, max_pages=1
     )
     if status == 304:
         return 0
@@ -2269,15 +2323,20 @@ def poll_once(
     """One refresh cycle: combined fetch + (conditional) unread reconciliation
     + enrichment.
 
-    The combined fetch covers virtually all reconciliation in normal use.
+    The combined fetch filters its response to `since=<earliest local
+    unread.updated_at>` whenever local has anything unread, so in-window
+    silent reads (read on github.com / mobile, no comment) flip locally on
+    the very next poll. When local has nothing unread it falls back to a
+    cheap If-Modified-Since 304 — see _fetch_combined.
+
     The dedicated unread fetch fires only when force_full is True (manual
     refresh, app launch) or when at least one locally-unread row sits
-    outside the latest-100 window — that's the only case the combined fetch
-    can't handle, since `?all=true` doesn't surface read-on-mobile-no-comment
+    outside the latest-100 window — the one case the combined fetch can't
+    handle, since `?all=true` doesn't surface read-on-mobile-no-comment
     events for items beyond the recent window.
     """
     touched: list = []
-    n_combined = _fetch_combined(conn, token, touched)
+    n_combined = _fetch_combined(conn, token, touched, force=force_full)
     n_unread = 0
     if force_full or _has_unread_outside_window(conn):
         n_unread = _fetch_unread(conn, token, touched, force=force_full)
