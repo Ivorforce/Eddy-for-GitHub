@@ -102,7 +102,7 @@
     {% set meta_has = n.category or m.complexity or n.labels_visible or n.labels_extra %}
     <div class="title-cell">
       <span class="type-spine type-{{ n.type|lower }} state-{{ n.type_state }}"
-            title="{{ n.type_label }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ type_icon(n.type, n.type_state) }}<span class="type-spine-label">{{ n.type_label }}</span></span>
+            title="{{ n.type_label_long }}{% if n.type_state != 'unknown' %} · {{ n.type_state|replace('_', ' ') }}{% endif %}">{{ type_icon(n.type, n.type_state) }}<span class="type-spine-label">{{ n.type_label }}</span></span>
       <div class="title-cell-body">
         {# Prefer link_url (per-event pointer captured while unread) over the
            generic item URL — sends the user to the first comment they haven't
