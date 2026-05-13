@@ -1850,23 +1850,31 @@
     // gated counter whenever it actually changed user-visible state; this
     // channel pings us with the new seq and we re-render the table from
     // the DB (no extra poll — the server already did one and that's *why*
-    // we're being notified). The first message after open seeds our
-    // last-seen value (the page itself was rendered from the same DB the
-    // server is reporting on), so we only refresh on subsequent advances —
-    // including the implicit advance on EventSource auto-reconnect after a
-    // network drop / laptop sleep, which is what now covers the old
-    // visibilitychange refocus case.
+    // we're being notified). The page is rendered with `<body data-event-seq=N>`,
+    // where N is the server's current seq at render time. Seeding lastSeenSeq
+    // from that — not from the first SSE message — handles the race where a
+    // poll lands between page render and EventSource open: the first
+    // message's seq would then be > N, and the comparison below triggers a
+    // catch-up.
     //
     // /list renders the table without polling. Open popovers, dirty
     // textareas, focus, and cursor position survive the swap via the
     // htmx:beforeSwap/afterSwap handlers below. source: "#filters" mirrors
     // the manual refresh button's hx-include so the active filter values
     // ride along.
-    // The page is rendered with `<body data-event-seq=N>`, where N is the
-    // server's current seq at render time. Seeding lastSeenSeq from that —
-    // not from the first SSE message — handles the race where a poll lands
-    // between page render and EventSource open: the first message's seq
-    // would then be > N, and the comparison below triggers a catch-up.
+    //
+    // Tab refocus fires POST /refresh?auto=1 (debounced 30s) so the server
+    // re-polls GitHub when the user comes back to the window — fingerprint-
+    // gated, so a quiet inbox is a 204 and a real change rides the SSE
+    // channel like any other. The same debounce window also covers the
+    // manual refresh button so clicking + alt-tabbing back doesn't double-fire.
+    //
+    // EventSource lifecycle drives the status pill's connectivity state:
+    // `open` clears any prior disconnect, `error` arms a 3s timer that
+    // flips to red "Disconnected" if we don't reconnect by then (rides out
+    // brief blips; if the server actually died the browser auto-retries
+    // forever and `open` never fires, so the pill stays red).
+    //
     // Wrapped in DOMContentLoaded because this script runs in <head>, before
     // <body> is parsed — `document.body` is null until the parser reaches it,
     // and a bare access here threw, aborting the rest of the script.
@@ -1882,6 +1890,53 @@
         if (!target) return;
         htmx.ajax("GET", "/list", { source: "#filters", target, swap: "innerHTML" });
       });
+      let sseDisconnected = false;
+      let sseErrorTimer = null;
+      sse.addEventListener("open", () => {
+        if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
+        if (sseDisconnected) {
+          sseDisconnected = false;
+          setStatus("idle", "Up to date");
+        }
+      });
+      sse.addEventListener("error", () => {
+        if (sseErrorTimer || sseDisconnected) return;
+        sseErrorTimer = setTimeout(() => {
+          sseErrorTimer = null;
+          sseDisconnected = true;
+          setStatus("error", "Disconnected");
+        }, 3000);
+      });
+
+      // Focus / visibility → ask the server to re-poll. Debounced so a quick
+      // alt-tab dance doesn't hammer GitHub; the manual refresh button
+      // shares the same debounce window. fetch() rather than htmx.ajax
+      // because the swap (if any) arrives over SSE, not via this response —
+      // we just want the side effect.
+      const FOCUS_REFRESH_MIN_MS = 30_000;
+      let lastRefreshAt = 0;
+      const maybeFocusRefresh = () => {
+        if (document.visibilityState !== "visible") return;
+        const dot = document.getElementById("status-dot");
+        if (dot && dot.classList.contains("status-error")) return;
+        const now = Date.now();
+        if (now - lastRefreshAt < FOCUS_REFRESH_MIN_MS) return;
+        lastRefreshAt = now;
+        setStatus("loading", "Updating…");
+        fetch("/refresh?auto=1", { method: "POST" })
+          .then((r) => {
+            if (sseDisconnected) return;  // SSE error wins until reconnect
+            if (r.ok || r.status === 204) setStatus("idle", "Up to date");
+          })
+          .catch(() => {});
+      };
+      document.addEventListener("visibilitychange", maybeFocusRefresh);
+      window.addEventListener("focus", maybeFocusRefresh);
+      // Manual refresh clicks count against the same debounce.
+      const refreshBtn = document.querySelector(".refresh-icon-btn");
+      if (refreshBtn) {
+        refreshBtn.addEventListener("click", () => { lastRefreshAt = Date.now(); });
+      }
     });
 
     // Plain-left-click on a popover trigger toggles its popover. Modifier
