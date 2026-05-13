@@ -46,7 +46,7 @@
       <span class="timeline-summary">
         {{ ev.count }} comments by
         {%- for a in ev.shown_authors %}
-          {{ author_chip(a.login, a.badge_class) }}{% if not loop.last %},{% endif %}
+          {{ author_chip(a.login, a.badge_class, '', a.is_tracked) }}{% if not loop.last %},{% endif %}
         {%- endfor %}
         {%- if ev.extra_authors %} +{{ ev.extra_authors }} more{% endif %}
       </span>
@@ -55,7 +55,7 @@
   {% elif ev.kind == 'comment' %}
     <div class="timeline-line">
       <span class="timeline-summary">
-        {{ author_chip(ev.actor, ev.author_badge_class, ev.payload.author_association or '') }}
+        {{ author_chip(ev.actor, ev.author_badge_class, ev.payload.author_association or '', ev.is_tracked) }}
         {{ ev.summary }}
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
@@ -63,19 +63,34 @@
   {% elif ev.kind == 'review' %}
     <div class="timeline-line">
       <span class="timeline-summary">
-        {{ author_chip(ev.actor, ev.author_badge_class, ev.payload.author_association or '') }}: <span class="review-state {{ ev.review_state_class }}">{{ ev.review_state_label }}</span>
+        {{ author_chip(ev.actor, ev.author_badge_class, ev.payload.author_association or '', ev.is_tracked) }}: <span class="review-state {{ ev.review_state_class }}">{{ ev.review_state_label }}</span>
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
   {% elif ev.kind == 'lifecycle' %}
     <div class="timeline-line">
       <span class="timeline-summary">
-        {{ author_chip(ev.actor, ev.author_badge_class) }}
+        {{ author_chip(ev.actor, ev.author_badge_class, '', ev.is_tracked) }}
         <span class="lifecycle-verb {{ ev.lifecycle_class }}">{{ ev.lifecycle_verb }}</span>
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
+  {% elif ev.kind in ('body_edit', 'code') %}
+    {# Real-login actors (the editor / pusher) — chip them like comments so
+       badge + tracked-state surface. Badge backfilled from the per-thread
+       roster in _format_event_for_render. #}
+    <div class="timeline-line">
+      <span class="timeline-summary">
+        {{ author_chip(ev.actor, ev.author_badge_class, '', ev.is_tracked) }}
+        {{ ev.summary }}
+      </span>
+      <span class="timeline-age">{{ ev.age_text }}</span>
+    </div>
   {% else %}
+    {# Fallback for kinds whose `actor` is a role label ("GitHub", "You")
+       rather than a real login — `mention`, `priority_change`, and any
+       `user_action` whose source collapses to GitHub/You. Plain text, no
+       chip. #}
     <div class="timeline-line">
       <span class="timeline-actor-mini">{{ ev.actor }}</span>
       <span class="timeline-summary">{{ ev.summary }}</span>

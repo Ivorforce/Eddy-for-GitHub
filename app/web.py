@@ -48,6 +48,7 @@ def _humanize(iso: str | None) -> str:
 
 
 app.jinja_env.filters["humanize"] = _humanize
+app.jinja_env.globals["author_badge_svg"] = ghmd.author_badge_svg
 
 
 # Item-creation age (NOT notification age — that's already encoded by row order
@@ -281,6 +282,57 @@ def _author_badge_class(login: str | None, assoc: str | None, user_login: str | 
         return "self"
     badge = _AUTHOR_BADGE.get(assoc or "")
     return badge[0] if badge else ""
+
+
+def _build_author_roster(
+    events, *, row_author: str | None = None, row_assoc: str | None = None,
+    user_login: str | None = None,
+) -> dict[str, dict]:
+    """Per-thread roster keyed by login → {'assoc': str, 'badge_class': str}.
+
+    Backfills author_association onto logins that appear elsewhere on the
+    thread without it (most notably @mentions inside body text, which
+    GitHub never decorates with an association). Sources, in precedence
+    order:
+
+      1. user_login → always 'self' (wins over anything else).
+      2. comment / review events: payload.author + payload.author_association.
+         Last-write-wins, since associations rarely flip and a recent
+         observation is the freshest signal.
+      3. The notification row's author + author_assoc, as a fallback.
+
+    `events` is the iterable of sqlite Row / dict-likes carrying `kind`
+    and `payload_json` (works for both _build_timeline's full event list
+    and _load_pill_events's pill-event subset)."""
+    roster: dict[str, dict] = {}
+
+    def _add(login: str | None, assoc: str | None) -> None:
+        if not login:
+            return
+        roster[login] = {
+            "assoc": assoc or "",
+            "badge_class": _author_badge_class(login, assoc, user_login),
+        }
+
+    if row_author:
+        _add(row_author, row_assoc)
+    for ev in events or ():
+        try:
+            kind = ev["kind"]
+        except (KeyError, TypeError):
+            continue
+        if kind not in ("comment", "review"):
+            continue
+        try:
+            payload = json.loads(ev["payload_json"]) if ev["payload_json"] else {}
+        except (ValueError, TypeError):
+            payload = {}
+        _add(payload.get("author"), payload.get("author_association"))
+    # User's own login: pre-stuff so @mentions of self pick up the self
+    # badge even when the user has never commented on this thread.
+    if user_login:
+        roster[user_login] = {"assoc": "", "badge_class": "self"}
+    return roster
 
 # GitHub reaction emoji buckets. Same user can react with multiple positives;
 # max() approximates a lower bound on distinct users in that sentiment bucket
@@ -814,6 +866,7 @@ _LIFECYCLE_LABEL = {
 def _verdict_render_dict(
     payload: dict, *, cur_repo: str | None = None,
     tracked_people=frozenset(), notes_people: dict | None = None,
+    author_assocs: dict | None = None,
 ) -> dict:
     """Display-ready bits of an ai_verdict event's payload, for rendering
     inside the timeline list. Distinct from _ai_verdict_dict, which shapes
@@ -824,6 +877,7 @@ def _verdict_render_dict(
         return ghmd.render(
             text, cur_repo=cur_repo, interactive=True,
             tracked_people=tracked_people, people_notes=notes_people,
+            author_assocs=author_assocs,
         )
 
     description = (payload.get("description") or "").strip()
@@ -1096,6 +1150,7 @@ def _coalesce_comments(events: list[dict]) -> list[dict]:
                     authors.append({
                         "login":       a,
                         "badge_class": c.get("author_badge_class", ""),
+                        "is_tracked":  bool(c.get("is_tracked")),
                     })
             shown = authors[:3]
             extra = max(0, len(authors) - len(shown))
@@ -1119,16 +1174,23 @@ def _format_event_for_render(
     row, now: int, user_login: str | None = None, *,
     cur_repo: str | None = None,
     tracked_people=frozenset(), notes_people: dict | None = None,
+    author_assocs: dict | None = None,
 ) -> dict:
     """Convert one thread_events row into a display-ready dict for the
     popover timeline. Each kind gets an `actor` (display name shown in
     the row gutter) and either a `summary` string (one-liner kinds) or
     full payload fields (ai_verdict / user_chat) for the chat-bubble
-    rendering. comment / review events also pick up `author_badge_class`
-    so the template can render the same icon styling the Repo column
-    uses (self/member/first-time/generic). user_chat / ai_verdict bodies
-    are run through ghmd for inline `code` / @mention / #ref rendering —
-    `cur_repo` (the thread's "owner/name") resolves bare #NN refs."""
+    rendering. comment / review / lifecycle / body_edit / code events
+    pick up `author_badge_class` + `is_tracked` so the template can
+    render the same chip styling the Repo column uses. body_edit and
+    code events lack association info in their payload, so they look it
+    up in the per-thread `author_assocs` roster (the editor / pusher has
+    usually commented or reviewed elsewhere on this thread).
+
+    user_chat / ai_verdict bodies are run through ghmd for inline
+    `code` / @mention / #ref rendering — `cur_repo` resolves bare #NN
+    refs; the roster lets @mentions pick up the same badge that the chip
+    macro uses."""
     try:
         payload = json.loads(row["payload_json"])
     except (ValueError, TypeError):
@@ -1136,6 +1198,18 @@ def _format_event_for_render(
     age_text = _humanize_age(now - row["ts"])
     kind = row["kind"]
     source = row["source"]
+    roster = author_assocs or {}
+
+    def _is_tracked(login: str | None) -> bool:
+        return bool(login) and login in (tracked_people or ())
+
+    def _badge_from_roster(login: str | None, assoc: str | None) -> str:
+        """Prefer the event's own association; fall back to roster lookup
+        for kinds that don't carry one (body_edit / code / lifecycle)."""
+        if assoc or (user_login and login == user_login):
+            return _author_badge_class(login, assoc, user_login)
+        info = roster.get(login or "") or {}
+        return info.get("badge_class") or _author_badge_class(login, None, user_login)
 
     out: dict = {
         "kind":     kind,
@@ -1151,6 +1225,7 @@ def _format_event_for_render(
         out["author_badge_class"] = _author_badge_class(
             author, payload.get("author_association"), user_login,
         )
+        out["is_tracked"] = _is_tracked(author)
         out["summary"] = "commented"
     elif kind == "review":
         author = payload.get("author") or "?"
@@ -1158,6 +1233,7 @@ def _format_event_for_render(
         out["author_badge_class"] = _author_badge_class(
             author, payload.get("author_association"), user_login,
         )
+        out["is_tracked"] = _is_tracked(author)
         state = (payload.get("state") or "").upper()
         label, cls = _REVIEW_STATE.get(state, (state.title() or "Reviewed", ""))
         out["review_state_label"] = label
@@ -1173,8 +1249,10 @@ def _format_event_for_render(
         out["actor"] = actor
         # Lifecycle events come from GraphQL timelineItems and don't
         # carry author_association, so the chip falls through to the
-        # generic icon (or 'self' when the actor is the user).
-        out["author_badge_class"] = _author_badge_class(actor, None, user_login)
+        # generic icon — unless the actor also commented on this thread
+        # (roster backfill) or is the user (self).
+        out["author_badge_class"] = _badge_from_roster(actor, None)
+        out["is_tracked"] = _is_tracked(actor)
         action = payload.get("action") or "?"
         verb, cls = _LIFECYCLE_LABEL.get(action, (action, ""))
         reason = payload.get("reason")
@@ -1187,18 +1265,26 @@ def _format_event_for_render(
         out["verdict"] = _verdict_render_dict(
             payload, cur_repo=cur_repo,
             tracked_people=tracked_people, notes_people=notes_people,
+            author_assocs=author_assocs,
         )
     elif kind == "user_chat":
         out["actor"] = "You"
         out["body_html"] = ghmd.render(
             payload.get("body") or "", cur_repo=cur_repo, interactive=True,
             tracked_people=tracked_people, people_notes=notes_people,
+            author_assocs=author_assocs,
         )
     elif kind == "body_edit":
-        out["actor"] = payload.get("editor") or "?"
+        editor = payload.get("editor") or "?"
+        out["actor"] = editor
+        out["author_badge_class"] = _badge_from_roster(editor, None)
+        out["is_tracked"] = _is_tracked(editor)
         out["summary"] = "edited the description"
     elif kind == "code":
-        out["actor"] = payload.get("author") or "?"
+        actor = payload.get("author") or "?"
+        out["actor"] = actor
+        out["author_badge_class"] = _badge_from_roster(actor, None)
+        out["is_tracked"] = _is_tracked(actor)
         adds = payload.get("additions")
         dels = payload.get("deletions")
         n_files = payload.get("changed_files")
@@ -1367,12 +1453,30 @@ def _build_timeline(
         """,
         (thread_id,),
     ).fetchall()
+    # Row author + assoc, so the roster has the fallback when the author
+    # never commented on the thread themselves.
+    nrow = conn.execute(
+        "SELECT details_json FROM notifications WHERE id = ?",
+        (thread_id,),
+    ).fetchone()
+    row_author = row_assoc = None
+    if nrow and nrow["details_json"]:
+        try:
+            details = json.loads(nrow["details_json"])
+            row_author = ((details.get("user") or {}).get("login")) or None
+            row_assoc = details.get("author_association") or None
+        except (ValueError, TypeError):
+            pass
     now = int(time.time())
     user_login = app.config.get("USER_LOGIN")
+    author_assocs = _build_author_roster(
+        rows, row_author=row_author, row_assoc=row_assoc, user_login=user_login,
+    )
     timeline = [
         _format_event_for_render(
             r, now, user_login=user_login, cur_repo=cur_repo,
             tracked_people=tracked_people, notes_people=notes_people,
+            author_assocs=author_assocs,
         )
         for r in rows
     ]
@@ -1479,6 +1583,7 @@ def _attach_pill_status(d: dict, rows: list) -> None:
 def _ai_verdict_dict(
     verdict_json: str | None, at: int | None, model: str | None,
     cur_repo: str | None = None,
+    author_assocs: dict | None = None,
 ) -> dict | None:
     """Parse the cached verdict + derive UI flags. None if no pending verdict.
     Out-of-date-ness is computed by _attach_pill_status from thread_events
@@ -1546,7 +1651,10 @@ def _ai_verdict_dict(
         # Non-interactive: the AI button's hover tooltip can't host clickable
         # links (it dismisses on mouse-out), so refs/mentions there render as
         # styled spans, not anchors. `code` still renders.
-        "description_html": ghmd.render(description, cur_repo=cur_repo, interactive=False),
+        "description_html": ghmd.render(
+            description, cur_repo=cur_repo, interactive=False,
+            author_assocs=author_assocs,
+        ),
         "model":           model or "",
         "at":              at,
         "age_text":        age_text,
@@ -1563,6 +1671,7 @@ def _row_to_dict(
     notes_orgs: dict[str, str] | None = None,
     last_mention_at: int | None = None,
     last_engaged_at: int | None = None,
+    events: list | None = None,
 ) -> dict:
     d = dict(row)
     details_json = d.pop("details_json", None)
@@ -1671,9 +1780,21 @@ def _row_to_dict(
     d["org_note"] = (notes_orgs or {}).get(repo_owner) if repo_owner else None
 
     # Cached AI verdict (None if Ask AI hasn't been run on this row).
+    # author_assocs roster lets a verdict description's @mentions pick up
+    # the same self/member/first-time badge that the chip macro uses —
+    # built from the row's pill events (comment/review payloads carry the
+    # association) plus the row author and the user's own login.
+    user_login = app.config.get("USER_LOGIN")
+    author_assocs = _build_author_roster(
+        events or (),
+        row_author=d["author_login"] or None,
+        row_assoc=d["author_assoc"] or None,
+        user_login=user_login,
+    )
     d["ai_verdict"] = _ai_verdict_dict(
         ai_verdict_json, ai_verdict_at, ai_verdict_model,
         cur_repo=d["repo"],
+        author_assocs=author_assocs,
     )
     # Refine the verdict's subscription suggestion against this row's reality:
     # restrict to the kinds that apply to its type, work out which suggested
@@ -1816,12 +1937,14 @@ def _load_notifications(show_archived: bool = True):
         # verdict-derived bits the row itself shows (pill recency, re-run state).
         out = []
         for r in rows:
+            evs = events_by_thread.get(r["id"], [])
             d = _row_to_dict(
                 r, t_p, t_r, t_o, n_p, n_r, n_o,
                 last_mention_at=mention_at.get(r["id"]),
                 last_engaged_at=engaged_at.get(r["id"]),
+                events=evs,
             )
-            _attach_pill_status(d, events_by_thread.get(r["id"], []))
+            _attach_pill_status(d, evs)
             out.append(d)
         return out
     finally:
@@ -2075,12 +2198,14 @@ def _load_one(thread_id: str) -> dict | None:
             return None
         events_by_thread = _load_pill_events(conn, [row["id"]])
         mention_at, engaged_at = _engagement_timestamps(events_by_thread)
+        evs = events_by_thread.get(row["id"], [])
         d = _row_to_dict(
             row, t_p, t_r, t_o, n_p, n_r, n_o,
             last_mention_at=mention_at.get(row["id"]),
             last_engaged_at=engaged_at.get(row["id"]),
+            events=evs,
         )
-        _attach_pill_status(d, events_by_thread.get(row["id"], []))
+        _attach_pill_status(d, evs)
         return d
     finally:
         conn.close()

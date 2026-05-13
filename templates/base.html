@@ -275,8 +275,6 @@
        per-line (see .repo-owner / .repo-name / .author-login below). */
     .repo-col, td.repo { width: 11rem; min-width: 11rem; max-width: 11rem; }
     td.repo { line-height: 1.1; padding-right: 1rem; }
-    td.repo a { text-decoration: none; }
-    td.repo a:hover { text-decoration: underline; }
     .repo-line {
       display: flex;
       align-items: baseline;
@@ -336,6 +334,22 @@
       cursor: help;
       vertical-align: -0.13em;
     }
+    /* @mention badge + link wrapper — keeps the icon glued to the
+       `@login` when a markdown bubble (white-space: pre-wrap) is wrapping
+       mid-sentence (inline-flex makes the pair an atomic inline box).
+       align-items: center vertically centres the icon with the text
+       (inline-flex ignores the SVG's `vertical-align: -0.13em`, so
+       baseline alignment lands the icon's bottom on the text baseline
+       and reads as visually high). Small gap so the icon doesn't crash
+       into the `@`. vertical-align: -0.13em on the chip itself
+       baseline-shifts the whole atomic box to sit with surrounding
+       prose rather than perching above it. */
+    .author-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.18rem;
+      vertical-align: -0.13em;
+    }
     /* Inline timeline contexts — popover one-liners + the AI verdict
        bubble head — render the icon directly next to the login as
        inline content (vs the Repo column's flex layout which gets
@@ -354,6 +368,14 @@
        popover (intercepted in JS); middle/cmd-click navigates the link. */
     .entity-trigger { cursor: pointer; }
     a.entity-trigger { color: var(--content-color); }
+    /* No underline at rest for the chip-style triggers (repo owner /
+       repo name / row author / timeline author chips) — they read as
+       content, not links. The hover rule below adds the underline as
+       the click affordance. @mentions are excluded from the no-underline
+       baseline because they sit inline in area text (verdict
+       descriptions, comment bodies) and follow GitHub's always-
+       underlined convention — see .mention below. */
+    a.entity-trigger:not(.mention) { text-decoration: none; }
     .repo-owner.entity-trigger { color: var(--pico-muted-color); }
     .author-login.entity-trigger { font-weight: 500; }
     .entity-trigger.is-tracked { color: var(--accent-amber); }
@@ -1176,13 +1198,10 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    /* Author logins in timeline lines pick up the muted color from
-       .timeline-line; restore content color so the name stays
-       legible against the muted "commented" / "review: approved" text. */
-    .ai-verdict-popover .timeline-line .author-login {
-      color: var(--pico-color);
-      font-weight: 500;
-    }
+    /* Author chips in timeline lines follow the same colour rules as the
+       Repo column's row author: content colour at rest, blue + underline
+       on hover, amber when tracked. All driven by a.entity-trigger /
+       .entity-trigger.is-tracked above; no timeline-specific override. */
     /* Review state labels — colored to read as the affordance: green
        approval, the existing desaturated red tone for change-requests,
        muted for dismissed/pending. Plain "Commented" stays default
@@ -1734,7 +1753,10 @@
       transition: opacity 0.08s ease-out;
     }
     .custom-tooltip.shown { opacity: 1; }
-    .custom-tooltip .mention { color: var(--accent-amber); }
+    /* Mentions inside tooltips are non-interactive <span>s (no hover
+       affordance), so they only need the tracked tint. Untracked stay
+       at the tooltip's plain white. */
+    .custom-tooltip .mention.is-tracked { color: var(--accent-amber); }
 
     /* Inline GitHub-markdown bits (see app/ghmd.py): `code` spans in titles /
        chat bubbles / the AI tooltip, plus #ref and @mention links. */
@@ -1750,9 +1772,15 @@
     }
     .timeline-bubble-body a.gh-ref { text-decoration: none; }
     .timeline-bubble-body a.gh-ref:hover { text-decoration: underline; }
-    /* @mentions: GitHub-style — always underlined, a touch bold.
-       a.mention also inherits .entity-trigger / .is-tracked colouring. */
-    .mention { font-weight: 500; text-decoration: underline; }
+    /* @mentions: GitHub-style — login is always underlined (the link
+       cue), a touch bold. The leading `@` reads as a sigil and stays
+       un-underlined, so the underline only spans the .mention-handle
+       inside. a.mention also inherits .entity-trigger / .is-tracked
+       colouring. The :hover rule for .entity-trigger would re-underline
+       the whole link (including the `@`), so override here. */
+    .mention { font-weight: 500; }
+    a.mention, a.mention:hover { text-decoration: none; }
+    .mention-handle { text-decoration: underline; }
   </style>
   <script>
     // Current auto-refresh mode (live / hourly / daily / manual). Read lazily
