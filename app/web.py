@@ -1,17 +1,16 @@
 """Flask app + routes."""
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import math
 import time
 from datetime import datetime, timezone
 
-from flask import Flask, make_response, render_template, request
+from flask import Flask, Response, make_response, render_template, request
 from markupsafe import Markup
 
-from . import ai, db, ghmd, github
+from . import ai, db, events, ghmd, github
 
 log = logging.getLogger(__name__)
 
@@ -1847,6 +1846,7 @@ def index():
         quiet_bystanders=_get_quiet_bystanders(),
         type_labels=TYPE_LABELS_LONG,
         action_labels=ACTION_FILTER_LABELS,
+        event_seq=events.current_seq(),
     )
 
 
@@ -1936,57 +1936,57 @@ def _table_response(error: str | None) -> "Response":
     return response
 
 
-def _table_fingerprint(conn) -> str:
-    """Hash of everything that feeds the row template — GitHub-side state lives
-    in raw_json, the rest are local-state / enrichment columns — plus a coarse
-    thread_events summary (new comments/reviews shift the pill counts). Compared
-    before/after a poll so a no-op auto-refresh can answer 204 instead of
-    re-rendering (which would dismiss whatever popover the user has open). The
-    rendered relative ages drift on their own; we fingerprint their inputs
-    (updated_at / effective_updated_at), not the output, so that's fine. Being
-    generous with the column list is cheap; the failure mode of omitting one is
-    just "a real change renders one poll late"."""
-    h = hashlib.blake2b(digest_size=16)
-    for row in conn.execute(
-        "SELECT id, raw_json, updated_at, unread, action, ignored, is_tracked, "
-        "snooze_until, throttle_until, muted_kinds, effective_updated_at, link_url, "
-        "note_user, priority_user, ai_verdict_json, ai_verdict_at, details_json, "
-        "baseline_comments, baseline_review_state, baseline_head_oid, "
-        "unique_commenters, unique_reviewers, pr_review_state, pr_reactions, "
-        "seen_reasons FROM notifications ORDER BY id"
-    ):
-        h.update(repr(tuple(row)).encode())
-    h.update(repr(tuple(conn.execute(
-        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM thread_events"
-    ).fetchone())).encode())
-    return h.hexdigest()
-
-
 @app.post("/refresh")
 def refresh():
     token = app.config["GITHUB_TOKEN"]
     error: str | None = None
-    # ?auto=1 marks browser-driven refreshes (visibilitychange handler) so
-    # they ride the poll predicate and skip the unread fetch on a quiet
-    # inbox. A user-clicked refresh has no flag and forces a full sync so
-    # the click never feels like it missed something.
+    # ?auto=1 marks browser-driven refreshes (SSE-triggered) so they ride the
+    # poll predicate and skip the unread fetch on a quiet inbox. A user-
+    # clicked refresh has no flag and forces a full sync so the click never
+    # feels like it missed something.
     auto = bool(request.values.get("auto"))
     force_full = not auto
     conn = db.connect()
     try:
-        before = _table_fingerprint(conn) if auto else None
         try:
             github.poll_once(conn, token, force_full=force_full)
         except Exception as e:
             log.exception("on-demand refresh failed")
             error = f"Refresh failed: {e}"
-        # Nothing user-visible changed — skip the swap so an open popover (and
-        # any in-progress edit) survives the background refresh untouched.
-        if before is not None and not error and _table_fingerprint(conn) == before:
+        # Fingerprint-gated SSE bump. notify_if_changed returns True iff the
+        # render inputs actually moved — also tells us whether this auto-
+        # refresh has anything to swap. 204 leaves an open popover (and any
+        # in-progress edit) untouched.
+        changed = events.notify_if_changed(conn)
+        if auto and not error and not changed:
             return make_response("", 204)
     finally:
         conn.close()
     return _table_response(error)
+
+
+@app.get("/events")
+def sse_events():
+    """SSE channel: emits `data: <seq>` whenever the poll loop (or another
+    refresh handler) bumps the global counter, plus a `: ping` comment every
+    ~15s so idle connections survive proxy timeouts. The first message after
+    open is the current seq — clients should use it to seed their last-seen
+    state, not refresh on it, since the page itself was rendered from the
+    same DB the seq describes."""
+    def gen():
+        last_seen = events.current_seq()
+        yield f"data: {last_seen}\n\n"
+        while True:
+            seq = events.wait(last_seen, timeout=15.0)
+            if seq > last_seen:
+                last_seen = seq
+                yield f"data: {seq}\n\n"
+            else:
+                yield ": ping\n\n"
+    resp = Response(gen(), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"  # disable proxy buffering
+    return resp
 
 
 @app.post("/backfetch")

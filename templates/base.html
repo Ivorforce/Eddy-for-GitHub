@@ -1846,25 +1846,37 @@
     // HTMX swaps can yank the tooltip target out of the DOM mid-hover.
     document.addEventListener("htmx:beforeSwap", hideTooltip);
 
-    // Auto-refresh when the tab regains focus (catches reads done on github.com).
-    // Debounced to once per 30s to avoid hammering the API on tab-switching.
-    // Open drawers, dirty textarea content, focus, and cursor position are
-    // preserved across the swap by the htmx:beforeSwap/afterSwap handlers
-    // below, so it's safe to fire even while the user is mid-edit.
-    let lastFocusRefresh = Date.now();
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) return;
-      if (Date.now() - lastFocusRefresh < 30000) return;
+    // Server-pushed refreshes via SSE. The poll loop bumps a fingerprint-
+    // gated counter whenever it actually changed user-visible state; this
+    // channel pings us with the new seq and we re-render the table from
+    // the DB (no extra poll — the server already did one and that's *why*
+    // we're being notified). The first message after open seeds our
+    // last-seen value (the page itself was rendered from the same DB the
+    // server is reporting on), so we only refresh on subsequent advances —
+    // including the implicit advance on EventSource auto-reconnect after a
+    // network drop / laptop sleep, which is what now covers the old
+    // visibilitychange refocus case.
+    //
+    // /list renders the table without polling. Open popovers, dirty
+    // textareas, focus, and cursor position survive the swap via the
+    // htmx:beforeSwap/afterSwap handlers below. source: "#filters" mirrors
+    // the manual refresh button's hx-include so the active filter values
+    // ride along.
+    // The page is rendered with `<body data-event-seq=N>`, where N is the
+    // server's current seq at render time. Seeding lastSeenSeq from that —
+    // not from the first SSE message — handles the race where a poll lands
+    // between page render and EventSource open: the first message's seq
+    // would then be > N, and the comparison below triggers a catch-up.
+    let lastSeenSeq = parseInt(document.body.dataset.eventSeq || "0", 10);
+    const sse = new EventSource("/events");
+    sse.addEventListener("message", (e) => {
+      const seq = parseInt(e.data, 10);
+      if (Number.isNaN(seq)) return;
+      if (seq <= lastSeenSeq) return;
+      lastSeenSeq = seq;
       const target = document.querySelector("#notifications-table");
       if (!target) return;
-      lastFocusRefresh = Date.now();
-      // ?auto=1 lets /refresh skip the dedicated unread fetch when the
-      // poll predicate says it isn't needed (faster auto-refresh on a
-      // quiet inbox). Manual button click omits the flag → full sync.
-      // source: "#filters" mirrors the manual refresh button's hx-include
-      // so the active filter values ride along — without it, the table
-      // re-renders unfiltered.
-      htmx.ajax("POST", "/refresh?auto=1", { source: "#filters", target, swap: "innerHTML" });
+      htmx.ajax("GET", "/list", { source: "#filters", target, swap: "innerHTML" });
     });
 
     // Plain-left-click on a popover trigger toggles its popover. Modifier
@@ -2222,7 +2234,7 @@
     });
   </script>
 </head>
-<body>
+<body data-event-seq="{{ event_seq|default(0) }}">
   <main class="container">
     {% block content %}{% endblock %}
   </main>

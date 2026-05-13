@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 
-from . import db, github
+from . import db, events, github
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +68,10 @@ def run_loop(stop: threading.Event, token: str, interval: int = DEFAULT_INTERVAL
                 woke = _wake_snoozed(conn, token)
                 if woke:
                     log.info("snooze: woke %d thread(s)", woke)
+                # Push the change to any connected SSE consumers. The fingerprint
+                # gate inside notify_if_changed makes this cheap on a no-op poll —
+                # no bump, no client refresh.
+                events.notify_if_changed(conn)
             finally:
                 conn.close()
         except Exception:
