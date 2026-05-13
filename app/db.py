@@ -314,6 +314,19 @@ UPDATE thread_events SET thread_id = 'q_' || substr(thread_id, 3) WHERE thread_i
 UPDATE ai_calls      SET thread_id = 'q_' || substr(thread_id, 3) WHERE thread_id LIKE 'q:%';
 """
 
+# Strip trailing `=` from synthetic ids. Legacy base64-padded node_ids
+# (`MDU6SXNzdWU...=`) made the id end in `=`, which is invalid in a CSS
+# identifier — `from:#pop-timeline-q_…=` threw "not a valid selector" from
+# the timeline trigger and `anchor-name: --pop-timeline-q_…=` failed to parse,
+# leaving the popover unanchored. Base64 padding is length-derived, so dropping
+# it is bijective; nothing decodes a `q_*` id back to a node_id. Mirrors
+# github._synth_id, which now strips at creation.
+SCHEMA_V29 = r"""
+UPDATE notifications SET id        = rtrim(id,        '=') WHERE id        LIKE 'q\_%=' ESCAPE '\';
+UPDATE thread_events SET thread_id = rtrim(thread_id, '=') WHERE thread_id LIKE 'q\_%=' ESCAPE '\';
+UPDATE ai_calls      SET thread_id = rtrim(thread_id, '=') WHERE thread_id LIKE 'q\_%=' ESCAPE '\';
+"""
+
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -440,6 +453,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V28)
             _set_version(conn, 28)
             version = 28
+        if version < 29:
+            conn.executescript(SCHEMA_V29)
+            _set_version(conn, 29)
+            version = 29
     finally:
         conn.close()
 

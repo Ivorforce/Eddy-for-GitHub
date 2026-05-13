@@ -122,9 +122,17 @@ def _thread_url(thread_id: str) -> str:
 # _apply_action); in particular Mute won't actually unsubscribe on GitHub. If
 # real activity later delivers a genuine notification for that thread, _upsert's
 # de-dup drops the synthetic row and the real one comes in unmuted — acceptable.
-# The id lands verbatim in DOM ids / CSS selectors, so it stays "_"-joined
-# (a ":" is a CSS syntax error); real thread ids are all-digits, so "q_" is
-# unambiguous. node_ids are [A-Za-z0-9_-], i.e. valid CSS identifier tails.
+# The id lands verbatim in DOM ids / CSS selectors / CSS custom-idents (e.g.
+# `anchor-name: --pop-timeline-<id>` and HTMX `from:#pop-timeline-<id>` triggers),
+# so it has to be a valid CSS identifier tail. Real thread ids are all-digits,
+# so "q_" is unambiguous. Modern node_ids are `[A-Za-z0-9_-]` (fine), but the
+# legacy base64-with-padding form (`MDU...=`) carries a trailing `=` that is
+# *not* valid in CSS identifiers — strip it. Padding is length-derived, so
+# dropping it is bijective; nothing else round-trips the id back to a node_id.
+def _synth_id(node_id: str) -> str:
+    return "q_" + node_id.rstrip("=")
+
+
 def _is_synthetic(thread_id: str) -> bool:
     return thread_id.startswith("q_")
 
@@ -280,7 +288,7 @@ def backfetch_issues(
             continue
         repo_full = repo_url[len(_API_REPOS_PREFIX):]
         synth = {
-            "id": "q_" + node_id,
+            "id": _synth_id(node_id),
             "unread": False,
             "reason": reason,
             "updated_at": it.get("updated_at") or "",
@@ -377,7 +385,7 @@ def track_link(conn: sqlite3.Connection, token: str, url: str) -> str:
 
     now = int(time.time())
     synth = {
-        "id": "q_" + node_id,
+        "id": _synth_id(node_id),
         "unread": False,
         "reason": "manual",  # ∈ INVOLVED_REASONS — a deliberate inclusion
         "updated_at": updated_at,
