@@ -1934,8 +1934,17 @@
         const rect = target.getBoundingClientRect();
         const margin = 6;
         let left = rect.left + rect.width / 2 - tipRect.width / 2;
-        let top = rect.top - tipRect.height - margin;
-        if (top < margin) top = rect.bottom + margin;
+        // Default above; flip below for triggers in the title's meta-row
+        // (labels / diff stats / category pill) — anchoring above there
+        // would land the tooltip on top of the title text itself.
+        const below = !!target.closest(".meta-row");
+        let top = below ? rect.bottom + margin : rect.top - tipRect.height - margin;
+        // If the preferred side doesn't fit, flip to the other.
+        if (below && top + tipRect.height > window.innerHeight - margin) {
+          top = rect.top - tipRect.height - margin;
+        } else if (!below && top < margin) {
+          top = rect.bottom + margin;
+        }
         left = Math.max(margin, Math.min(left, window.innerWidth - tipRect.width - margin));
         tip.style.left = `${left}px`;
         tip.style.top = `${top}px`;
