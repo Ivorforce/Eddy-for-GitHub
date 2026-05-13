@@ -8,7 +8,7 @@ import threading
 
 from dotenv import load_dotenv
 
-from . import auth, db, github, poll, settings, web
+from . import auth, db, github, oauth, poll, settings, web
 
 
 # One-shot migration: when settings.toml doesn't exist yet, seed it from any
@@ -51,7 +51,19 @@ def main() -> int:
     db.init()
     settings.init(meta_migrate=_migrate_settings_from_meta)
     token = auth.get_token()
-    auth.check_scope(token)
+    if not auth.check_scope(token):
+        # Stored token was revoked or its scopes were tightened on github.com.
+        # An env-supplied token is the user's explicit choice — don't override
+        # it; otherwise wipe the stored token and re-run the device flow once.
+        if os.environ.get("GITHUB_TOKEN"):
+            sys.exit("GITHUB_TOKEN lacks the 'notifications' scope.")
+        logging.getLogger(__name__).warning(
+            "stored token rejected — clearing and re-authorizing"
+        )
+        oauth.clear_stored_token()
+        token = auth.get_token()
+        if not auth.check_scope(token):
+            sys.exit("Re-authorization failed.")
 
     user_login, user_teams = auth.fetch_identity(token)
     if user_login:

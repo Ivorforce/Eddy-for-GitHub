@@ -6,15 +6,7 @@ and shows them in a table.
 
 ## Setup
 
-Requires Python 3.11+ and the [GitHub CLI](https://cli.github.com/) authenticated
-with the `notifications` scope:
-
-```bash
-gh auth login
-gh auth refresh -s notifications
-```
-
-Then:
+Requires Python 3.11+.
 
 ```bash
 python3 -m venv .venv
@@ -23,13 +15,21 @@ pip install -e .
 python -m app run
 ```
 
+On first launch Eddy opens github.com in your browser and asks you to
+authorize the app (scopes: `notifications`, `read:org`). The token is
+stored in `data/auth.json` (mode 0600) and reused on subsequent launches.
+Revoke any time at https://github.com/settings/applications.
+
 Open http://127.0.0.1:5734.
+
+Headless / CI: set `GITHUB_TOKEN` in `.env` to skip the browser prompt.
 
 ## Configuration
 
 Optional `.env` (see `.env.example`):
 
-- `GITHUB_TOKEN` — overrides `gh auth token` if set
+- `GITHUB_TOKEN` — skip the device-flow prompt and use this token instead
+- `EDDY_OAUTH_CLIENT_ID` — override the OAuth Client ID (for forks)
 - `PORT` — server port (default 5734)
 - `ANTHROPIC_API_KEY` — required for the **Ask AI** triage feature
 - `AI_MODEL` — overrides the default model (`claude-haiku-4-5`)
