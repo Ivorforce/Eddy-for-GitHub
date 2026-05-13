@@ -22,7 +22,7 @@ def get_token() -> str:
             check=True,
         )
     except FileNotFoundError:
-        sys.exit("gh CLI not found. Install it: brew install gh")
+        sys.exit("gh CLI not found. Install it: https://cli.github.com/")
     except subprocess.CalledProcessError as e:
         msg = e.stderr.strip() or "gh auth token failed"
         sys.exit(f"{msg}\nRun: gh auth login")

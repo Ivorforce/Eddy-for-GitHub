@@ -251,7 +251,7 @@ def _read_preferences() -> str:
 
 def _identity_block(user_login: str | None, user_teams) -> str | None:
     """Short prefix telling the model whose inbox it's triaging. Without it,
-    the AI sees logins like 'lukastenbrink' as anonymous strings and can't
+    the AI sees logins like 'octocat' as anonymous strings and can't
     tell author/assignee/reviewer fields apart from any other commenter.
     Returns None when the login isn't known (auth.fetch_identity failed)."""
     if not user_login:
