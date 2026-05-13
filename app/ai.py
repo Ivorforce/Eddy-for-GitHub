@@ -298,6 +298,11 @@ def _summarize_details(d: dict, subject_type: str) -> dict:
         "comments":            d.get("comments"),
         "labels":              [l.get("name") for l in (d.get("labels") or []) if l.get("name")],
         "assignees":           [(a or {}).get("login") for a in (d.get("assignees") or []) if (a or {}).get("login")],
+        # GitHub Project (v2) boards this thread sits on:
+        # [{project, fields?: {field_name: value}}]. Advisory — field names /
+        # values are team-specific and the card often lags the GitHub state.
+        # See app/github.py:_parse_project_items and the system prompt entry.
+        "projects":            d.get("projects"),
     }
     if subject_type == "PullRequest":
         out["additions"] = d.get("additions")

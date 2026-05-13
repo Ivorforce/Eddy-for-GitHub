@@ -745,6 +745,21 @@ query($owner: String!, $name: String!, $number: Int!) {
       closingIssuesReferences(first: 10) {
         nodes { number title state reactionGroups { content reactors { totalCount } } }
       }
+      projectItems(first: 10, includeArchived: false) {
+        nodes {
+          project { title closed }
+          fieldValues(first: 20) {
+            nodes {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldTextValue         { text field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldNumberValue       { number field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldDateValue         { date field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldIterationValue    { title field { ... on ProjectV2FieldCommon { name } } }
+            }
+          }
+        }
+      }
       reviewThreads(last: 100) {
         nodes {
           isResolved
@@ -967,6 +982,67 @@ def _condense_review_threads(node) -> dict | None:
     return out
 
 
+# Built-in Project field names whose values dupe data we already carry, so
+# folding them into `fields` would just bloat the prompt. "Title" is the
+# item's title (we have it on the row); the user / label / milestone / repo
+# built-ins are skipped at the GraphQL level (we don't request those value
+# types — see _PR_QUERY / _ISSUE_QUERY).
+_PROJECT_FIELD_SKIPS = frozenset({"Title"})
+
+
+def _project_field_value(node: dict) -> tuple[str, object] | None:
+    """One ProjectV2ItemFieldValue node → (field_name, value) or None when
+    the field is unsupported / empty / a built-in dupe."""
+    fname = ((node.get("field") or {}) or {}).get("name")
+    if not fname or fname in _PROJECT_FIELD_SKIPS:
+        return None
+    typename = node.get("__typename") or ""
+    if typename == "ProjectV2ItemFieldSingleSelectValue":
+        v = node.get("name")
+    elif typename == "ProjectV2ItemFieldTextValue":
+        v = node.get("text")
+    elif typename == "ProjectV2ItemFieldNumberValue":
+        v = node.get("number")
+    elif typename == "ProjectV2ItemFieldDateValue":
+        v = node.get("date")
+    elif typename == "ProjectV2ItemFieldIterationValue":
+        v = node.get("title")
+    else:
+        return None
+    if v is None or v == "":
+        return None
+    return fname, v
+
+
+def _parse_project_items(node) -> list[dict]:
+    """projectItems connection → [{project, fields?}, …]. `project` is the
+    board title; `fields` is a `{field_name: value}` dict of the board's
+    custom fields (Status, Priority, Iteration, Estimate, …) — single-select
+    options, text, numbers, dates, and iteration titles. Built-in dupes
+    (Title, plus assignees/labels/milestone/repo/PR/reviewer values we don't
+    request at the GraphQL level) are dropped. Closed (archived) projects
+    are dropped too — leftover bookkeeping the user rarely cares about.
+    Capped at 10 projects × 20 fields by the GraphQL query; threads on more
+    boards / boards with more fields undercount, matching the rest of the
+    module."""
+    out: list[dict] = []
+    for it in (node or {}).get("nodes") or []:
+        proj = (it or {}).get("project") or {}
+        title = proj.get("title")
+        if not title or proj.get("closed"):
+            continue
+        entry: dict = {"project": title}
+        fields: dict = {}
+        for fv in ((it.get("fieldValues") or {}) or {}).get("nodes") or []:
+            kv = _project_field_value(fv or {})
+            if kv:
+                fields[kv[0]] = kv[1]
+        if fields:
+            entry["fields"] = fields
+        out.append(entry)
+    return out
+
+
 def fetch_pr(token: str, api_url: str | None) -> dict | None:
     """GraphQL fetch for a PR. Replaces four REST round trips with one.
 
@@ -1000,12 +1076,15 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         return None
     r.raise_for_status()
     payload = r.json()
+    # Partial errors (e.g. a token without `read:project` failing on
+    # projectItems) come with usable `data` alongside the `errors` list — log
+    # and continue; the per-field parsers already handle null inputs. We only
+    # bail when the core object itself is missing.
     if payload.get("errors"):
         log.warning(
             "GraphQL errors fetching PR %s/%s#%s: %s",
             owner, name, number, payload["errors"],
         )
-        return None
     pr = ((payload.get("data") or {}).get("repository") or {}).get("pullRequest")
     if not pr:
         return None
@@ -1188,6 +1267,11 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "changed_files": pr.get("changedFiles"),
         "files": files,
         "closes": closes,
+        # GitHub Project (v2) boards this PR sits on, with each board's
+        # custom fields ({Status, Priority, Iteration, …}). Advisory triage
+        # context; field names / values are team-specific and the card can
+        # lag the PR's state. See _parse_project_items.
+        "projects": _parse_project_items(pr.get("projectItems")),
         # Inline review-thread state: {resolved: int, unresolved: [{path,
         # comments, last_comment_at?, outdated?, comments_sample?}]} or None.
         # See _condense_review_threads.
@@ -1234,6 +1318,21 @@ query($owner: String!, $name: String!, $number: Int!) {
       assignees(first: 10) { nodes { login } }
       labels(first: 20) { nodes { name color description } }
       reactionGroups { content reactors { totalCount } }
+      projectItems(first: 10, includeArchived: false) {
+        nodes {
+          project { title closed }
+          fieldValues(first: 20) {
+            nodes {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldTextValue         { text field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldNumberValue       { number field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldDateValue         { date field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldIterationValue    { title field { ... on ProjectV2FieldCommon { name } } }
+            }
+          }
+        }
+      }
       comments(last: 100) {
         totalCount
         nodes {
@@ -1288,12 +1387,13 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         return None
     r.raise_for_status()
     payload = r.json()
+    # See fetch_pr — partial errors are non-fatal as long as `data` carries
+    # the core object.
     if payload.get("errors"):
         log.warning(
             "GraphQL errors fetching issue %s/%s#%s: %s",
             owner, name, number, payload["errors"],
         )
-        return None
     issue = ((payload.get("data") or {}).get("repository") or {}).get("issue")
     if not issue:
         return None
@@ -1368,6 +1468,8 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         "assignees": assignees,
         "labels": labels,
         "reactions": reactions,
+        # GitHub Project (v2) boards this issue sits on — see _parse_project_items.
+        "projects": _parse_project_items(issue.get("projectItems")),
         "_unique_commenters": len(commenter_logins),
     }
 
