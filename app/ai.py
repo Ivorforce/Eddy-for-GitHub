@@ -212,12 +212,11 @@ def _build_tool_def(notif_type: str, muted_kinds, *, has_prior: bool) -> dict:
             "items": {"type": "string", "enum": tokens},
             "description": (
                 "Forward-looking subscription tweaks for this thread — quiet (or resume) "
-                "individual activity kinds without unsubscribing. Empty list = no change "
-                "(the common case). Use it when there's a durable reason the user cares "
-                "about only some kinds here — waiting on a review/merge, or has stepped back "
-                "from the thread entirely (then it pairs with action_now: ignore/mute). "
-                "Tokens reflect current state; `mute_<kind>` stops those notifications going "
-                "forward, `unmute_<kind>` resumes them. See system prompt §Subscription tweaks."
+                "individual activity kinds without unsubscribing. Use when one kind dominates "
+                "the churn and another carries the signal; pairs with `action_now: ignore` "
+                "(passive watcher) or `archive` (their part is done). Tokens reflect current "
+                "state; `mute_<kind>` stops those notifications going forward, `unmute_<kind>` "
+                "resumes them. See system prompt §Subscription tweaks."
             ),
         }
     if has_prior:
