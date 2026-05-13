@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 _PLACEHOLDER_CLIENT_ID = "Ov23liREPLACE_ME"
 _DEFAULT_CLIENT_ID = "Ov23liUAnoZLM37RMOkR"
 
-SCOPES = "notifications,read:org"
+SCOPES = "notifications,read:org,read:project"
 TOKEN_PATH = Path("data") / "auth.json"
 
 _DEVICE_CODE_URL = "https://github.com/login/device/code"
@@ -61,7 +61,22 @@ def load_stored_token() -> str | None:
         log.exception("auth: failed to load %s — re-authorizing", TOKEN_PATH)
         return None
     token = data.get("token")
-    return token if isinstance(token, str) and token else None
+    if not (isinstance(token, str) and token):
+        return None
+    # SCOPES has grown since the stored token was minted → drop it so the
+    # next get_token() runs the device flow with the current scope set.
+    # Without this, the token keeps working for everything except the newly
+    # added scope, which fails silently (e.g. read:project nukes the whole
+    # GraphQL response for any thread carrying a project item).
+    required = {s.strip() for s in SCOPES.split(",") if s.strip()}
+    stored = set(data.get("scopes") or [])
+    if missing := required - stored:
+        log.warning(
+            "auth: stored token missing scopes %s — re-authorizing",
+            sorted(missing),
+        )
+        return None
+    return token
 
 
 def save_token(token: str, *, login: str | None = None) -> None:
