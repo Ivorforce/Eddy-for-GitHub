@@ -1153,18 +1153,26 @@ def _coalesce_comments(events: list[dict]) -> list[dict]:
                         "is_tracked":  bool(c.get("is_tracked")),
                     })
             shown = authors[:3]
-            extra = max(0, len(authors) - len(shown))
+            extras = authors[len(shown):]
+            # Hover tooltip on the inline "+N more": expands to the actual
+            # chips for those overflow authors. Cap at 10 to keep the popup
+            # bounded; anything past 10 gets the same "… and N more" footer
+            # the diff-stats and labels tooltips use.
+            extra_tip = extras[:10]
+            extra_tip_overflow = max(0, len(extras) - len(extra_tip))
             last = group[-1]
             out.append({
-                "kind":           "comment_group",
-                "source":         "github",
-                "at_ts":          last["at_ts"],
-                "age_text":       last["age_text"],
-                "payload":        {},
-                "actor":          "GitHub",
-                "count":          len(group),
-                "shown_authors":  shown,
-                "extra_authors":  extra,
+                "kind":                  "comment_group",
+                "source":                "github",
+                "at_ts":                 last["at_ts"],
+                "age_text":              last["age_text"],
+                "payload":               {},
+                "actor":                 "GitHub",
+                "count":                 len(group),
+                "shown_authors":         shown,
+                "extra_authors":         len(extras),
+                "extra_author_list":     extra_tip,
+                "extra_author_overflow": extra_tip_overflow,
             })
         i = j
     return out

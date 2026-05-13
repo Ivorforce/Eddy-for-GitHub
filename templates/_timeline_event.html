@@ -48,7 +48,10 @@
         {%- for a in ev.shown_authors %}
           {{ author_chip(a.login, a.badge_class, '', a.is_tracked) }}{% if not loop.last %},{% endif %}
         {%- endfor %}
-        {%- if ev.extra_authors %} +{{ ev.extra_authors }} more{% endif %}
+        {%- if ev.extra_authors %}
+          {% set authors_tip %}<div class="authors-tip">{% for a in ev.extra_author_list %}<span class="authors-tip-chip">{{ author_chip(a.login, a.badge_class, '', a.is_tracked) }}</span>{% endfor %}{% if ev.extra_author_overflow %}<div class="authors-tip-more">… and {{ ev.extra_author_overflow }} more</div>{% endif %}</div>{% endset %}
+          <span class="author-extra-more" data-tip-html="{{ authors_tip|forceescape }}">+{{ ev.extra_authors }} more</span>
+        {%- endif %}
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>

@@ -235,6 +235,35 @@
       gap: 0.2rem 0.25rem;
       max-width: 22rem;
     }
+    /* Coalesced "+N more" authors on a comment_group timeline line — small
+       gap left of the trigger so it doesn't crowd the preceding chip, and
+       the tooltip lists the actual overflow chips (capped at 10) with a
+       diff-tip-style "… and N more" footer past the cap. */
+    .author-extra-more {
+      margin-left: 0.2rem;
+      cursor: help;
+      opacity: 0.75;
+    }
+    .custom-tooltip .authors-tip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.2rem 0.6rem;
+      max-width: 22rem;
+    }
+    /* Each chip becomes a single flex item so its badge + login stay
+       glued together (otherwise flex would treat the inline <svg> and
+       <a> as separate items and split them with the .authors-tip gap). */
+    .custom-tooltip .authors-tip-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.18rem;
+    }
+    .custom-tooltip .authors-tip-more {
+      width: 100%;
+      margin-top: 0.2rem;
+      opacity: 0.7;
+      font-style: italic;
+    }
     td.activity .activity-stats .stat { min-width: 2.5rem; }
     /* Item creation age — spans both grid columns as a header so the 2x2
        reactions/comments grid below stays clean. Color comes inline from a
