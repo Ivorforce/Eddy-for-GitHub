@@ -1,5 +1,7 @@
 {%- from "_macros.html" import type_icon -%}
-<tr class="{% if not n.unread %}read{% endif %}{% if n.action == 'done' %} done{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_tracked %} is-tracked-row{% endif %}{% if triage_mode == 'ai' and n.ai_verdict and not n.ai_uptodate %} ai-outdated{% endif %}"
+<tr id="row-{{ n.id }}"
+    {% if oob %}hx-swap-oob="outerHTML"{% endif %}
+    class="{% if not n.unread %}read{% endif %}{% if n.action == 'done' %} done{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_tracked %} is-tracked-row{% endif %}{% if triage_mode == 'ai' and n.ai_verdict and not n.ai_uptodate %} ai-outdated{% endif %}"
     data-author="{{ n.author_login or '' }}"
     data-repo="{{ n.repo }}"
     data-org="{{ n.repo_owner or '' }}"
@@ -262,8 +264,13 @@
            data-kind="item" data-thread-id="{{ n.id }}"
            style="position-anchor: --pop-item-{{ n.id }}">
         <div class="popover-title"><span class="popover-kind">{{ n.type_label_long }}</span></div>
+        {# `commit=1` on blur tells the server to render the new <tr> as an
+           OOB swap so the pill / tooltip update without paying for a full
+           table refresh. Keyup saves stay silent — the popover is open
+           during typing and we don't want to swap the row out from under it. #}
         <form hx-post="/note/{{ n.id }}"
               hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
+              hx-on::config-request="event.detail.parameters.commit = event.detail.triggeringEvent && event.detail.triggeringEvent.type === 'blur' ? '1' : ''"
               hx-swap="none">
           <textarea name="note_user" rows="3" placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
         </form>

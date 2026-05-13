@@ -1869,14 +1869,19 @@ def _set_last_poll_at(epoch: int) -> None:
         conn.close()
 
 
-def _render_row(n: dict):
+def _render_row(n: dict, *, oob: bool = False):
     """Wrap render_template('_row.html', ...) so every row swap carries
     the active triage_mode (persisted setting) and sort (rides on the
     request via the hx-included #filters — the Reception column shows the
-    engaged-count in AI mode only while that's the active sort)."""
+    engaged-count in AI mode only while that's the active sort).
+
+    `oob=True` adds `hx-swap-oob="outerHTML"` to the <tr> so HTMX swaps
+    the row by id, not whatever target the request named. Used by
+    save_note on the blur path so the pill / tooltip update without a
+    full /list re-render."""
     return render_template(
         "_row.html", n=n, triage_mode=_get_triage_mode(),
-        sort=request.values.get("sort") or "updated",
+        sort=request.values.get("sort") or "updated", oob=oob,
     )
 
 
@@ -2786,23 +2791,30 @@ def _form_note() -> str | None:
 
 @app.post("/note/<thread_id>")
 def save_note(thread_id: str):
-    """Save user note for a notification. Silent (no row-level swap); HTMX
-    fires this on textarea change with a small delay. The note feeds the
-    pill text + tooltip on this row, so bump the SSE fingerprint here so
-    the table swap that updates them fires immediately rather than waiting
-    for the next 60s poll tick. Open popovers ride through the swap via
-    the htmx:beforeSwap snapshot in templates/base.html."""
+    """Save user note for a notification. Two save paths share the
+    endpoint: keyup-debounced saves during typing (silent — popover is
+    open and re-rendering the row would tear it out) and a blur save when
+    the user commits (`commit=1`, sent via hx-on::config-request in the
+    form). The commit path returns the freshly-rendered <tr> as an
+    OOB swap so the pill text + amber kind + tooltip update on the
+    originating tab without a full /list refresh. Other tabs sync at the
+    next poll-loop tick's notify_if_changed."""
     note = _form_note()
+    commit = request.values.get("commit") == "1"
     conn = db.connect()
     try:
         conn.execute(
             "UPDATE notifications SET note_user = ? WHERE id = ?",
             (note, thread_id),
         )
-        events.notify_if_changed(conn)
     finally:
         conn.close()
-    return _entity_note_response("item", thread_id, bool(note))
+    if not commit:
+        return _entity_note_response("item", thread_id, bool(note))
+    n = _load_one(thread_id)
+    if not n:
+        return _entity_note_response("item", thread_id, bool(note))
+    return _render_row(n, oob=True)
 
 
 @app.post("/people/<login>/note")
