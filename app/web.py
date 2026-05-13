@@ -1688,6 +1688,46 @@ def _set_quiet_bystanders(on: bool) -> bool:
     return on
 
 
+# Auto-refresh cadence (live / hourly / daily / manual). Live is the default
+# 5-min server poll + tab-focus refresh; the others throttle the auto-fetch
+# rhythm to reduce the compulsive-check pull. See poll.run_loop for the
+# wall-clock alignment, and templates/base.html for the focus-refresh guard.
+AUTO_REFRESH_MODES = ("live", "hourly", "daily", "manual")
+
+
+def _get_auto_refresh() -> str:
+    conn = db.connect()
+    try:
+        mode = (db.get_meta(conn, "auto_refresh") or "live").strip()
+    finally:
+        conn.close()
+    return mode if mode in AUTO_REFRESH_MODES else "live"
+
+
+def _set_auto_refresh(mode: str) -> str:
+    if mode not in AUTO_REFRESH_MODES:
+        raise ValueError(f"invalid auto_refresh mode: {mode!r}")
+    conn = db.connect()
+    try:
+        db.set_meta(conn, "auto_refresh", mode)
+        conn.commit()
+    finally:
+        conn.close()
+    return mode
+
+
+def _set_last_poll_at(epoch: int) -> None:
+    """Record the timestamp of the most recent successful GitHub poll —
+    read by poll.run_loop to decide whether the next scheduled tick is due,
+    and surfaced (via auto_refresh mode + this stamp) to the status pill."""
+    conn = db.connect()
+    try:
+        db.set_meta(conn, "last_poll_at", str(int(epoch)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _render_row(n: dict):
     """Wrap render_template('_row.html', ...) so every row swap carries
     the active triage_mode (persisted setting) and sort (rides on the
@@ -1844,6 +1884,7 @@ def index():
         sort=f["sort"],
         triage_mode=_get_triage_mode(),
         quiet_bystanders=_get_quiet_bystanders(),
+        auto_refresh=_get_auto_refresh(),
         type_labels=TYPE_LABELS_LONG,
         action_labels=ACTION_FILTER_LABELS,
         event_seq=events.current_seq(),
@@ -1902,6 +1943,20 @@ def set_quiet_bystanders():
     return ("", 204)
 
 
+@app.post("/settings/auto_refresh")
+def set_auto_refresh():
+    """Persist the auto-refresh cadence (live / hourly / daily / manual).
+    The change affects future polls only (poll.run_loop reads the value each
+    iteration), and the dropdown row flips its own radio mark client-side —
+    so 204, no table re-render. Invalid values 400."""
+    mode = (request.values.get("value") or "").strip()
+    try:
+        _set_auto_refresh(mode)
+    except ValueError as e:
+        return (str(e), 400)
+    return ("", 204)
+
+
 @app.post("/settings/triage_mode")
 def set_triage_mode():
     """Persist the Relevance-column mode (manual vs ai) and re-render the
@@ -1953,6 +2008,13 @@ def refresh():
         except Exception as e:
             log.exception("on-demand refresh failed")
             error = f"Refresh failed: {e}"
+        if not error:
+            # Stamp the successful poll so poll.run_loop sees the cadence
+            # window as freshly satisfied and doesn't double-fire on its
+            # next wake. A failed poll leaves last_poll_at untouched so the
+            # loop can retry on its own schedule.
+            db.set_meta(conn, "last_poll_at", str(int(time.time())))
+            conn.commit()
         # Fingerprint-gated SSE bump. notify_if_changed returns True iff the
         # render inputs actually moved — also tells us whether this auto-
         # refresh has anything to swap. 204 leaves an open popover (and any

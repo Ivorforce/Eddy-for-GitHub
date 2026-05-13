@@ -1365,6 +1365,18 @@
        (server-rendered for initial state, htmx flips it on response). */
     .options-toggle .check { visibility: hidden; margin-inline-end: 0.15rem; }
     .options-toggle.on .check { visibility: visible; }
+    /* Group label inside the Options dropdown (visually similar to
+       Backfill's .bf-section). Non-interactive — the only-one-on
+       behaviour of the rows below carries the "this is a radio group"
+       cue without extra styling. */
+    .options-menu .options-section {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--pico-muted-color);
+      padding: 0.5rem 0.5rem 0.15rem;
+      pointer-events: none;
+    }
 
     /* Status dot — green idle, orange pulsing while updating, red on error.
        Hover for details. Replaces the old hx-indicator-only spinner. */
@@ -1634,6 +1646,40 @@
     .mention { font-weight: 500; text-decoration: underline; }
   </style>
   <script>
+    // Current auto-refresh mode (live / hourly / daily / manual). Read lazily
+    // off <body> because this script runs in <head> before <body> exists, and
+    // because the dropdown can change it mid-session — we want the freshest
+    // value at every call. See the Options dropdown in index.html and
+    // poll.run_loop on the server.
+    const autoMode = () => (document.body && document.body.dataset.autoRefresh) || "live";
+
+    // Status pill tooltip in idle state. Hourly / Daily show the wall-clock
+    // tick the loop will fire on next (computed locally — the cadence is
+    // anchored to wall-clock boundaries, so no server round-trip is needed
+    // to keep the countdown honest). Live and Manual carry a static message;
+    // Live deliberately has no countdown because at 5min granularity it's
+    // noise, and Manual has no scheduled fetch to count toward.
+    const nextTickLabel = () => {
+      const mode = autoMode();
+      if (mode === "manual") return "Manual — auto-refresh off (click ↻ to fetch)";
+      if (mode === "live")   return "Live — polling every 5 min";
+      const now = new Date();
+      const next = new Date(now);
+      if (mode === "hourly") {
+        next.setMinutes(0, 0, 0);
+        next.setHours(next.getHours() + 1);
+      } else {  // daily
+        next.setHours(4, 0, 0, 0);
+        if (next <= now) next.setDate(next.getDate() + 1);
+      }
+      const mins = Math.max(0, Math.round((next - now) / 60000));
+      const hh = String(next.getHours()).padStart(2, "0");
+      const mm = String(next.getMinutes()).padStart(2, "0");
+      const rel = mins < 60 ? `${mins}m` : `${Math.floor(mins/60)}h ${mins%60}m`;
+      const label = mode.charAt(0).toUpperCase() + mode.slice(1);
+      return `${label} — next at ${hh}:${mm} (in ${rel})`;
+    };
+
     // Global status indicator. HTMX request lifecycle drives loading/idle;
     // online/offline events and HX-Trigger 'showError' drive the error state.
     const setStatus = (state, msg) => {
@@ -1650,7 +1696,7 @@
       dot.title = msg;
     };
     if (!navigator.onLine) setStatus("error", "Offline");
-    window.addEventListener("online",  () => setStatus("idle", "Up to date"));
+    window.addEventListener("online",  () => setStatus("idle", nextTickLabel()));
     window.addEventListener("offline", () => setStatus("error", "Offline"));
 
     // Min visible duration so a sub-100ms 304 round-trip still flashes the
@@ -1667,7 +1713,7 @@
     document.addEventListener("htmx:afterRequest", (e) => {
       const settle = () => {
         if (e.detail.successful) {
-          setStatus("idle", "Up to date");
+          setStatus("idle", nextTickLabel());
         } else {
           const code = e.detail.xhr ? e.detail.xhr.status : 0;
           const txt  = (e.detail.xhr && e.detail.xhr.responseText) || "Network error";
@@ -1896,7 +1942,7 @@
         if (sseErrorTimer) { clearTimeout(sseErrorTimer); sseErrorTimer = null; }
         if (sseDisconnected) {
           sseDisconnected = false;
-          setStatus("idle", "Up to date");
+          setStatus("idle", nextTickLabel());
         }
       });
       sse.addEventListener("error", () => {
@@ -1908,14 +1954,18 @@
         }, 3000);
       });
 
-      // Focus / visibility → ask the server to re-poll. Debounced so a quick
-      // alt-tab dance doesn't hammer GitHub; the manual refresh button
-      // shares the same debounce window. fetch() rather than htmx.ajax
-      // because the swap (if any) arrives over SSE, not via this response —
-      // we just want the side effect.
+      // Focus / visibility → ask the server to re-poll. Live mode only —
+      // in Hourly / Daily / Manual the whole point is that refocusing the
+      // tab learns nothing fresh, so the user can refocus freely and the
+      // pull to compulsively check fades. Debounced 30s so a quick alt-tab
+      // dance doesn't hammer GitHub; the manual refresh button shares the
+      // window. fetch() rather than htmx.ajax because the swap (if any)
+      // arrives over SSE, not via this response — we just want the side
+      // effect.
       const FOCUS_REFRESH_MIN_MS = 30_000;
       let lastRefreshAt = 0;
       const maybeFocusRefresh = () => {
+        if (autoMode() !== "live") return;
         if (document.visibilityState !== "visible") return;
         const dot = document.getElementById("status-dot");
         if (dot && dot.classList.contains("status-error")) return;
@@ -1926,7 +1976,7 @@
         fetch("/refresh?auto=1", { method: "POST" })
           .then((r) => {
             if (sseDisconnected) return;  // SSE error wins until reconnect
-            if (r.ok || r.status === 204) setStatus("idle", "Up to date");
+            if (r.ok || r.status === 204) setStatus("idle", nextTickLabel());
           })
           .catch(() => {});
       };
@@ -1937,6 +1987,26 @@
       if (refreshBtn) {
         refreshBtn.addEventListener("click", () => { lastRefreshAt = Date.now(); });
       }
+
+      // Keep the idle tooltip's countdown roughly current — every 30s,
+      // re-render iff the pill is idle (don't stomp a loading flicker or a
+      // sticky error). Also re-render immediately when the user picks a
+      // new cadence in the Options dropdown; that event also resets
+      // lastRefreshAt so the new mode's focus-refresh policy applies fresh.
+      const refreshIdleTooltip = () => {
+        const dot = document.getElementById("status-dot");
+        if (dot && dot.classList.contains("status-idle")) {
+          setStatus("idle", nextTickLabel());
+        }
+      };
+      setInterval(refreshIdleTooltip, 30_000);
+      window.addEventListener("autoRefreshChanged", () => {
+        lastRefreshAt = 0;
+        refreshIdleTooltip();
+      });
+      // Server-rendered initial title is a static placeholder; replace it
+      // with the cadence-aware text now that <body> is parsed.
+      refreshIdleTooltip();
     });
 
     // Plain-left-click on a popover trigger toggles its popover. Modifier
@@ -2294,7 +2364,7 @@
     });
   </script>
 </head>
-<body data-event-seq="{{ event_seq|default(0) }}">
+<body data-event-seq="{{ event_seq|default(0) }}" data-auto-refresh="{{ auto_refresh|default('live') }}">
   <main class="container">
     {% block content %}{% endblock %}
   </main>
