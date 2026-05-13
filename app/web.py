@@ -71,18 +71,21 @@ def _age_pill(iso: str | None, subject_type: str | None = None) -> dict | None:
     secs = max(0, int((datetime.now(timezone.utc) - dt).total_seconds()))
     days = secs / 86400.0
 
+    # num + unit split lets the template render the unit as a smaller / faded
+    # suffix — mirrors the row below's `stat-num + stat-icon` shape. "now" is
+    # the no-magnitude case, emitted as just the word.
     if secs < 3600:
-        text = "now"
+        num, unit = "now", ""
     elif secs < 86400:
-        text = f"{secs // 3600}h"
+        num, unit = str(secs // 3600), "h"
     elif days < 7:
-        text = f"{int(days)}d"
+        num, unit = str(int(days)), "d"
     elif days < 30:
-        text = f"{int(days / 7)}w"
+        num, unit = str(int(days / 7)), "w"
     elif days < 365:
-        text = f"{int(days / 30.44)}mo"
+        num, unit = str(int(days / 30.44)), "mo"
     else:
-        text = f"{int(days / 365.25)}y"
+        num, unit = str(int(days / 365.25)), "y"
 
     t = min(1.0, math.log(days + 1) / math.log(AGE_GRADIENT_MAX_DAYS + 1))
     # HSL endpoints picked to read in both light and dark mode: moderate
@@ -93,10 +96,8 @@ def _age_pill(iso: str | None, subject_type: str | None = None) -> dict | None:
     lit = 45 + (50 - 45) * t
     color = f"hsl({hue:.0f} {sat:.0f}% {lit:.0f}%)"
 
-    days_int = int(days)
     verb = "Published" if subject_type == "Release" else "Created"
-    title = f"{verb} {days_int} day{'' if days_int == 1 else 's'} ago ({iso})"
-    return {"text": text, "color": color, "title": title}
+    return {"num": num, "unit": unit, "color": color, "verb": verb}
 
 
 # Popularity colors split sentiment into two independent visual axes:

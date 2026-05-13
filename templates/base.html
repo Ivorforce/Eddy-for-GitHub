@@ -120,7 +120,7 @@
     td.activity .activity-stats {
       display: inline-grid;
       grid-template-columns: auto auto;
-      gap: 0 0.7rem;
+      gap: 0.25rem 0.7rem;
       line-height: 1.2;
       color: var(--pico-muted-color);
     }
@@ -145,6 +145,20 @@
       display: inline-flex;
       align-items: center;
       gap: 0.2rem;
+    }
+    /* Age pill has a text unit, not an icon — baseline-align so the small
+       "h" / "mo" / "y" suffix sits on the same baseline as the number,
+       reading as a single unit rather than two separated glyphs. */
+    .age-pill .stat-content { align-items: baseline; gap: 0.1rem; }
+    /* Tabular nums make 1-vs-2-digit counts line up vertically across rows;
+       the column reads as a number column, not a ragged list. */
+    .stat-num { font-variant-numeric: tabular-nums; }
+    /* Unit suffix on the age pill — smaller and faded so the number is what
+       the eye latches onto; the gradient color still carries through. */
+    .stat-unit {
+      font-size: 0.78em;
+      opacity: 0.7;
+      font-weight: 500;
     }
     .stat-icon {
       width: 1em;
@@ -1255,6 +1269,26 @@
     .custom-tooltip .tip-recency-desc + .tip-recency-since {
       margin-top: 0.3rem;
       padding-top: 0.3rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.18);
+    }
+    /* Age-pill tooltip: two sections (creation, last activity), each with a
+       small uppercase label, the humanized delta, then the raw ISO muted
+       below. Hairline mirrors .tip-recency above. */
+    .custom-tooltip .age-tip-label {
+      font-size: 0.72em;
+      opacity: 0.6;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .custom-tooltip .age-tip-value { font-weight: 600; }
+    .custom-tooltip .age-tip-iso {
+      font-size: 0.85em;
+      opacity: 0.55;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .custom-tooltip .age-tip-section + .age-tip-section {
+      margin-top: 0.35rem;
+      padding-top: 0.35rem;
       border-top: 1px solid rgba(255, 255, 255, 0.18);
     }
 

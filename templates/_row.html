@@ -186,7 +186,10 @@
          on entry, see the [data-tip] cursor rule in base.html. The inner
          .stat-content wrapper keeps the tooltip + help cursor scoped to
          the visible text rather than the full grid-column-span row. #}
-      {% if n.age %}<span class="stat age-pill" style="color: {{ n.age.color }}"><span class="stat-content" data-tip="Updated {{ n.updated_at|humanize }} · {{ n.updated_at }}&#10;{{ n.age.title }}">{{ n.age.text }}</span></span>{% endif %}
+      {% if n.age %}
+      {% set age_tip %}<div class="age-tip"><div class="age-tip-section"><div class="age-tip-label">{{ n.age.verb }}</div><div class="age-tip-value">{{ n.created_at|humanize }}</div><div class="age-tip-iso">{{ n.created_at }}</div></div><div class="age-tip-section"><div class="age-tip-label">Last activity</div><div class="age-tip-value">{{ n.updated_at|humanize }}</div><div class="age-tip-iso">{{ n.updated_at }}</div></div></div>{% endset %}
+      <span class="stat age-pill" style="color: {{ n.age.color }}"><span class="stat-content" data-tip-html="{{ age_tip|forceescape }}"><span class="stat-num">{{ n.age.num }}</span>{% if n.age.unit %}<span class="stat-unit">{{ n.age.unit }}</span>{% endif %}</span></span>
+      {% endif %}
       {% if not ai_mode %}
       {# Popularity: net reactions as magnitude + ▲/▼, with magnitude-driven
          color saturation. Hover for the pos/neg breakdown. #}
