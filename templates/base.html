@@ -484,13 +484,20 @@
       color: color-mix(in srgb, var(--pico-muted-color) 65%, transparent);
     }
 
-    /* actions — segmented control of three mutually-exclusive states
-       (Ignore | Done | Mute) + the ••• item-popover trigger. The "active"
-       segment is a filled tint, not an icon: the fill itself signals
-       "you're here". Each state gets a distinct hue along the severity
-       ramp — green for the soft "read but visible", amber for "archived",
-       red for "archived and never come back" — so the three are
-       distinguishable by hue even before the icon registers. */
+    /* actions — two rows on orthogonal axes:
+         Row 1 (segmented): Ignore | Snooze | Done — disposition while
+           subscribed (left→right releases the user's commitment to
+           revisit). Green for "read but visible" (Ignore), amber for
+           "archived w/ timer" (Snooze; grey when also unsubscribed) and
+           "archived" (Done).
+         Row 2 (standalone toggles): Track · Mute · ▾ — subscription
+           posture. Track wears amber when bookmarked; Mute wears red
+           ("archived and never come back" — also archives, so it's
+           mutually exclusive with row 1's three); ▾ wears amber
+           `has-muted` for the partial-mute state.
+       The "active" segment is a filled tint, not an icon — the fill
+       itself signals "you're here". Only one of the four hide-states
+       (Done, Snooze, Mute, or none) is ever active at once. */
     td.actions { white-space: nowrap; width: 1%; vertical-align: middle; }
     td.actions .action-group {
       display: flex;
@@ -529,19 +536,25 @@
       color: var(--pico-color);
     }
     td.actions .action-segment.seg-ignore.active {
-      background: rgba(var(--state-good-rgb), 0.22);   /* muted green */
+      background: rgba(var(--state-good-rgb), 0.22);   /* muted green — read, visible */
     }
     td.actions .action-segment.seg-done.active {
       background: rgba(var(--accent-amber-deep-rgb), 0.26);   /* amber — archived */
     }
-    td.actions .action-segment.seg-mute.active {
-      background: rgba(var(--state-bad-rgb), 0.22);   /* red — silenced */
+    td.actions .action-segment.seg-snooze.active {
+      background: rgba(var(--accent-amber-deep-rgb), 0.26);   /* amber — archived w/ timer */
+      color: var(--pico-color);
+    }
+    /* Quiet snooze (also unsubscribed) — muted grey, not amber: it's not a
+       live timer waiting on activity, just a parked thread. */
+    td.actions .action-segment.seg-snooze.active.quiet {
+      background: rgba(140, 149, 159, 0.24);
     }
 
-    /* Row 2 of the Actions cell — Track + Snooze (+ "Note…" in manual mode).
-       Track wears the segmented-control's slot background (faint grey box,
-       filled tint when on) so it reads as a toggle; Snooze is a one-shot
-       action — no persistent fill, just opens a duration popover. */
+    /* Row 2 of the Actions cell — Track · Mute · ▾. Three standalone toggles
+       on the subscription-posture axis; each wears the segmented-control's
+       slot background (faint grey box, filled tint when on) so they read as
+       toggles. Mute and ▾ form the unsubscribe pair (full / partial). */
     td.actions .action-row2 {
       display: flex;
       align-items: center;
@@ -561,25 +574,62 @@
       gap: 0.18rem;
       font-size: 0.6rem;
       white-space: nowrap;
+      background: rgba(140, 149, 159, 0.08);   /* slot background, like .action-group */
     }
     td.actions .row2-btn svg { width: 0.9rem; height: 0.9rem; display: block; }
     td.actions .row2-btn:hover { background: rgba(140, 149, 159, 0.18); color: var(--pico-color); }
-    /* Track — slot background like .action-group above; filled when tracked. */
-    td.actions .track-btn { background: rgba(140, 149, 159, 0.08); }
+    /* Track — amber when bookmarked. */
     td.actions .track-btn.active {
       background: rgba(var(--accent-amber-rgb), 0.20);
       color: var(--accent-amber);
     }
-    /* Snooze trigger — no fill (it's an action, not a state); the snoozed
-       state shows the wake countdown amber-filled, like the Done segment. */
-    td.actions .snooze-btn { background: none; }
-    td.actions .snooze-btn.active {
-      background: rgba(var(--accent-amber-deep-rgb), 0.26);
+    /* Mute — red when fully unsubscribed (also archived). Mutually exclusive
+       with row 1's active states. */
+    td.actions .mute-btn.active {
+      background: rgba(var(--state-bad-rgb), 0.22);
       color: var(--pico-color);
+      font-weight: 600;
     }
-    /* Quiet snooze (also unsubscribed) — muted grey, not amber: it's not a
-       live timer waiting on activity, just a parked thread. */
-    td.actions .snooze-btn.active.quiet { background: rgba(140, 149, 159, 0.24); }
+    /* Mute + ▾ joined sub-group — share a single border + slot background
+       (like row 1's .action-group). The child buttons drop their own borders
+       and radii; a hairline divider separates them. overflow:hidden clips
+       child backgrounds to the rounded corner, so Mute's red `active` and ▾'s
+       amber `has-muted` fills paint inside the group's outline. */
+    td.actions .row2-group {
+      display: inline-flex;
+      background: rgba(140, 149, 159, 0.08);
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.4rem;
+      overflow: hidden;
+      margin-left: auto;   /* push to the right edge, away from Track */
+    }
+    td.actions .row2-group .row2-btn {
+      border: none;
+      border-radius: 0;
+      background: none;
+    }
+    td.actions .row2-group .row2-btn + .row2-btn {
+      border-left: 1px solid var(--pico-muted-border-color);
+    }
+    /* ▾ caret — narrower than the icon button next to it; amber `has-muted`
+       marks the partial-mute state (some kinds silenced), distinct from
+       Mute's red. */
+    td.actions .mute-caret-btn {
+      padding: 0.13rem 0.38rem;
+      font-size: 0.62rem;
+    }
+    td.actions .mute-caret-btn.has-muted {
+      background: rgba(var(--accent-amber-deep-rgb), 0.18);
+      color: var(--accent-amber-deep);
+    }
+    /* Inline ▾ after an icon — signals "opens a menu" on a button that's
+       not part of a sibling-caret pattern. Used on the Snooze trigger. */
+    td.actions .action-segment .disclosure {
+      font-size: 0.62rem;
+      line-height: 1;
+      margin-inline-start: 0.1rem;
+      opacity: 0.7;
+    }
 
     /* Snooze duration menu — a native [popover] anchored to its trigger
        (no Pico <details> box to override). Sized like a compact menu. */
@@ -638,18 +688,6 @@
     .snooze-pop .snooze-quiet-opt.on { color: var(--pico-color); }
     .snooze-pop .snooze-quiet-opt.on .check { visibility: visible; }
 
-    /* ▾ caret after the Mute segment — opens the per-kind mute menu. Narrower
-       than the icon segments; the amber `has-muted` tint marks "some kind is
-       muted" and stays distinct from the red full-mute `.seg-mute.active`. */
-    td.actions .action-segment.seg-mute-caret {
-      padding: 0.1rem 0.26rem;
-      font-size: 0.62rem;
-      line-height: 1;
-    }
-    td.actions .action-segment.seg-mute-caret.has-muted {
-      background: rgba(var(--accent-amber-deep-rgb), 0.18);
-      color: var(--accent-amber-deep);   /* same amber as the note / partial-state accents */
-    }
     /* Purple dotted inset ring — the AI *suggests* this action / subscription
        change and the user hasn't done it yet. Dashed (not solid) so it reads
        as a hint, not a state. Goes on whichever Actions-column control matches
@@ -664,13 +702,6 @@
     td.actions .row2-btn.ai-suggests {
       outline: 1.5px dashed rgba(var(--ai-accent-rgb), 0.85);
       outline-offset: -2px;
-    }
-    /* Inline ▾ after an icon — signals "opens a menu" on buttons that aren't
-       part of a segmented control (Snooze). Same glyph as the Mute caret. */
-    td.actions .row2-btn .disclosure {
-      font-size: 0.62rem;
-      line-height: 1;
-      opacity: 0.7;
     }
     .mutekind-pop .mutekind-title {
       font-size: 0.62rem;
