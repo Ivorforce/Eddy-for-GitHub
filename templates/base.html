@@ -301,9 +301,12 @@
        when filters change which cells are visible. width alone is only a
        preferred-width hint in auto table layout; min-width is the hard floor
        that survives "no visible cell needs 11rem". Long content truncates
-       per-line (see .repo-owner / .repo-name / .author-login below). */
-    .repo-col, td.repo { width: 11rem; min-width: 11rem; max-width: 11rem; }
-    td.repo { line-height: 1.1; padding-right: 1rem; }
+       per-line (see .repo-owner / .repo-name below). */
+    .repo-col, td.repo { width: 10rem; min-width: 10rem; max-width: 10rem; }
+    /* line-height needs a little slack below the baseline so the dotted
+       has-note underline on .repo-owner / .repo-name (overflow:hidden for
+       ellipsis) isn't clipped by the line box. */
+    td.repo { line-height: 1.25; padding-right: 1rem; }
     .repo-line {
       display: flex;
       align-items: baseline;
@@ -323,8 +326,7 @@
       min-width: 0;
     }
     /* Trailing slash signals "this owner contains the repo below" — turns
-       the stacked owner/name into a directional path, distinguishing it
-       from the indented author line below. */
+       the stacked owner/name into a directional path. */
     .repo-owner.entity-trigger::after {
       content: "/";
       opacity: 0.6;
@@ -337,20 +339,19 @@
       white-space: nowrap;
       min-width: 0;
     }
-    /* Author indents under the repo so it reads as item-attribution, not
-       another segment of the owner/repo path. */
-    .repo-author {
-      display: flex;
+    /* Author chip — sits as the first cluster of the title's meta-row.
+       Inline-flex keeps "by [badge] [login]" atomic so it wraps as a unit
+       when the meta-row overflows. Inherits the meta-row's font-size. */
+    .meta-author {
+      display: inline-flex;
       align-items: center;
-      gap: 0.3rem;
-      margin-top: 0.1rem;
-      padding-left: 0.45rem;
-      font-size: 0.72rem;
-      color: var(--pico-muted-color);
+      gap: 0.25rem;
       position: relative;
+      max-width: 100%;
+      min-width: 0;
     }
-    .repo-author .author-by { opacity: 0.7; flex-shrink: 0; }
-    .repo-author .author-login {
+    .meta-author .author-by { opacity: 0.7; flex-shrink: 0; }
+    .meta-author .author-login {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -417,6 +418,15 @@
     a.entity-trigger { transition: none; }
     .entity-trigger:hover { color: var(--pico-color); text-decoration: underline; }
     .entity-trigger.is-tracked:hover { color: var(--accent-amber); }
+    /* A saved note on this entity (org / repo / person) — dotted amber
+       underline at rest signals "annotated"; the note text rides in the
+       title= attribute for hover. Keyed on the class, not [title], because
+       the custom-tooltip JS swaps title↔data-stashed-title on hover and
+       attribute-keyed styling would flicker (see memory). */
+    a.entity-trigger.has-note {
+      text-decoration: underline dashed var(--accent-amber);
+    }
+    a.entity-trigger.has-note:hover { text-decoration: underline; }
     /* Item title is the longest piece of free-text prose on the row, so it
        reads as text rather than as a styled link: inherits body color (NOT
        Pico's anchor-scoped --pico-color, which is the link primary blue —
