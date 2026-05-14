@@ -1814,7 +1814,15 @@
       padding: 0.1em 0.3em;
       border-radius: 3px;
     }
-    .timeline-bubble-body a.gh-ref { text-decoration: none; }
+    /* `#NN` / repo#NN / URL refs from ghmd.render — same look in timeline
+       bubbles (interactive=True → <a>) and pill tooltips (interactive=False
+       → <span>). Spans need the color set explicitly; <a> gets it from
+       Pico but we re-state it so the two contexts can't drift. */
+    .timeline-bubble-body .gh-ref,
+    .custom-tooltip .gh-ref {
+      color: var(--pico-primary);
+      text-decoration: none;
+    }
     .timeline-bubble-body a.gh-ref:hover { text-decoration: underline; }
     /* @mentions: GitHub-style — login is always underlined (the link
        cue), a touch bold. The leading `@` reads as a sigil and stays
