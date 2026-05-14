@@ -148,15 +148,14 @@
     /* Age pill has a text unit, not an icon — baseline-align so the small
        "h" / "mo" / "y" suffix sits on the same baseline as the number,
        reading as a single unit rather than two separated glyphs. */
-    .age-pill .stat-content { align-items: baseline; gap: 0.1rem; }
+    .age-pill .stat-content { align-items: baseline; gap: 0.05rem; }
     /* Tabular nums make 1-vs-2-digit counts line up vertically across rows;
        the column reads as a number column, not a ragged list. */
     .stat-num { font-variant-numeric: tabular-nums; }
-    /* Unit suffix on the age pill — smaller and faded so the number is what
-       the eye latches onto; the gradient color still carries through. */
+    /* Unit suffix on the age pill — smaller so the number is what the eye
+       latches onto; the gradient color still carries through. */
     .stat-unit {
       font-size: 0.78em;
-      opacity: 0.7;
       font-weight: 500;
     }
     .stat-icon {
