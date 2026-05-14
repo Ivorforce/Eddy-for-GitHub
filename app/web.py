@@ -438,7 +438,7 @@ def _format_meta(
         dels = d.get("deletions") or 0
         if adds or dels:
             out["complexity"] = (adds, dels)
-        # Top 5 files by total changed lines, for the diff-label hover. Sort
+        # Top 10 files by total changed lines, for the diff-label hover. Sort
         # is descending on additions+deletions so the user sees the biggest
         # touch points first; ties break on filename for stability across
         # re-renders.
@@ -449,7 +449,7 @@ def _format_meta(
                 -((f.get("additions") or 0) + (f.get("deletions") or 0)),
                 f.get("filename") or "",
             ),
-        )[:5]
+        )[:10]
         if ranked:
             out["top_files"] = ranked
             # `changed_files` is the PR's *total* file count; `files` may be
