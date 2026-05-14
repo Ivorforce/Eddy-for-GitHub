@@ -78,6 +78,17 @@
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
+  {% elif ev.kind == 'mention' %}
+    {# The /notifications API gives us the reason (mention / team_mention)
+       but not the author — the triggering comment is already in the
+       timeline above as its own `comment` event, so "someone" is honest.
+       @mentioned in the self/yours blue accent. #}
+    <div class="timeline-line">
+      <span class="timeline-summary">
+        someone <span class="recency-mention">@mentioned</span> {% if ev.is_team %}your team{% else %}you{% endif %}
+      </span>
+      <span class="timeline-age">{{ ev.age_text }}</span>
+    </div>
   {% elif ev.kind in ('body_edit', 'code') %}
     {# Real-login actors (the editor / pusher) — chip them like comments so
        badge + tracked-state surface. Badge backfilled from the per-thread

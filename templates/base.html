@@ -1401,6 +1401,10 @@
     }
     .custom-tooltip .state-approved          { color: var(--state-good); font-weight: 500; }
     .custom-tooltip .state-changes-requested { color: var(--state-bad-muted); font-weight: 500; }
+    /* "@mentioned" — surfaced in both the inline pill text and the tooltip
+       line. Blue is the self/yours accent (is-yours-row, .icon-self, etc),
+       so the token reads as "you, addressed" at a glance. */
+    .recency-mention { color: var(--accent-blue); font-weight: 500; }
     /* Age-pill tooltip: two sections (creation, last activity), each with a
        small uppercase label, the humanized delta, then the raw ISO muted
        below. Hairline mirrors .tip-recency above. */

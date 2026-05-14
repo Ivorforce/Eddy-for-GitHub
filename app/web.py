@@ -1362,10 +1362,9 @@ def _format_event_for_render(
         # team_mention. The comment that triggered it is already in the
         # timeline (kind='comment'); this event just anchors *when* the
         # mention landed so the pill can compare against the latest
-        # engagement.
-        out["actor"] = "GitHub"
-        team = (payload.get("reason") == "team_mention")
-        out["summary"] = "mentioned your team" if team else "mentioned you"
+        # engagement. Rendered telegraphically in its own template branch
+        # — no actor chip ("GitHub mentioned you" reads awkwardly).
+        out["is_team"] = (payload.get("reason") == "team_mention")
     elif kind == "priority_change":
         out["actor"] = "You"
         to_val = payload.get("to")
@@ -1452,11 +1451,15 @@ def _recency_summary(
     def _plural(n: int, noun: str) -> str:
         return f"+{n} {noun}{'' if n == 1 else 's'}"
 
-    parts: list[str] = []          # inline pill text — plain counts
+    parts: list = []               # inline pill text — plain counts (str or Markup)
     detail: list[Markup] = []      # hover line — same shape, with state notes colored
     if mentions:
-        parts.append("+ mentioned")
-        detail.append(Markup("+ mentioned"))
+        # @mentioned in the self-accent blue used everywhere "you" is denoted
+        # (is-yours-row left border, .icon-self, etc). Drops the "+" sigil
+        # — the @ already reads as a GitHub mention reference.
+        mention = Markup('<span class="recency-mention">@mentioned</span>')
+        parts.append(mention)
+        detail.append(mention)
     if reviews:
         parts.append(_plural(reviews, "review"))
         cr = sum(1 for s in review_states if s == "CHANGES_REQUESTED")
@@ -1479,16 +1482,16 @@ def _recency_summary(
     for verb in lifecycle_verbs:
         parts.append(verb)
         detail.append(Markup(verb))
+    if comments:
+        label = "+ you commented" if user_comments == comments else _plural(comments, "comment")
+        parts.append(label)
+        detail.append(Markup(label))
     if pushes:
         label = "code pushed" if pushes == 1 else f"+{pushes} code pushes"
         parts.append(label)
         detail.append(Markup(label))
     if body_edits:
         label = "description edited" if body_edits == 1 else f"{body_edits} description edits"
-        parts.append(label)
-        detail.append(Markup(label))
-    if comments:
-        label = "+ you commented" if user_comments == comments else _plural(comments, "comment")
         parts.append(label)
         detail.append(Markup(label))
 
@@ -1500,7 +1503,7 @@ def _recency_summary(
         '<div class="tip-recency-label">{}</div>'
         '<div class="tip-recency-line">{}</div>'
         '</div>').format(label_text, Markup(", ").join(detail))
-    return {"text": ", ".join(parts), "tip_html": tip_html}
+    return {"text": Markup(", ").join(parts), "tip_html": tip_html}
 
 
 def _build_timeline(
