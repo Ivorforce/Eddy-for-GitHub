@@ -4,7 +4,7 @@
    sub_sug mirrors the _row.html expression: AI mode with a verdict carrying
    a subscription suggestion (applied or not). #}
 {% set sub_sug = triage_mode == 'ai' and n.ai_verdict and n.ai_verdict.has_subscription_suggestion %}
-<div class="mutekind-title">Mute updates</div>
+<div class="pop-title">Mute updates</div>
 {% if sub_sug %}
 <button type="button"
         class="mutekind-apply{% if not n.ai_verdict.subscription_pending %} done{% endif %}"
