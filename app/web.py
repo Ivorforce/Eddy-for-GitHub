@@ -1398,7 +1398,7 @@ def _recency_summary(
     body_edits, and comments — in importance order. Returns None when
     there's no activity AND no description to show on top — i.e. the
     tooltip would be empty."""
-    comments = reviews = mentions = body_edits = user_comments = pushes = 0
+    comments = reviews = mentions = body_edits = user_comments = user_reviews = pushes = 0
     review_states: list[str] = []
     lifecycle_verbs: list[str] = []
     for r in rows:
@@ -1417,11 +1417,14 @@ def _recency_summary(
         elif kind == "review":
             reviews += 1
             try:
-                st = (json.loads(r["payload_json"]).get("state") or "").upper()
+                pl = json.loads(r["payload_json"])
             except (ValueError, TypeError):
-                st = ""
+                pl = {}
+            st = (pl.get("state") or "").upper()
             if st:
                 review_states.append(st)
+            if user_login and pl.get("author") == user_login:
+                user_reviews += 1
         elif kind == "lifecycle":
             try:
                 action = json.loads(r["payload_json"]).get("action") or ""
@@ -1461,7 +1464,8 @@ def _recency_summary(
         parts.append(mention)
         detail.append(mention)
     if reviews:
-        parts.append(_plural(reviews, "review"))
+        review_label = "+ you reviewed" if user_reviews == reviews else _plural(reviews, "review")
+        parts.append(review_label)
         cr = sum(1 for s in review_states if s == "CHANGES_REQUESTED")
         ap = sum(1 for s in review_states if s == "APPROVED")
         # State breakdown inherits the timeline-view colors
@@ -1475,7 +1479,7 @@ def _recency_summary(
             notes.append(Markup(
                 '<span class="state-approved">{} approved</span>'
             ).format(ap))
-        line = Markup(_plural(reviews, "review"))
+        line = Markup(review_label)
         if notes:
             line = line + Markup(" (") + Markup(", ").join(notes) + Markup(")")
         detail.append(line)
