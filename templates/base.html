@@ -2273,6 +2273,27 @@
       pop.showPopover();
     });
 
+    // Priority picker — delegated click. Each row's grid has 6 cells, and
+    // wiring per-button hx-post would multiply the HTMX scan cost across
+    // every table swap. One document-level listener, htmx.ajax with the
+    // same target/swap/include the buttons used to declare. Mirrors the
+    // visit-link pattern in _row.html (onclick="htmx.ajax(...)").
+    document.addEventListener("click", (e) => {
+      const cell = e.target.closest(".priority-cell");
+      if (!cell) return;
+      if (e.button !== 0) return;
+      const grid = cell.closest(".priority-grid");
+      const tr = cell.closest("tr");
+      const threadId = grid && grid.dataset.threadId;
+      if (!threadId || !tr) return;
+      htmx.ajax("POST", `/set/${threadId}/priority`, {
+        target: tr,
+        swap: "outerHTML",
+        source: "#filters",
+        values: { level: cell.value },
+      });
+    });
+
     // Entity (person/repo/org) track toggles broadcast a single
     // entityTrackedChanged event. The originating row is updated by the
     // HTMX row-swap; this handler updates *every other* affected row's

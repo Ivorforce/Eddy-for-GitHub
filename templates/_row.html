@@ -350,14 +350,17 @@
        in manual mode to neutral. The band labels are a non-interactive
        overlay — clicks land on the cells underneath. Posting re-renders
        the whole row so the pill and picker highlight move together. #}
-    <div class="priority-grid" role="group" aria-label="Priority">
+    {# Priority cells use a document-level delegated click handler in
+       base.html (priorityCellClick) — keeps 6 hx-attributed buttons ×
+       N rows off every table swap. data-thread-id on the grid is what
+       the handler reads. #}
+    <div class="priority-grid" role="group" aria-label="Priority"
+         data-thread-id="{{ n.id }}">
       {% for g in PRIORITY_UI %}{% set gi = loop.index0 %}
         {% for c in g.cells %}
-        <button type="button" name="level" value="{{ c.key }}"
+        <button type="button" value="{{ c.key }}"
                 style="grid-column: {{ gi * 2 + loop.index }}; --imp: {{ '%.3f' % c.score }};"
                 class="priority-cell{% if loop.first %} band-start{% endif %}{% if n.priority_level == c.key %} active{% endif %}"
-                hx-post="/set/{{ n.id }}/priority"
-                hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters"
                 title="{{ c.desc }}"></button>
         {% endfor %}
       {% endfor %}
