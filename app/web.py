@@ -3138,6 +3138,13 @@ def ai_judge(thread_id: str):
                 user_teams=app.config.get("USER_TEAMS"),
                 invocation_mode=mode,
             )
+        except ai.AIBusy:
+            # Double-click, or this manual click raced an auto-judge pass.
+            # The other caller will write a verdict and SSE will deliver it;
+            # from this client's perspective "already judging" is the same
+            # outcome as "judging started" — no error, just re-render the
+            # row in its current (pre-verdict) state.
+            pass
         except ai.AIError as e:
             log.warning("AI judge failed for %s: %s", thread_id, e)
             error = f"AI judge failed: {e}"

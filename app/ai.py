@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -818,8 +819,13 @@ def _cached_verdict(conn: sqlite3.Connection, thread_id: str) -> dict | None:
 
 def _save_verdict(
     conn: sqlite3.Connection, thread_id: str, verdict: dict, model: str,
-    *, reclaim_priority: bool = True,
+    *, ts: int, reclaim_priority: bool = True,
 ) -> None:
+    # `ts` is the kick-off timestamp captured at the top of judge(), not now —
+    # so a comment that arrives mid-call has a higher ts than the verdict and
+    # correctly marks it outdated (auto_judge / Re-ask predicate keys on
+    # `te.ts > ai_verdict_at`). See judge() for the race this closes.
+    #
     # A fresh verdict normally reclaims the displayed priority: clear any
     # hand-set priority_user. The user's choice isn't lost — it survives as a
     # priority_change event in the timeline, which this judgment already saw
@@ -835,7 +841,7 @@ def _save_verdict(
                    priority_user = NULL
              WHERE id = ?
             """,
-            (json.dumps(verdict, ensure_ascii=False), int(time.time()), model, thread_id),
+            (json.dumps(verdict, ensure_ascii=False), ts, model, thread_id),
         )
     else:
         conn.execute(
@@ -844,7 +850,7 @@ def _save_verdict(
                SET ai_verdict_json = ?, ai_verdict_at = ?, ai_verdict_model = ?
              WHERE id = ?
             """,
-            (json.dumps(verdict, ensure_ascii=False), int(time.time()), model, thread_id),
+            (json.dumps(verdict, ensure_ascii=False), ts, model, thread_id),
         )
 
 
@@ -915,6 +921,32 @@ class AIError(RuntimeError):
     Routes catch this and surface via the existing showError HX-Trigger."""
 
 
+class AIBusy(AIError):
+    """Raised when judge() is already running for this thread on another
+    caller (manual Re-ask vs. auto-judge race, or a double-click). Single-
+    process Flask, so an in-memory lock is enough."""
+
+
+# Per-thread in-flight set, guarded by a single mutex. _enter_judge returns
+# True iff the caller now owns the slot and must call _exit_judge in a
+# finally. Manual clicks and the auto-judge pass go through the same gate.
+_IN_FLIGHT_LOCK = threading.Lock()
+_IN_FLIGHT: set[str] = set()
+
+
+def _enter_judge(thread_id: str) -> bool:
+    with _IN_FLIGHT_LOCK:
+        if thread_id in _IN_FLIGHT:
+            return False
+        _IN_FLIGHT.add(thread_id)
+        return True
+
+
+def _exit_judge(thread_id: str) -> None:
+    with _IN_FLIGHT_LOCK:
+        _IN_FLIGHT.discard(thread_id)
+
+
 def judge(
     thread_id: str,
     conn: sqlite3.Connection,
@@ -943,7 +975,38 @@ def judge(
     merge fills them from `prior_verdict` — and in `re_evaluate` mode may call
     `skip` instead, which re-affirms the prior verdict unchanged. An inherited
     `priority_score` (and `skip`) won't clear a hand-set `priority_user`; a
-    freshly-supplied one will. See ai_system_prompt.md §Output fields."""
+    freshly-supplied one will. See ai_system_prompt.md §Output fields.
+
+    Concurrency: a per-thread in-memory lock (`_IN_FLIGHT`) serializes calls
+    for the same thread — a manual Re-ask racing the auto-judge pass, or a
+    double-click, gets `AIBusy` on the second caller rather than double-spending
+    the API. The kick-off timestamp `ts_start` is captured before the call and
+    used for both `ai_verdict_at` and the `ai_verdict` event's `ts`, so any
+    activity that lands while the model is thinking sorts *after* the verdict
+    and correctly marks it outdated."""
+    # Capture early so activity that arrives mid-call sorts after the verdict.
+    ts_start = int(time.time())
+    if not _enter_judge(thread_id):
+        raise AIBusy(f"judgment already in flight for {thread_id}")
+    try:
+        return _judge_locked(
+            thread_id, conn, ts_start=ts_start,
+            user_login=user_login, user_teams=user_teams,
+            invocation_mode=invocation_mode,
+        )
+    finally:
+        _exit_judge(thread_id)
+
+
+def _judge_locked(
+    thread_id: str,
+    conn: sqlite3.Connection,
+    *,
+    ts_start: int,
+    user_login: str | None,
+    user_teams,
+    invocation_mode: str,
+) -> dict:
     model = _model_id()
     cap = _daily_cap()
     spent = _spent_today(conn)
@@ -1120,7 +1183,10 @@ def judge(
     if missing:
         raise _fail(f"Verdict missing fields: {sorted(missing)}")
 
-    _save_verdict(conn, thread_id, verdict, model, reclaim_priority=reclaim_priority)
+    _save_verdict(
+        conn, thread_id, verdict, model,
+        ts=ts_start, reclaim_priority=reclaim_priority,
+    )
     ai_call_id = _log_call(
         conn, thread_id=thread_id, model=model,
         request=request_log, response=response_dict, usage=usage,
@@ -1131,11 +1197,13 @@ def judge(
     # query away; `model` rides in the payload so timeline-render can show
     # which model produced it. A `skip` lands here as another ai_verdict event
     # with the prior payload — the timeline collapses superseded verdicts, so
-    # it just advances the "AI last looked here" mark.
+    # it just advances the "AI last looked here" mark. `ts=ts_start` (not now)
+    # so any activity that arrived while the model was thinking sorts after
+    # this row — see the judge() docstring.
     db.write_thread_event(
         conn,
         thread_id=thread_id,
-        ts=int(time.time()),
+        ts=ts_start,
         kind="ai_verdict",
         source="ai",
         external_id=str(ai_call_id),
@@ -1241,8 +1309,10 @@ def auto_judge_eligible(
     for r in rows:
         thread_id = r["id"]
         # Re-check the predicate right before the call: a manual Ask AI may
-        # have judged this thread between the SELECT and now (no per-thread
-        # lock in `judge()`), and we don't want to double-spend.
+        # have judged this thread between the SELECT and now, and we don't
+        # want to double-spend. (judge() also has a per-thread in-flight lock
+        # — AIBusy — that catches the same race when the manual call is still
+        # in flight; this predicate catches it after it has already completed.)
         current = conn.execute(
             f"""
             SELECT 1 FROM notifications n
@@ -1280,6 +1350,11 @@ def auto_judge_eligible(
             )
             conn.commit()
             judged += 1
+        except AIBusy:
+            # Manual click is mid-call on this same thread — skip silently and
+            # let the in-flight call write its verdict; this pass will pick up
+            # any remaining staleness on the next tick.
+            log.debug("auto-judge: %s busy (manual call in flight), skipping", thread_id)
         except AIError as e:
             # cap_exceeded is the only AIError that should halt the pass —
             # one row failing for any other reason (transient API error,
