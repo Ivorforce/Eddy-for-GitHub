@@ -277,25 +277,27 @@ def _read_system_prompt() -> str:
         )
 
 
-def _read_preferences() -> str:
-    """User-edited preferences. Empty when the user hasn't created the file."""
+def _read_preferences() -> str | None:
+    """User-edited preferences. None when the user hasn't created the file."""
     try:
         return _PREFERENCES_PATH.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
-        return "(No preferences file found at config/preferences.md. Judge using the heuristics in the system prompt only.)"
+        return None
 
 
 def _identity_block(user_login: str | None, user_teams) -> str | None:
-    """Short prefix telling the model whose inbox it's triaging. Without it,
-    the AI sees logins like 'octocat' as anonymous strings and can't
-    tell author/assignee/reviewer fields apart from any other commenter.
-    Returns None when the login isn't known (auth.fetch_identity failed)."""
+    """Short prefix naming the model's role and the user it's triaging for.
+    Without it, the AI sees logins like 'octocat' as anonymous strings and
+    can't tell author/assignee/reviewer fields apart from any other
+    commenter. Returns None when the login isn't known (auth.fetch_identity
+    failed)."""
     if not user_login:
         return None
     parts = [
-        f"You are judging on behalf of GitHub user @{user_login}. "
-        f'Treat the login "{user_login}" appearing in any field (author, assignee, '
-        f"requested_reviewer, commenter, etc.) as the user themselves."
+        f"You are an AI assistant helping GitHub user @{user_login} triage GitHub activity "
+        f"by judging each item's relevance and urgency to the user. "
+        f'When the login "{user_login}" appears in any field (author, assignee, '
+        f"requested_reviewer, commenter, etc.), that refers to the user — not you."
     ]
     if user_teams:
         team_strs = sorted(f"{org}/{slug}" for org, slug in user_teams)
@@ -1095,7 +1097,16 @@ def _judge_locked(
     identity = _identity_block(user_login, user_teams)
     if identity:
         system_prompt = f"{identity}\n\n{system_prompt}"
-    prefs = _read_preferences()
+    prefs_body = _read_preferences()
+    if prefs_body is None:
+        prefs = "(No preferences file found at config/preferences.md. Judge using the heuristics in the system prompt only.)"
+    else:
+        who = f"GitHub user @{user_login}" if user_login else "the user"
+        prefs = (
+            f"The following are notes that {who} wrote about themselves and their triage preferences. "
+            f'First-person "I" is the user, not you.\n\n'
+            f"{prefs_body}"
+        )
     user_msg = _build_user_message(ctx)
 
     # Extended thinking + a *forced* tool_choice are mutually exclusive on
