@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 import time
 from typing import Any
 
@@ -41,6 +42,97 @@ _USER_LOGIN: str | None = None
 def set_user_login(login: str | None) -> None:
     global _USER_LOGIN
     _USER_LOGIN = login
+
+
+# Per-thread enrichment signal. A row is "dirty" (enrichment owed) iff
+# `details_fetched_at IS NULL OR datetime(updated_at) > datetime(details_fetched_at,
+# 'unixepoch')` — same predicate the _enrich eligibility query uses. The Event
+# is the in-memory edge of that DB state: cleared when _upsert lands new
+# activity that makes the row dirty, set when _enrich finishes (or 404s) and
+# writes details_fetched_at. AI callers wait on it before sending the prompt,
+# so they don't judge against stale thread_events.
+_ENRICH_SIGNAL_LOCK = threading.Lock()
+_ENRICH_SIGNALS: dict[str, threading.Event] = {}
+
+
+def _is_dirty(conn: sqlite3.Connection, thread_id: str) -> bool:
+    """The dirty predicate. Returns True iff the row needs (re-)enrichment."""
+    row = conn.execute(
+        "SELECT updated_at, details_fetched_at FROM notifications WHERE id = ?",
+        (thread_id,),
+    ).fetchone()
+    if row is None:
+        return False
+    if row["details_fetched_at"] is None:
+        # No detail fetch yet (e.g., a Release row, or pre-enrichment). Only
+        # treat as dirty if the row has a populated updated_at — otherwise
+        # there's nothing for _enrich to compare against.
+        return bool(row["updated_at"])
+    # SQLite datetime() handles the unix-epoch vs ISO comparison; mirror
+    # _enrich's eligibility query exactly so the predicate doesn't drift.
+    cmp = conn.execute(
+        "SELECT datetime(?) > datetime(?, 'unixepoch') AS dirty",
+        (row["updated_at"], row["details_fetched_at"]),
+    ).fetchone()
+    return bool(cmp["dirty"])
+
+
+def _enrich_signal(conn: sqlite3.Connection, thread_id: str) -> threading.Event:
+    """Lookup-or-create the Event for `thread_id`. New Events are initialized
+    against the current DB predicate — a clean row starts set so waiters don't
+    block forever on a row we've never touched; a dirty row starts cleared."""
+    with _ENRICH_SIGNAL_LOCK:
+        ev = _ENRICH_SIGNALS.get(thread_id)
+        if ev is not None:
+            return ev
+        ev = threading.Event()
+        if not _is_dirty(conn, thread_id):
+            ev.set()
+        _ENRICH_SIGNALS[thread_id] = ev
+        return ev
+
+
+def wait_until_enriched(
+    conn: sqlite3.Connection, thread_id: str, *, timeout: float = 60.0
+) -> bool:
+    """Block until the row's enrichment is up to date, or `timeout` elapses.
+
+    Returns True if the row is clean (now or after waiting), False if it's
+    still dirty when we give up. Callers raise their own error on False —
+    judging a stale timeline is worse than failing the call.
+
+    The post-wait DB re-check is load-bearing: poll N's _enrich can set the
+    signal carrying a details_fetched_at that's already stale because poll N+1
+    bumped updated_at in between. Trusting the Event alone would let the
+    waiter proceed on data the next enrichment will overwrite."""
+    if not _is_dirty(conn, thread_id):
+        return True
+    ev = _enrich_signal(conn, thread_id)
+    ev.wait(timeout=timeout)
+    return not _is_dirty(conn, thread_id)
+
+
+def _mark_enriched(thread_id: str) -> None:
+    """Signal waiters that this row is freshly enriched. Safe to call even if
+    no Event exists yet — we create one set."""
+    with _ENRICH_SIGNAL_LOCK:
+        ev = _ENRICH_SIGNALS.get(thread_id)
+        if ev is None:
+            ev = threading.Event()
+            _ENRICH_SIGNALS[thread_id] = ev
+        ev.set()
+
+
+def _mark_dirty(thread_id: str) -> None:
+    """Signal waiters that this row has fresh activity pending enrichment.
+    Lazily creates a cleared Event if none existed yet."""
+    with _ENRICH_SIGNAL_LOCK:
+        ev = _ENRICH_SIGNALS.get(thread_id)
+        if ev is None:
+            ev = threading.Event()  # starts cleared
+            _ENRICH_SIGNALS[thread_id] = ev
+            return
+        ev.clear()
 
 
 def derive_html_url(item: dict[str, Any]) -> str | None:
@@ -1572,6 +1664,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
                 "UPDATE notifications SET details_fetched_at = ? WHERE id = ?",
                 (now, row["id"]),
             )
+            _mark_enriched(row["id"])
             continue
 
         # Pop the bonus keys so they don't leak into details_json (which is
@@ -1589,11 +1682,15 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
         # COALESCE captures baseline_comments on first enrichment so the
         # '+N new comments' indicator stays alive through Read actions and
         # only shifts when actual notification activity changes the count.
+        # details_fetched_at is written at the *end* of the per-row block
+        # below, not here, so the dirty predicate flips clean only after the
+        # thread_events fan-out is done — otherwise wait_until_enriched
+        # waiters could be released onto a half-built timeline.
         conn.execute(
-            "UPDATE notifications SET details_json = ?, details_fetched_at = ?, "
+            "UPDATE notifications SET details_json = ?, "
             "baseline_comments = COALESCE(baseline_comments, ?) "
             "WHERE id = ?",
-            (json.dumps(details), now, details.get("comments") or 0, row["id"]),
+            (json.dumps(details), details.get("comments") or 0, row["id"]),
         )
 
         # Lazy-populate people directory from the author of the item.
@@ -1837,6 +1934,15 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
         ):
             _clear_engagement_baselines(conn, row["id"])
 
+        # Last write in the per-row block: stamps the dirty-predicate clean.
+        # Pair with _mark_enriched so any wait_until_enriched callers wake up
+        # to a fully-populated thread_events timeline, not a half-built one.
+        conn.execute(
+            "UPDATE notifications SET details_fetched_at = ? WHERE id = ?",
+            (now, row["id"]),
+        )
+        _mark_enriched(row["id"])
+
     return new_kinds
 
 
@@ -1990,6 +2096,13 @@ def _upsert(
             updated_at,
         ),
     )
+    # Mark the enrichment signal dirty whenever the row picked up fresh
+    # activity (brand-new row, or updated_at advanced). _enrich will _mark_
+    # enriched() at the end of its per-row block to release waiters. Pure
+    # read-state changes (unread flip with no updated_at move) leave the
+    # signal alone — no new context to enrich.
+    if prev is None or (prev["updated_at"] or "") != updated_at:
+        _mark_dirty(item["id"])
     if reason:
         _accumulate_seen_reason(conn, item["id"], reason)
     if reason in ("mention", "team_mention") and updated_at:

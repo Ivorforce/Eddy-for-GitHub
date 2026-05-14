@@ -989,6 +989,14 @@ def judge(
     if not _enter_judge(thread_id):
         raise AIBusy(f"judgment already in flight for {thread_id}")
     try:
+        # Block until the row's enrichment is up to date — judging against a
+        # half-built thread_events timeline would feed the model stale context
+        # (missing the comments / reviews / lifecycle / code events that
+        # _enrich is about to fan out). 60s is the hard ceiling; on a real
+        # enrichment failure the manual click surfaces this as a toast and
+        # the auto-judge worker logs + skips.
+        if not github.wait_until_enriched(conn, thread_id, timeout=60.0):
+            raise AIError(f"enrichment not complete for {thread_id}; try again shortly")
         return _judge_locked(
             thread_id, conn, ts_start=ts_start,
             user_login=user_login, user_teams=user_teams,
@@ -1304,6 +1312,11 @@ def auto_judge_eligible(
     ).fetchall()
     if not rows:
         return 0
+    if len(rows) >= _AUTO_JUDGE_PER_PASS:
+        # Hitting the cap is unusual in steady state — flag it so we notice
+        # if focus events ever bunch up eligible rows (deploy after a long
+        # downtime, a watermark gone stale, etc.).
+        log.info("auto-judge: eligibility scan hit per-pass cap of %d", _AUTO_JUDGE_PER_PASS)
 
     judged = 0
     for r in rows:

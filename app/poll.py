@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 
-from . import ai, db, events, github, settings
+from . import db, events, github, settings
 
 log = logging.getLogger(__name__)
 
@@ -118,9 +118,10 @@ def run_loop(
     must fire on time even in manual mode, and a fingerprint that moves
     (e.g., a snooze auto-woke a thread) needs to push to connected clients.
 
-    `user_login` / `user_teams` flow through to `ai.auto_judge_eligible` so
-    the system prompt's identity block matches what the manual route uses.
-    Both default to None so a stripped-down caller (tests) still works.
+    `user_login` / `user_teams` are accepted for API stability — earlier the
+    poll loop ran `ai.auto_judge_eligible` and needed identity; auto-judge is
+    now focus-triggered, so the poll loop itself doesn't use them. Kept on
+    the signature so callers (and tests) don't need to change.
     """
     force_full = True
     while True:
@@ -146,22 +147,9 @@ def run_loop(
                 # gate inside notify_if_changed makes this cheap on a no-op poll —
                 # no bump, no client refresh.
                 events.notify_if_changed(conn)
-                # Background AI judgment on rows with fresh activity, gated
-                # by triage_mode + ai_auto_judge inside auto_judge_eligible.
-                # A failure must not kill the loop — the next pass will pick
-                # up where this one left off.
-                try:
-                    n_judged = ai.auto_judge_eligible(
-                        conn, user_login=user_login, user_teams=user_teams,
-                    )
-                    if n_judged:
-                        log.info("auto-judge: %d verdict(s)", n_judged)
-                        # A burst of new verdicts changes what the table
-                        # would render — kick the fingerprint again so
-                        # connected clients refresh.
-                        events.notify_if_changed(conn)
-                except Exception:
-                    log.exception("auto-judge pass failed")
+                # Auto-judge no longer runs on the poll cycle — it's
+                # focus-triggered via /ai/auto-judge-batch so we don't burn
+                # API spend judging rows the user can't see right now.
             finally:
                 conn.close()
         except Exception:

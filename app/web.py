@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -3196,3 +3197,57 @@ def ai_chat(thread_id: str):
         notes_people=_entity_notes("people", "login"),
     )
     return render_template("_timeline_event.html", ev=ev, thread_id=thread_id)
+
+
+# Module-level guard so a burst of focus events (multi-monitor cycling, fast
+# alt-tab) doesn't kick off overlapping eligibility scans + judge fan-outs.
+# Non-blocking try-acquire; if held, the second caller returns 204 immediately.
+_AUTO_JUDGE_RUNNING = threading.Lock()
+
+
+def _auto_judge_worker(user_login, user_teams) -> None:
+    """Daemon thread body. Opens its own DB connection (the request's conn
+    closes when this returns 202), runs the eligibility scan + per-row judges
+    inside `ai.auto_judge_eligible`, and bumps the SSE fingerprint so any
+    fresh verdicts surface to the open tab."""
+    try:
+        conn = db.connect()
+        try:
+            n_judged = ai.auto_judge_eligible(
+                conn, user_login=user_login, user_teams=user_teams,
+            )
+            if n_judged:
+                log.info("auto-judge (focus): %d verdict(s)", n_judged)
+                events.notify_if_changed(conn)
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("auto-judge worker crashed")
+    finally:
+        _AUTO_JUDGE_RUNNING.release()
+
+
+@app.post("/ai/auto-judge-batch")
+def ai_auto_judge_batch():
+    """Focus-triggered batch: judge any rows that have fresh invalidating
+    activity since their last verdict (or no verdict yet, post-watermark).
+    Eligibility, suppressors, and daily cap all live in
+    `ai.auto_judge_eligible` — same code path the poll loop used to call.
+
+    Gated to AI triage mode + ai_auto_judge enabled so the client can fire
+    this unconditionally on focus / load without needing to know the user's
+    mode. A 204 means "nothing to do" (mode off, or a batch is already in
+    flight); a 202 means "kicked off, verdicts will arrive over SSE"."""
+    if _get_triage_mode() != "ai":
+        return ("", 204)
+    if not _get_ai_auto_judge():
+        return ("", 204)
+    if not _AUTO_JUDGE_RUNNING.acquire(blocking=False):
+        return ("", 204)
+    threading.Thread(
+        target=_auto_judge_worker,
+        args=(app.config.get("USER_LOGIN"), app.config.get("USER_TEAMS")),
+        daemon=True,
+        name="auto-judge-batch",
+    ).start()
+    return ("", 202)
