@@ -2025,7 +2025,7 @@ def _upsert(
     # uncertainty (distinct from the local 'visited' / 'read' labels).
     prev = conn.execute(
         "SELECT unread, action, ignored, muted_kinds, effective_updated_at, "
-        "snooze_until, updated_at FROM notifications WHERE id = ?",
+        "snooze_until, updated_at, last_read_at FROM notifications WHERE id = ?",
         (item["id"],),
     ).fetchone()
     if touched is not None and prev is not None:
@@ -2034,7 +2034,16 @@ def _upsert(
             prev["effective_updated_at"], prev["snooze_until"],
         ))
     new_unread = 1 if item.get("unread") else 0
-    external_read = (prev is not None and prev["unread"] == 1 and new_unread == 0)
+    # Detect a github-side read by watching `last_read_at` advance rather
+    # than the local `unread` flag's 1→0 transition. The flag-only trigger
+    # missed: rows arriving already-read (no prior local state at all), and
+    # bump-then-read-between-polls (prev.unread was already 0 from an
+    # earlier in-app mark-read, then activity bumped + user read on github
+    # — our `prev` never saw the unread=1 intermediate). `last_read_at`
+    # advancing covers all three cases uniformly.
+    prev_read_ts = db.iso_to_unix(prev["last_read_at"] or "") if prev else 0
+    new_read_ts = db.iso_to_unix(item.get("last_read_at") or "") or 0
+    read_advanced = new_read_ts > (prev_read_ts or 0)
     updated_at = item.get("updated_at") or ""
     # Resurface a locally-archived thread — Done (action='done') or Snooze
     # (action='snoozed') — when GitHub hands us the notification again *with new
@@ -2121,19 +2130,27 @@ def _upsert(
             external_id=updated_at,
             payload={"reason": reason},
         )
-    if external_read:
+    if read_advanced:
+        # Use github's own `last_read_at` as the event ts — it's the actual
+        # moment of engagement, which may be well before `now` (the user
+        # read days ago and we're only now polling). A "Mark all as read"
+        # sweep on github.com would trigger this too; weak signal, but
+        # better than missing the engagement entirely.
         db.write_thread_event(
             conn,
             thread_id=item["id"],
-            ts=now,
+            ts=new_read_ts,
             kind="user_action",
             source="github",
             payload={"action": "read_on_github"},
         )
-        # Weak engagement signal (a "Mark all as read" sweep on github.com
-        # would trigger this too) but better than nothing — re-anchor the
-        # since-visit deltas so the pill stops counting from before.
-        _clear_engagement_baselines(conn, item["id"])
+        # Re-anchor the since-visit deltas so the pill stops counting from
+        # before this read. Skipped on a brand-new row (prev is None):
+        # details_json isn't populated yet, so the baseline would zero
+        # against nothing; _enrich's first pass will set baseline_comments
+        # to the current count on COALESCE, which gives the same effect.
+        if prev is not None:
+            _clear_engagement_baselines(conn, item["id"])
     if resurfaced:
         # New activity arrived on a Done/Snoozed thread — bring it back. No
         # thread_event marker for it: whatever triggered the re-delivery is
