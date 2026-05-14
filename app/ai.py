@@ -1315,38 +1315,47 @@ def auto_judge_eligible(
 
     now = int(time.time())
     kind_placeholders = ",".join("?" * len(VERDICT_INVALIDATING_KINDS))
-    # The inner EXISTS mirrors Re-assess's `ai_uptodate` predicate (event of
-    # an invalidating kind past `ai_verdict_at`) and adds two suppressors:
-    # the absorb-marker check (the event must be newer than the latest
-    # `absorbed` user_action, so muted-kinds re-deliveries don't qualify)
-    # and the watermark (prospective-only on toggle). Throttle is a
-    # row-level skip; muted/done/snoozed/synthetic intentionally aren't —
-    # they naturally don't accumulate post-verdict invalidating activity
-    # while in-state, and the absorb-marker check handles the one edge
-    # case (`_apply_mute_filter` keeping a Done row in Done). Newest
-    # bumped-row first so top-of-inbox gets verdicts before the cap trips.
+    # Mirrors Re-assess's `ai_uptodate` predicate — enabled when *either*
+    # there's no verdict yet *or* an invalidating event landed since the
+    # verdict — and adds the watermark for prospective-only-on-toggle:
+    #   A) never-judged row whose updated_at is past the watermark (a fresh
+    #      PR / Release with no comments yet has no thread_events at all,
+    #      so the EXISTS clause alone misses it — but it's exactly the case
+    #      a focus event should pick up); or
+    #   B) prior verdict + an invalidating event past the verdict, past the
+    #      watermark, and past the latest `absorbed` user_action (so a
+    #      muted-kinds re-delivery via `_apply_mute_filter` doesn't qualify
+    #      but a subsequent directed-reason delivery does).
+    # Throttle is a row-level skip; muted/done/snoozed/synthetic intentionally
+    # aren't — they naturally don't accumulate post-verdict invalidating
+    # activity while in-state. Newest bumped-row first so top-of-inbox gets
+    # verdicts before the cap trips.
     rows = conn.execute(
         f"""
         SELECT n.id AS id
           FROM notifications n
          WHERE (n.throttle_until IS NULL OR n.throttle_until <= ?)
-           AND EXISTS (
-               SELECT 1 FROM thread_events te
-                WHERE te.thread_id = n.id
-                  AND te.kind IN ({kind_placeholders})
-                  AND te.ts > ?
-                  AND te.ts > COALESCE(n.ai_verdict_at, 0)
-                  AND te.ts > COALESCE((
-                      SELECT MAX(ab.ts) FROM thread_events ab
-                       WHERE ab.thread_id = n.id
-                         AND ab.kind = 'user_action'
-                         AND json_extract(ab.payload_json, '$.action') = 'absorbed'
-                  ), 0)
+           AND (
+               (n.ai_verdict_at IS NULL
+                  AND datetime(n.updated_at) > datetime(?, 'unixepoch'))
+               OR EXISTS (
+                   SELECT 1 FROM thread_events te
+                    WHERE te.thread_id = n.id
+                      AND te.kind IN ({kind_placeholders})
+                      AND te.ts > ?
+                      AND te.ts > COALESCE(n.ai_verdict_at, 0)
+                      AND te.ts > COALESCE((
+                          SELECT MAX(ab.ts) FROM thread_events ab
+                           WHERE ab.thread_id = n.id
+                             AND ab.kind = 'user_action'
+                             AND json_extract(ab.payload_json, '$.action') = 'absorbed'
+                      ), 0)
+               )
            )
          ORDER BY n.effective_updated_at DESC, n.updated_at DESC
          LIMIT ?
         """,
-        (now, *VERDICT_INVALIDATING_KINDS, watermark, _AUTO_JUDGE_PER_PASS),
+        (now, watermark, *VERDICT_INVALIDATING_KINDS, watermark, _AUTO_JUDGE_PER_PASS),
     ).fetchall()
     if not rows:
         return 0
@@ -1369,22 +1378,26 @@ def auto_judge_eligible(
             SELECT 1 FROM notifications n
              WHERE n.id = ?
                AND (n.throttle_until IS NULL OR n.throttle_until <= ?)
-               AND EXISTS (
-                   SELECT 1 FROM thread_events te
-                    WHERE te.thread_id = n.id
-                      AND te.kind IN ({kind_placeholders})
-                      AND te.ts > ?
-                      AND te.ts > COALESCE(n.ai_verdict_at, 0)
-                      AND te.ts > COALESCE((
-                          SELECT MAX(ab.ts) FROM thread_events ab
-                           WHERE ab.thread_id = n.id
-                             AND ab.kind = 'user_action'
-                             AND json_extract(ab.payload_json, '$.action') = 'absorbed'
-                      ), 0)
+               AND (
+                   (n.ai_verdict_at IS NULL
+                      AND datetime(n.updated_at) > datetime(?, 'unixepoch'))
+                   OR EXISTS (
+                       SELECT 1 FROM thread_events te
+                        WHERE te.thread_id = n.id
+                          AND te.kind IN ({kind_placeholders})
+                          AND te.ts > ?
+                          AND te.ts > COALESCE(n.ai_verdict_at, 0)
+                          AND te.ts > COALESCE((
+                              SELECT MAX(ab.ts) FROM thread_events ab
+                               WHERE ab.thread_id = n.id
+                                 AND ab.kind = 'user_action'
+                                 AND json_extract(ab.payload_json, '$.action') = 'absorbed'
+                          ), 0)
+                   )
                )
              LIMIT 1
             """,
-            (thread_id, now, *VERDICT_INVALIDATING_KINDS, watermark),
+            (thread_id, now, watermark, *VERDICT_INVALIDATING_KINDS, watermark),
         ).fetchone()
         if not current:
             continue

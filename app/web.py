@@ -2413,6 +2413,12 @@ def refresh():
             # loop can retry on its own schedule.
             db.set_meta(conn, "last_poll_at", str(int(time.time())))
             conn.commit()
+            # Now that fresh notifications have landed and been enriched,
+            # kick off an auto-judge pass — that's how a manual refresh
+            # click (and a Live-mode focus refresh) gets verdicts on rows
+            # that just arrived. Worker no-ops when AI is off or a pass is
+            # already running; idempotent under bursts.
+            _kickoff_auto_judge_batch()
         # Fingerprint-gated SSE bump. notify_if_changed returns True iff the
         # render inputs actually moved — also tells us whether this auto-
         # refresh has anything to swap. 204 leaves an open popover (and any
@@ -3200,16 +3206,17 @@ def ai_chat(thread_id: str):
 
 
 # Module-level guard so a burst of focus events (multi-monitor cycling, fast
-# alt-tab) doesn't kick off overlapping eligibility scans + judge fan-outs.
-# Non-blocking try-acquire; if held, the second caller returns 204 immediately.
+# alt-tab) plus a poll-triggered kick-off doesn't fan out overlapping
+# eligibility scans + judge passes. Non-blocking try-acquire; if held, a
+# second caller short-circuits.
 _AUTO_JUDGE_RUNNING = threading.Lock()
 
 
 def _auto_judge_worker(user_login, user_teams) -> None:
-    """Daemon thread body. Opens its own DB connection (the request's conn
-    closes when this returns 202), runs the eligibility scan + per-row judges
-    inside `ai.auto_judge_eligible`, and bumps the SSE fingerprint so any
-    fresh verdicts surface to the open tab."""
+    """Daemon thread body. Opens its own DB connection (request connection
+    is gone by the time this runs), runs the eligibility scan + per-row
+    judges inside `ai.auto_judge_eligible`, and bumps the SSE fingerprint
+    so any fresh verdicts surface to the open tab."""
     try:
         conn = db.connect()
         try:
@@ -3217,7 +3224,7 @@ def _auto_judge_worker(user_login, user_teams) -> None:
                 conn, user_login=user_login, user_teams=user_teams,
             )
             if n_judged:
-                log.info("auto-judge (focus): %d verdict(s)", n_judged)
+                log.info("auto-judge: %d verdict(s)", n_judged)
                 events.notify_if_changed(conn)
         finally:
             conn.close()
@@ -3227,27 +3234,34 @@ def _auto_judge_worker(user_login, user_teams) -> None:
         _AUTO_JUDGE_RUNNING.release()
 
 
-@app.post("/ai/auto-judge-batch")
-def ai_auto_judge_batch():
-    """Focus-triggered batch: judge any rows that have fresh invalidating
-    activity since their last verdict (or no verdict yet, post-watermark).
-    Eligibility, suppressors, and daily cap all live in
-    `ai.auto_judge_eligible` — same code path the poll loop used to call.
-
-    Gated to AI triage mode + ai_auto_judge enabled so the client can fire
-    this unconditionally on focus / load without needing to know the user's
-    mode. A 204 means "nothing to do" (mode off, or a batch is already in
-    flight); a 202 means "kicked off, verdicts will arrive over SSE"."""
+def _kickoff_auto_judge_batch() -> bool:
+    """Try to start an auto-judge batch in a background thread. Returns True
+    iff a worker was started — False if AI is off, the toggle is off, or a
+    worker is already running. Safe to call repeatedly; the lock makes
+    overlapping triggers free."""
     if _get_triage_mode() != "ai":
-        return ("", 204)
+        return False
     if not _get_ai_auto_judge():
-        return ("", 204)
+        return False
     if not _AUTO_JUDGE_RUNNING.acquire(blocking=False):
-        return ("", 204)
+        return False
     threading.Thread(
         target=_auto_judge_worker,
         args=(app.config.get("USER_LOGIN"), app.config.get("USER_TEAMS")),
         daemon=True,
         name="auto-judge-batch",
     ).start()
-    return ("", 202)
+    return True
+
+
+@app.post("/ai/auto-judge-batch")
+def ai_auto_judge_batch():
+    """Client-triggered batch (focus / DOMContentLoaded). Eligibility and the
+    daily cap live in `ai.auto_judge_eligible` — same code path the poll loop
+    used to call. The /refresh endpoint also calls `_kickoff_auto_judge_batch`
+    after a successful poll, so manual refresh clicks and Live-mode focus
+    refreshes are covered without needing two client calls.
+
+    202 = kicked off (verdicts arrive over SSE); 204 = nothing to do (mode
+    off, batch already running)."""
+    return ("", 202 if _kickoff_auto_judge_batch() else 204)
