@@ -576,7 +576,10 @@
          stretched to it, a constant height row to row. Many labels still
          wrap and grow it, which is fine. */
       min-height: 1rem;
+      opacity: 0.6;
+      transition: opacity 0.12s ease;
     }
+    tr:hover td.title .meta-row { opacity: 1; }
     .icon {
       width: 0.95em;
       height: 0.95em;
