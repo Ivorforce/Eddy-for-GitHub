@@ -1056,10 +1056,13 @@
       vertical-align: -0.12em;
       color: var(--pico-muted-color);
     }
-    /* Tinted on threads the user has never engaged with — parallel to AI
-       mode's "unassessed" word, but compact: same icon slot, accent color
-       carries the meaning. */
-    .thread-pill-headline.never-visited .thread-pill-icon {
+    /* Tinted when the thread is waiting for a triage call — no decision
+       in the timeline yet, or the AI's last verdict was `look` (it punted
+       to the user). Same rule + class drives both pills; the AI sparkle
+       tints amber in parallel. Cleared by any user_action or a non-`look`
+       AI verdict. */
+    .thread-pill-headline.needs-attention .thread-pill-icon,
+    .ai-verdict-take.needs-attention .ai-pill-icon {
       color: var(--accent-amber);
     }
 

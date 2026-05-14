@@ -665,13 +665,11 @@ def _thread_pill(d: dict, recency: dict | None) -> dict:
     `recency.tip_html` — note on top, "Since last visit: …" below the
     hairline — exactly the shape the AI pill uses for its own description
     + "Since this assessment: …" tooltip."""
-    never_visited = d.get("last_engaged_at") is None
     activity_text = recency.get("text") if recency else None
     tip_html = recency.get("tip_html") if recency else None
 
     if activity_text:
         return {
-            "never_visited": never_visited,
             "text": activity_text,
             "text_kind": "activity",
             "tip_html": tip_html,
@@ -684,7 +682,6 @@ def _thread_pill(d: dict, recency: dict | None) -> dict:
         if line:
             label = f"{line[:40]}{'…' if len(line) > 40 else ''}"
             return {
-                "never_visited": never_visited,
                 "text": label,
                 "text_kind": "note",
                 "tip_html": tip_html,
@@ -706,7 +703,6 @@ def _thread_pill(d: dict, recency: dict | None) -> dict:
             standing.append(fallback)
 
     return {
-        "never_visited": never_visited,
         "text": ", ".join(standing) if standing else None,
         "text_kind": "muted",
         "tip_html": tip_html,
@@ -1508,6 +1504,12 @@ _PILL_EVENT_KINDS = (
 )
 
 
+# `user_action` payload kinds that don't count as a user *decision* for the
+# pill's amber flag: `woken` is the snooze timer firing, `absorbed` is the
+# muted-kind suppressor. Both are system-driven, not the user weighing in.
+_SYSTEM_USER_ACTIONS = ("woken", "absorbed")
+
+
 def _load_pill_events(conn, thread_ids) -> dict[str, list]:
     """One batched query for the thread_events that feed both
     `_engagement_timestamps` and `_attach_pill_status`. Returns
@@ -1582,6 +1584,29 @@ def _attach_pill_status(d: dict, rows: list) -> None:
         user_login=user_login,
     )
     d["thread_pill"] = _thread_pill(d, pill_recency)
+
+    # Amber flag — shared across both modes. True when the most recent triage
+    # signal didn't close the loop: nobody has weighed in yet, or the AI's
+    # last verdict was `look` (it punted to the user). Any user_action
+    # (excluding the system-driven `woken` / `absorbed`) counts as the user
+    # making their call; any non-`look` ai_verdict counts as the AI deciding.
+    last_action_ts = 0
+    for r in rows:
+        if r["kind"] != "user_action":
+            continue
+        try:
+            action = (json.loads(r["payload_json"]) or {}).get("action")
+        except (ValueError, TypeError):
+            action = None
+        if action and action not in _SYSTEM_USER_ACTIONS:
+            last_action_ts = r["ts"]  # rows are sorted ASC, so the last wins
+    verdict_ts = verdict.get("at") if verdict else 0
+    if last_action_ts == 0 and verdict_ts == 0:
+        d["needs_attention"] = True
+    elif last_action_ts >= verdict_ts:
+        d["needs_attention"] = False
+    else:
+        d["needs_attention"] = verdict.get("disposition") == "look"
 
 
 def _ai_verdict_dict(
