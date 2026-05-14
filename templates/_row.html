@@ -31,11 +31,14 @@
                 hx-vals='{"thread_id": "{{ n.id }}"}'
                 hx-target="closest tr"
                 hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-track"/></svg>{% if n.org_is_tracked %}Untrack{% else %}Track{% endif %}</button>
-        <form hx-post="/orgs/{{ n.repo_owner }}/note"
-              hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
-              hx-swap="none">
-          <textarea name="note_user" rows="3" placeholder="Note about {{ n.repo_owner }} (saved automatically)…">{{ n.org_note or '' }}</textarea>
-        </form>
+        {# Bare textarea — wrapping <form>s were costing ~2.5s per search-input
+           focus as Safari's autofill scanned _logicalFormsInPage across ~1000+
+           inner forms. hx-post on the textarea works the same. #}
+        <textarea name="note_user" rows="3"
+                  hx-post="/orgs/{{ n.repo_owner }}/note"
+                  hx-trigger="keyup changed delay:600ms, blur"
+                  hx-swap="none"
+                  placeholder="Note about {{ n.repo_owner }} (saved automatically)…">{{ n.org_note or '' }}</textarea>
       </div>
     </div>
     {% endif %}
@@ -56,11 +59,11 @@
                 hx-vals='{"thread_id": "{{ n.id }}"}'
                 hx-target="closest tr"
                 hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-track"/></svg>{% if n.repo_is_tracked %}Untrack{% else %}Track{% endif %}</button>
-        <form hx-post="/repos/{{ n.repo }}/note"
-              hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
-              hx-swap="none">
-          <textarea name="note_user" rows="3" placeholder="Note about {{ n.repo }} (saved automatically)…">{{ n.repo_note or '' }}</textarea>
-        </form>
+        <textarea name="note_user" rows="3"
+                  hx-post="/repos/{{ n.repo }}/note"
+                  hx-trigger="keyup changed delay:600ms, blur"
+                  hx-swap="none"
+                  placeholder="Note about {{ n.repo }} (saved automatically)…">{{ n.repo_note or '' }}</textarea>
       </div>
     </div>
   </td>
@@ -116,11 +119,11 @@
                       hx-vals='{"thread_id": "{{ n.id }}"}'
                       hx-target="closest tr"
                       hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-track"/></svg>{% if n.author_is_tracked %}Untrack{% else %}Track{% endif %}</button>
-              <form hx-post="/people/{{ n.author_login }}/note"
-                    hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
-                    hx-swap="none">
-                <textarea name="note_user" rows="3" placeholder="Note about {{ n.author_login }} (saved automatically)…">{{ n.author_note or '' }}</textarea>
-              </form>
+              <textarea name="note_user" rows="3"
+                        hx-post="/people/{{ n.author_login }}/note"
+                        hx-trigger="keyup changed delay:600ms, blur"
+                        hx-swap="none"
+                        placeholder="Note about {{ n.author_login }} (saved automatically)…">{{ n.author_note or '' }}</textarea>
             </div>
           </span>
           {% endif %}
@@ -274,12 +277,12 @@
            OOB swap so the pill / tooltip update without paying for a full
            table refresh. Keyup saves stay silent — the popover is open
            during typing and we don't want to swap the row out from under it. #}
-        <form hx-post="/note/{{ n.id }}"
-              hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
-              hx-on::config-request="event.detail.parameters.commit = event.detail.triggeringEvent && event.detail.triggeringEvent.type === 'blur' ? '1' : ''"
-              hx-swap="none">
-          <textarea name="note_user" rows="3" placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
-        </form>
+        <textarea name="note_user" rows="3"
+                  hx-post="/note/{{ n.id }}"
+                  hx-trigger="keyup changed delay:600ms, blur"
+                  hx-on::config-request="event.detail.parameters.commit = event.detail.triggeringEvent && event.detail.triggeringEvent.type === 'blur' ? '1' : ''"
+                  hx-swap="none"
+                  placeholder="Personal note (saved automatically)…">{{ n.note_user or '' }}</textarea>
       </div>
     {% endif %}
 
@@ -316,9 +319,13 @@
          is empty. The textarea clears via hx-on::after-request after a
          successful Note so subsequent notes append rather than re-saving
          the same draft. #}
-      <form class="ai-chat-form"
-            onsubmit="return false"
-            onkeydown="aiChatKeydown(event)">
+      {# Not a <form> — Safari's autofill scans every form on focus
+         (_logicalFormsInPage), and at ~1 per row this dominated clicking
+         the search input. aiChatKeydown handles Enter / Ctrl+Enter
+         directly, so the form's onsubmit safety net wasn't doing real
+         work; "closest .ai-chat-form" replaces the old "closest form"
+         include for the textarea's body. #}
+      <div class="ai-chat-form" onkeydown="aiChatKeydown(event)">
         <textarea name="body" rows="2"
                   placeholder="Note (Enter) · send to AI (Ctrl+Enter) · Shift+Enter for newline"
                   oninput="aiChatInput(event)"></textarea>
@@ -334,12 +341,12 @@
                   hx-post="/ai/{{ n.id }}/judge"
                   hx-target="closest tr"
                   hx-swap="outerHTML"
-                  hx-include="#filters, closest form"
+                  hx-include="#filters, closest .ai-chat-form"
                   hx-indicator="closest tr"
                   hx-on::before-request="aiBusyOn(this)"
                   title="Empty: re-assess from current state. With text: send it to the AI and re-assess (Ctrl+Enter)."><span class="rejudge-label">↻ Re-ask</span></button>
         </div>
-      </form>
+      </div>
       {% endif %}
     </div>
 

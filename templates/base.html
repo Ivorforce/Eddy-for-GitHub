@@ -543,16 +543,18 @@
       flex-shrink: 0;
       color: var(--accent-amber);
     }
-    .action-popover form { margin: 0 0 0.35rem; }
     .action-popover textarea {
       /* Starting width matches the popover's min-width minus its horizontal
          padding so the textarea sits flush with the popover edges; min-width
          pins that floor so dragging narrower doesn't open a gap (the popover
-         can't shrink past its own min-width). max-width caps absurd growth. */
+         can't shrink past its own min-width). max-width caps absurd growth.
+         The bottom margin used to live on a <form> wrapper — the wrapper was
+         removed (see _row.html note textareas) because Safari's autofill
+         scanned every <form> on focus. */
       width: 15.9rem;
       min-width: 15.9rem;
       max-width: 60rem;
-      margin: 0;
+      margin: 0 0 0.35rem;
       font-size: 0.78rem;
       min-height: 2.6rem;
       padding: 0.3rem 0.45rem;
@@ -2397,7 +2399,7 @@
           ta.value = s.dirty;
           // New textarea has no HTMX debounce timer running, so nudge a save
           // so an unsaved edit doesn't just sit there until the next keystroke.
-          const url = ta.closest("form")?.getAttribute("hx-post");
+          const url = ta.getAttribute("hx-post");
           if (url) {
             const data = new FormData();
             data.append("note_user", s.dirty);
@@ -2534,7 +2536,7 @@
     window.aiSendAfterRequest = function (btn, evt) {
       btn.closest(".ai-verdict-popover")?.classList.remove("busy");
       if (evt.detail.successful) {
-        const ta = btn.closest("form").querySelector("textarea");
+        const ta = btn.closest(".ai-chat-form").querySelector("textarea");
         ta.value = "";
         aiChatInput({ target: ta });
       }
@@ -2682,11 +2684,9 @@
     // sendBeacon is the browser-native API for fire-and-forget POSTs that
     // survive page unload (regular fetch/XHR may be cancelled mid-flight).
     window.addEventListener("pagehide", () => {
-      document.querySelectorAll(".action-popover form").forEach((form) => {
-        const ta = form.querySelector("textarea");
-        if (!ta) return;
+      document.querySelectorAll(".action-popover textarea[hx-post]").forEach((ta) => {
         if (ta.value === ta.defaultValue) return;
-        const url = form.getAttribute("hx-post");
+        const url = ta.getAttribute("hx-post");
         if (!url) return;
         const data = new FormData();
         data.append("note_user", ta.value);
