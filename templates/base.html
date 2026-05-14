@@ -2301,6 +2301,32 @@
       });
     });
 
+    // Entity (person/repo/org) note saves broadcast an entityNoteChanged
+    // event. Sync the dashed-amber has-note class and the title= tooltip
+    // text across every matching trigger so notes show up immediately on
+    // sibling rows. Item-kind events are per-thread and handled by the
+    // row's own OOB swap; this listener is a no-op for them. We do NOT
+    // sync the popover textareas — programmatic .value assignment can race
+    // with a user editing a parallel popover, and stale per-row text
+    // refreshes naturally on the next /list swap.
+    document.addEventListener("entityNoteChanged", (e) => {
+      const { kind, key, has_note } = e.detail;
+      const note = e.detail.note ?? "";  // defensive: old server payloads omitted note
+      if (kind === "item" || !ENTITY_ROW_ATTR[kind]) return;
+      const escaped = CSS.escape(key);
+      document.querySelectorAll(
+        `[data-tracked-trigger][data-kind="${kind}"][data-key="${escaped}"]`
+      ).forEach((el) => {
+        el.classList.toggle("has-note", !!has_note);
+        // Custom-tooltip JS stashes title→data-stashed-title on hover, so
+        // write whichever attribute is currently active (see memory).
+        const attr = el.hasAttribute("data-stashed-title")
+          ? "data-stashed-title" : "title";
+        if (has_note) el.setAttribute(attr, note);
+        else { el.removeAttribute("title"); el.removeAttribute("data-stashed-title"); }
+      });
+    });
+
     // Preserve which popovers are open (and any unsaved typing) across
     // full-table refreshes. Without this, the visibilitychange auto-refresh
     // would dismiss whatever popover the user has open mid-edit. Scoped to

@@ -3043,10 +3043,9 @@ def toggle_org_track(owner: str):
     return _entity_track_response("org", owner, new_val)
 
 
-def _save_entity_note(table: str, key_col: str, key: str, note: str | None) -> bool:
+def _save_entity_note(table: str, key_col: str, key: str, note: str | None) -> None:
     """Upsert note_user on people / repos / orgs. Allows attaching a note to
-    an entity that's never been tracked (the row is created on first save).
-    Returns the new has-note flag."""
+    an entity that's never been tracked (the row is created on first save)."""
     conn = db.connect()
     try:
         conn.execute(
@@ -3057,15 +3056,18 @@ def _save_entity_note(table: str, key_col: str, key: str, note: str | None) -> b
         )
     finally:
         conn.close()
-    return bool(note)
 
 
-def _entity_note_response(kind: str, key: str, has_note: bool):
+def _entity_note_response(kind: str, key: str, note: str | None):
     """Silent 204 + HX-Trigger 'entityNoteChanged' so the JS listener can
-    flip the has-note styling on every matching pencil across rows."""
+    flip has-note styling, refresh title= tooltips, and sync the popover
+    textareas across every matching trigger / popover on the page."""
     response = make_response("", 204)
     response.headers["HX-Trigger"] = json.dumps({
-        "entityNoteChanged": {"kind": kind, "key": key, "has_note": has_note}
+        "entityNoteChanged": {
+            "kind": kind, "key": key,
+            "has_note": bool(note), "note": note or "",
+        }
     })
     return response
 
@@ -3095,30 +3097,33 @@ def save_note(thread_id: str):
     finally:
         conn.close()
     if not commit:
-        return _entity_note_response("item", thread_id, bool(note))
+        return _entity_note_response("item", thread_id, note)
     n = _load_one(thread_id)
     if not n:
-        return _entity_note_response("item", thread_id, bool(note))
+        return _entity_note_response("item", thread_id, note)
     return _render_row(n, oob=True)
 
 
 @app.post("/people/<login>/note")
 def save_person_note(login: str):
-    has_note = _save_entity_note("people", "login", login, _form_note())
-    return _entity_note_response("person", login, has_note)
+    note = _form_note()
+    _save_entity_note("people", "login", login, note)
+    return _entity_note_response("person", login, note)
 
 
 @app.post("/repos/<owner>/<name>/note")
 def save_repo_note(owner: str, name: str):
     repo = f"{owner}/{name}"
-    has_note = _save_entity_note("repos", "name", repo, _form_note())
-    return _entity_note_response("repo", repo, has_note)
+    note = _form_note()
+    _save_entity_note("repos", "name", repo, note)
+    return _entity_note_response("repo", repo, note)
 
 
 @app.post("/orgs/<owner>/note")
 def save_org_note(owner: str):
-    has_note = _save_entity_note("orgs", "name", owner, _form_note())
-    return _entity_note_response("org", owner, has_note)
+    note = _form_note()
+    _save_entity_note("orgs", "name", owner, note)
+    return _entity_note_response("org", owner, note)
 
 
 def _ai_response(thread_id: str, error: str | None):
