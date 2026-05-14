@@ -2,6 +2,7 @@
 <tr id="row-{{ n.id }}"
     {% if oob %}hx-swap-oob="outerHTML"{% endif %}
     class="{% if not n.unread %}read{% endif %}{% if n.action == 'done' %} done{% endif %}{% if n.is_author %} is-yours-row{% endif %}{% if n.is_tracked %} is-tracked-row{% endif %}{% if triage_mode == 'ai' and n.ai_verdict and not n.ai_uptodate %} ai-outdated{% endif %}"
+    data-hash="{{ n.render_hash }}"
     data-author="{{ n.author_login or '' }}"
     data-repo="{{ n.repo }}"
     data-org="{{ n.repo_owner or '' }}"

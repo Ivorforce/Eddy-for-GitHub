@@ -2100,8 +2100,16 @@
       if (!tooltipTarget.contains(e.relatedTarget)) hideTooltip();
     });
 
-    // HTMX swaps can yank the tooltip target out of the DOM mid-hover.
-    document.addEventListener("htmx:beforeSwap", hideTooltip);
+    // HTMX swaps can yank the tooltip target out of the DOM mid-hover —
+    // but only hide when that actually happened. The merge handler below
+    // leaves unchanged rows in place, and 204 short-circuits don't swap at
+    // all, so an unconditional beforeSwap hide flickered the tooltip on
+    // every refresh. isConnected goes false the moment the node is
+    // detached, so checking it on afterSwap catches both default-swap and
+    // partial-merge cases.
+    document.addEventListener("htmx:afterSwap", () => {
+      if (tooltipTarget && !tooltipTarget.isConnected) hideTooltip();
+    });
 
     // Server-pushed refreshes via SSE. The poll loop bumps a fingerprint-
     // gated counter whenever it actually changed user-visible state; this
@@ -2402,6 +2410,48 @@
         }
       }
       popoverSnapshot = null;
+    });
+
+    // Hash-aware merge for full-table swaps. The server emits a per-row
+    // data-hash (computed in app/web.py:_render_hash); if the row sequence
+    // (length + ids in same order) matches, only rows whose hash actually
+    // changed get replaced. Unchanged rows stay in the DOM, preserving their
+    // open popovers, hover tooltips, focus, and textarea draft text across
+    // refreshes / search keystrokes / mode toggles. Different-shape swaps
+    // (filter changes that drop or add rows, large backfills) fall through
+    // to the default HTMX replace — the popoverSnapshot above already
+    // restores the open popover for those cases. Registered after the
+    // snapshot handler so the snapshot still sees the pre-merge DOM.
+    document.addEventListener("htmx:beforeSwap", (e) => {
+      const tgt = e.detail.target;
+      if (!tgt || tgt.id !== "notifications-table") return;
+      const doc = new DOMParser().parseFromString(
+        e.detail.serverResponse, "text/html"
+      );
+      const newTbody = doc.querySelector("table tbody");
+      const oldTbody = tgt.querySelector("table tbody");
+      if (!newTbody || !oldTbody) return;  // empty state → default swap
+      const oldChildren = Array.from(oldTbody.children);
+      const newChildren = Array.from(newTbody.children);
+      let sameShape = oldChildren.length === newChildren.length;
+      if (sameShape) {
+        for (let i = 0; i < newChildren.length; i++) {
+          if (oldChildren[i].id !== newChildren[i].id) {
+            sameShape = false;
+            break;
+          }
+        }
+      }
+      if (!sameShape) return;  // filter/sort changed rows → default replace
+      for (let i = 0; i < newChildren.length; i++) {
+        const oldTr = oldChildren[i];
+        const newTr = newChildren[i];
+        const oldHash = oldTr.dataset.hash;
+        if (oldHash && oldHash === newTr.dataset.hash) continue;
+        oldTr.replaceWith(newTr);
+        htmx.process(newTr);
+      }
+      e.detail.shouldSwap = false;
     });
 
     // Sync the filter form state into the URL bar so any filter

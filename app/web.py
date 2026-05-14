@@ -1,6 +1,7 @@
 """Flask app + routes."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -147,6 +148,39 @@ _ROW_COLS = (
     "note_user, is_tracked, priority_user, snooze_until, "
     "ai_verdict_json, ai_verdict_at, ai_verdict_model"
 )
+
+# Per-row render hash inputs — feeds `data-hash` on each <tr>, which the
+# client-side merge handler in base.html compares to decide whether a row's
+# DOM can be left in place across a table swap. Mirrors compute_fingerprint
+# in app/events.py (which fingerprints the whole table for the SSE bump),
+# but emitted per-row. Subset of _ROW_COLS that actually drives the render —
+# titles / repo splits / html_url are stable per row, so omitted.
+_RENDER_HASH_COLS = (
+    "updated_at", "effective_updated_at", "unread", "ignored", "action",
+    "action_source", "details_json", "seen_reasons", "baseline_comments",
+    "muted_kinds", "pr_reactions_json", "unique_commenters",
+    "unique_reviewers", "pr_review_state", "baseline_review_state",
+    "note_user", "is_tracked", "priority_user", "snooze_until",
+    "ai_verdict_json", "ai_verdict_at", "ai_verdict_model",
+)
+
+
+def _render_hash(row, events, d, triage_mode):
+    """Stable per-row hash for the client's DOM merge. Beyond the row's own
+    DB columns, mixes in the per-thread event signal (count + max ts — new
+    events shift the pill / recency / verdict-staleness), the row's
+    tracked/note flags (depend on cross-table state not in `row`), and
+    triage_mode (global, but reshapes the whole row's render)."""
+    h = hashlib.blake2b(digest_size=10)
+    h.update(repr(tuple(row[c] for c in _RENDER_HASH_COLS)).encode())
+    h.update(repr((
+        len(events or ()),
+        max((e["ts"] for e in (events or ())), default=0),
+        d["author_is_tracked"], d["repo_is_tracked"], d["org_is_tracked"],
+        d["author_note"], d["repo_note"], d["org_note"],
+        triage_mode,
+    )).encode())
+    return h.hexdigest()
 
 # Per-thread notification-kind filter. The taxonomy (MUTE_KINDS, which type
 # produces which) lives in github.py — _enrich is what emits the events; here
@@ -1701,6 +1735,7 @@ def _row_to_dict(
     last_mention_at: int | None = None,
     last_engaged_at: int | None = None,
     events: list | None = None,
+    triage_mode: str | None = None,
 ) -> dict:
     d = dict(row)
     details_json = d.pop("details_json", None)
@@ -1900,6 +1935,8 @@ def _row_to_dict(
     # discriminator; the row button reads/labels differently.
     d["snooze_quiet"] = bool(su) and bool(d["ignored"])
 
+    d["render_hash"] = _render_hash(row, events, d, triage_mode)
+
     return d
 
 
@@ -1952,6 +1989,7 @@ def _load_notifications(show_archived: bool = True):
     n_p = _entity_notes("people", "login")
     n_r = _entity_notes("repos", "name")
     n_o = _entity_notes("orgs", "name")
+    triage_mode = _get_triage_mode()
     conn = db.connect()
     try:
         where = "" if show_archived else "WHERE COALESCE(action, '') NOT IN ('done', 'snoozed') "
@@ -1972,6 +2010,7 @@ def _load_notifications(show_archived: bool = True):
                 last_mention_at=mention_at.get(r["id"]),
                 last_engaged_at=engaged_at.get(r["id"]),
                 events=evs,
+                triage_mode=triage_mode,
             )
             _attach_pill_status(d, evs)
             out.append(d)
@@ -2240,6 +2279,7 @@ def _load_one(thread_id: str) -> dict | None:
     n_p = _entity_notes("people", "login")
     n_r = _entity_notes("repos", "name")
     n_o = _entity_notes("orgs", "name")
+    triage_mode = _get_triage_mode()
     conn = db.connect()
     try:
         row = conn.execute(
@@ -2256,6 +2296,7 @@ def _load_one(thread_id: str) -> dict | None:
             last_mention_at=mention_at.get(row["id"]),
             last_engaged_at=engaged_at.get(row["id"]),
             events=evs,
+            triage_mode=triage_mode,
         )
         _attach_pill_status(d, evs)
         return d
