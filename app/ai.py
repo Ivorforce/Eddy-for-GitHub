@@ -132,10 +132,13 @@ TOOL_DEF: dict = {
             },
             "set_tracked": {
                 "type": "string",
-                "enum": ["track", "untrack", "leave"],
+                "enum": ["track", "untrack"],
                 "description": (
-                    "Whether to change the item-level tracked flag. "
-                    "Default to 'leave' unless preferences clearly say to track / untrack this kind of thread."
+                    "Per-turn change to the item-level tracked flag. *Omit* to leave it as-is "
+                    "(the default — nothing to do this turn). Use 'track' only when preferences "
+                    "explicitly direct, or when a `user_chat` asks to track it; 'untrack' only "
+                    "when the user explicitly asks. The user's own use of the flag ('I want to "
+                    "come back to this') isn't something you can infer — don't try."
                 ),
             },
             "priority_score": {
@@ -173,7 +176,7 @@ TOOL_DEF: dict = {
                 ),
             },
         },
-        "required": ["disposition", "set_tracked", "priority_score", "description"],
+        "required": ["disposition", "priority_score", "description"],
     },
 }
 
@@ -205,8 +208,8 @@ def _build_tool_def(notif_type: str, muted_kinds, *, has_prior: bool) -> dict:
     a verdict in the timeline this re-judgment can fall back on — `disposition`,
     `priority_score` and `description` come out of `required`: omitting any of
     them keeps that field's value from the last verdict (see §Output fields).
-    `set_tracked` stays required (it's your this-turn call on the track flag,
-    almost always 'leave')."""
+    `set_tracked` is always optional — it's a per-turn change to the flag, not
+    a standing field, and omitting it means 'no change this turn'."""
     schema = copy.deepcopy(TOOL_DEF)
     applicable = github.MUTE_KINDS_BY_TYPE.get(notif_type, ())
     if applicable:
@@ -228,7 +231,7 @@ def _build_tool_def(notif_type: str, muted_kinds, *, has_prior: bool) -> dict:
             ),
         }
     if has_prior:
-        schema["input_schema"]["required"] = ["set_tracked"]
+        schema["input_schema"]["required"] = []
     return schema
 
 
@@ -245,7 +248,7 @@ def _read_system_prompt() -> str:
         log.warning("ai_system_prompt.md not found; using minimal fallback")
         return (
             "You are a GitHub notification triage assistant. "
-            "Call judge_thread exactly once with disposition, set_tracked, priority_score, description."
+            "Call judge_thread exactly once with disposition, priority_score, description."
         )
 
 
@@ -1105,11 +1108,15 @@ def judge(
             for k in ("disposition", "priority_score", "description", "snooze_days"):
                 if k not in verdict and k in prior_verdict:
                     verdict[k] = prior_verdict[k]
+        # `set_tracked` is per-turn, not standing: omitted means "no change this
+        # turn". Normalize to 'leave' so the stored verdict stays complete (the
+        # cached-verdict / purple-ring code reads this field unconditionally).
+        verdict.setdefault("set_tracked", "leave")
         # A fresh priority_score reclaims the displayed priority; an inherited
         # one leaves a user pin alone (see _save_verdict).
         reclaim_priority = "priority_score" in raw
 
-    missing = {"disposition", "set_tracked", "priority_score", "description"} - verdict.keys()
+    missing = {"disposition", "priority_score", "description"} - verdict.keys()
     if missing:
         raise _fail(f"Verdict missing fields: {sorted(missing)}")
 
