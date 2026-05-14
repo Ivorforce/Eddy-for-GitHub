@@ -176,6 +176,17 @@ TOOL_DEF: dict = {
                     "noise. Not a substitute for `description`. See system prompt §Output fields."
                 ),
             },
+            "reasoning": {
+                "type": "string",
+                "description": (
+                    "Optional. The load-bearing *why* of this verdict — disposition or "
+                    "priority — that `description` doesn't carry. NOT user-visible: only "
+                    "future-you reads this (via the timeline). Per-turn, never inherited: "
+                    "omit when there's nothing fresh to add — prior `reasoning` notes on "
+                    "the timeline stay on record and the silence reads as 'still holds'. "
+                    "Same brevity as `description`. See system prompt §Output fields."
+                ),
+            },
         },
         "required": ["disposition", "priority_score", "description"],
     },
@@ -188,15 +199,28 @@ TOOL_DEF: dict = {
 SKIP_TOOL_DEF: dict = {
     "name": "skip",
     "description": (
-        "Re-affirm your existing verdict, unchanged — call with no arguments. "
+        "Re-affirm your existing verdict, unchanged. "
         "Use this on a Re-ask when, after weighing everything that's happened since your "
         "last verdict, your read is the same in every respect: same action, same priority, "
         "the same standing description, nothing to add for subscription_changes. It re-stamps "
         "the prior verdict as current. If *anything* moves — even a priority nudge or a "
         "one-word sharpening of the description — that's a `judge_thread` call instead "
-        "(omitting only the fields that genuinely haven't changed). See system prompt §Output fields."
+        "(omitting only the fields that genuinely haven't changed). May optionally carry a "
+        "fresh `reasoning` (per-turn, AI-only — see `judge_thread.reasoning`). "
+        "See system prompt §Output fields."
     ),
-    "input_schema": {"type": "object", "properties": {}},
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reasoning": {
+                "type": "string",
+                "description": (
+                    "Optional. Per-turn AI-only note — see `judge_thread.reasoning`. "
+                    "Use sparingly; the skip itself already signals 'nothing changed'."
+                ),
+            },
+        },
+    },
 }
 
 
@@ -833,6 +857,14 @@ def _save_verdict(
     # re-judgment that *inherited* priority_score from the prior verdict (or a
     # `skip`) isn't asserting a new priority — it's saying the old one still
     # stands — so it leaves a user pin in place (reclaim_priority=False).
+    # `reasoning` is per-turn (timeline-only, AI-only): keep it out of the
+    # cached row state so `_cached_verdict` never returns a stale note that
+    # the skip-wholesale-copy or a future inheritance would re-stamp. The
+    # caller still has the full verdict for the timeline event write.
+    cached_json = json.dumps(
+        {k: v for k, v in verdict.items() if k != "reasoning"},
+        ensure_ascii=False,
+    )
     if reclaim_priority:
         conn.execute(
             """
@@ -841,7 +873,7 @@ def _save_verdict(
                    priority_user = NULL
              WHERE id = ?
             """,
-            (json.dumps(verdict, ensure_ascii=False), ts, model, thread_id),
+            (cached_json, ts, model, thread_id),
         )
     else:
         conn.execute(
@@ -850,7 +882,7 @@ def _save_verdict(
                SET ai_verdict_json = ?, ai_verdict_at = ?, ai_verdict_model = ?
              WHERE id = ?
             """,
-            (json.dumps(verdict, ensure_ascii=False), ts, model, thread_id),
+            (cached_json, ts, model, thread_id),
         )
 
 
@@ -1163,8 +1195,14 @@ def _judge_locked(
     if is_skip:
         # Re-affirm the cached verdict verbatim. `skip` asserts nothing
         # changed, so it doesn't reclaim a hand-set priority. `prior_verdict`
-        # is always a complete, `model`-free dict (see _cached_verdict).
+        # is always a complete, `model`-free dict (see _cached_verdict) and
+        # carries no `reasoning` (stripped at row-write — per-turn field).
+        # A skip *may* still carry a fresh reasoning note; layer it on so it
+        # lands in the timeline event for future-you to read.
         verdict = dict(prior_verdict)
+        raw = dict(tool_use.input or {})
+        if raw.get("reasoning"):
+            verdict["reasoning"] = raw["reasoning"]
         reclaim_priority = False
     else:
         raw = dict(tool_use.input or {})
