@@ -1207,15 +1207,59 @@
        doesn't push the composer off-screen. */
     .ai-verdict-popover .timeline-list {
       list-style: none;
-      padding: 0;
+      padding: 0 0 0 1.1rem;
       margin: 0.3rem 0 0.45rem;
       display: flex;
       flex-direction: column;
       gap: 0.35rem;
+      position: relative;
+    }
+    /* Vertical rail behind the per-event dots — the timeline backbone.
+       Spans the list's full height; the dots sit on it per event so the
+       eye can thread the chronology even when adjacent rows are a chat
+       bubble and a coalesced one-liner. */
+    .ai-verdict-popover .timeline-list::before {
+      content: "";
+      position: absolute;
+      left: 0.4rem;
+      top: 0.1rem;
+      bottom: 0.1rem;
+      width: 1px;
+      background: var(--pico-muted-color);
+      opacity: 0.55;
     }
     .ai-verdict-popover .timeline-event {
       font-size: 0.74rem;
       line-height: 1.35;
+      position: relative;
+    }
+    /* Event marker. Default is a small open dot (background = popover
+       card colour, ring matched to the rail) so it reads as part of
+       the rail rather than floating above it. ai_verdict and user_chat
+       fill the dot with the bubble's accent so chat-bubble events read
+       as the timeline's punctuation against the muted activity lines. */
+    .ai-verdict-popover .timeline-event::before {
+      content: "";
+      position: absolute;
+      left: -0.92rem;
+      top: 0.25rem;
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: var(--pico-card-background-color);
+      border: 1px solid var(--pico-muted-color);
+      opacity: 0.85;
+      box-sizing: border-box;
+    }
+    .ai-verdict-popover .timeline-event.kind-ai_verdict::before {
+      background: var(--ai-accent);
+      border-color: var(--ai-accent);
+      opacity: 1;
+    }
+    .ai-verdict-popover .timeline-event.kind-user_chat::before {
+      background: rgb(var(--accent-blue-rgb));
+      border-color: rgb(var(--accent-blue-rgb));
+      opacity: 1;
     }
     /* A review a later review by the same author has overridden — kept in
        the log for history but dimmed so the live review state reads first. */
