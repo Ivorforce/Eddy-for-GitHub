@@ -29,7 +29,7 @@
                 hx-post="/orgs/{{ n.repo_owner }}/track"
                 hx-vals='{"thread_id": "{{ n.id }}"}'
                 hx-target="closest tr"
-                hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z"/></svg>{% if n.org_is_tracked %}Untrack{% else %}Track{% endif %}</button>
+                hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-track"/></svg>{% if n.org_is_tracked %}Untrack{% else %}Track{% endif %}</button>
         <form hx-post="/orgs/{{ n.repo_owner }}/note"
               hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
               hx-swap="none">
@@ -54,7 +54,7 @@
                 hx-post="/repos/{{ n.repo }}/track"
                 hx-vals='{"thread_id": "{{ n.id }}"}'
                 hx-target="closest tr"
-                hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z"/></svg>{% if n.repo_is_tracked %}Untrack{% else %}Track{% endif %}</button>
+                hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-track"/></svg>{% if n.repo_is_tracked %}Untrack{% else %}Track{% endif %}</button>
         <form hx-post="/repos/{{ n.repo }}/note"
               hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
               hx-swap="none">
@@ -114,7 +114,7 @@
                       hx-post="/people/{{ n.author_login }}/track"
                       hx-vals='{"thread_id": "{{ n.id }}"}'
                       hx-target="closest tr"
-                      hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z"/></svg>{% if n.author_is_tracked %}Untrack{% else %}Track{% endif %}</button>
+                      hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-track"/></svg>{% if n.author_is_tracked %}Untrack{% else %}Track{% endif %}</button>
               <form hx-post="/people/{{ n.author_login }}/note"
                     hx-trigger="keyup from:find textarea changed delay:600ms, blur from:find textarea"
                     hx-swap="none">
@@ -199,7 +199,7 @@
       <span class="stat">
         <span class="stat-content" data-tip="{{ int_engaged }} engaged · {{ int_commenters or 0 }} unique commenter{{ '' if int_commenters == 1 else 's' }} · {{ int_reviewers or 0 }} unique reviewer{{ '' if int_reviewers == 1 else 's' }} · {{ int_comments }} comment{{ '' if int_comments == 1 else 's' }}">
           <span class="stat-num">{{ int_engaged }}</span>
-          <svg class="icon stat-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 5.5a3.5 3.5 0 1 1 5.898 2.549 5.508 5.508 0 0 1 3.034 4.084.75.75 0 1 1-1.482.235 4 4 0 0 0-7.9 0 .75.75 0 0 1-1.482-.236A5.507 5.507 0 0 1 3.102 8.05 3.493 3.493 0 0 1 2 5.5ZM11 4a3.001 3.001 0 0 1 2.22 5.018 5.01 5.01 0 0 1 2.56 3.012.749.749 0 0 1-.885.954.752.752 0 0 1-.549-.514 3.507 3.507 0 0 0-2.522-2.372.75.75 0 0 1-.574-.73v-.352a.75.75 0 0 1 .416-.672A1.5 1.5 0 0 0 11 5.5.75.75 0 0 1 11 4Zm-5.5-.5a2 2 0 1 0-.001 3.999A2 2 0 0 0 5.5 3.5Z"/></svg>
+          <svg class="icon stat-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-engaged"/></svg>
         </span>
       </span>
       {% elif not ai_mode %}
@@ -230,7 +230,7 @@
         <button type="button" class="ai-verdict-main"
                 popovertarget="pop-timeline-{{ n.id }}"
                 style="anchor-name: --pop-timeline-{{ n.id }}"
-                {% if n.recency %}data-tip-html="{{ n.recency.tip_html|forceescape }}"{% endif %}><span class="ai-verdict-take{% if n.needs_attention %} needs-attention{% endif %}"><svg class="ai-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.53 1.282a.5.5 0 0 1 .94 0l.478 1.306a7.492 7.492 0 0 0 4.464 4.464l1.305.478a.5.5 0 0 1 0 .94l-1.305.478a7.492 7.492 0 0 0-4.464 4.464l-.478 1.305a.5.5 0 0 1-.94 0l-.478-1.305a7.492 7.492 0 0 0-4.464-4.464L1.282 8.47a.5.5 0 0 1 0-.94l1.306-.478a7.492 7.492 0 0 0 4.464-4.464Z"/></svg>{% if not v %}unassessed{% endif %}</span>{% if n.recency and n.recency.text %}<span class="ai-verdict-desc">{{ n.recency.text }}</span>{% elif v and v.description %}<span class="ai-verdict-desc">{{ v.description }}</span>{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
+                {% if n.recency %}data-tip-html="{{ n.recency.tip_html|forceescape }}"{% endif %}><span class="ai-verdict-take{% if n.needs_attention %} needs-attention{% endif %}"><svg class="ai-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-ai-sparkle"/></svg>{% if not v %}unassessed{% endif %}</span>{% if n.recency and n.recency.text %}<span class="ai-verdict-desc">{{ n.recency.text }}</span>{% elif v and v.description %}<span class="ai-verdict-desc">{{ v.description }}</span>{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
                 {% if n.ai_uptodate %}
                 disabled
                 aria-disabled="true"
@@ -244,7 +244,7 @@
                 hx-indicator="closest tr"
                 aria-label="{{ 'Re-assess with AI' if v else 'Ask AI to assess this thread' }}"
                 title="{{ 'Re-assess — incorporate activity since the last verdict' if v else 'Ask AI to triage this thread' }}"
-                {% endif %}><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z"/></svg></button>
+                {% endif %}><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-refresh"/></svg></button>
       </span>
     {% else %}
       {# Manual mode — thread pill group, mirroring the AI split pill.
@@ -259,11 +259,11 @@
                 popovertarget="pop-timeline-{{ n.id }}"
                 style="anchor-name: --pop-timeline-{{ n.id }}"
                 {% if tp.tip_html %}data-tip-html="{{ tp.tip_html|forceescape }}"{% endif %}
-                aria-label="Thread timeline"><span class="thread-pill-headline{% if n.needs_attention %} needs-attention{% endif %}"><svg class="thread-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.75 2.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-6a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg></span>{% if tp.text %}<span class="thread-pill-subtext kind-{{ tp.text_kind }}">{{ tp.text }}</span>{% endif %}</button><button type="button" class="thread-note-btn{% if n.note_user %} has-note{% endif %}"
+                aria-label="Thread timeline"><span class="thread-pill-headline{% if n.needs_attention %} needs-attention{% endif %}"><svg class="thread-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-thread-list"/></svg></span>{% if tp.text %}<span class="thread-pill-subtext kind-{{ tp.text_kind }}">{{ tp.text }}</span>{% endif %}</button><button type="button" class="thread-note-btn{% if n.note_user %} has-note{% endif %}"
                 popovertarget="pop-item-{{ n.id }}"
                 style="anchor-name: --pop-item-{{ n.id }}"
                 data-tip="{{ n.note_user or 'Add a personal note' }}"
-                aria-label="{{ ('Edit note: ' ~ n.note_user) if n.note_user else 'Add note' }}"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064Zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354Z"/></svg></button>
+                aria-label="{{ ('Edit note: ' ~ n.note_user) if n.note_user else 'Add note' }}"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-note"/></svg></button>
       </span>
       <div class="action-popover" popover id="pop-item-{{ n.id }}"
            data-kind="item" data-thread-id="{{ n.id }}"
@@ -407,7 +407,7 @@
               hx-swap="outerHTML"
               hx-include="#filters"
               aria-label="Mark read"
-              title="Mark read — row stays visible"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2.5 1.75v11.5c0 .138.112.25.25.25h3.17a.75.75 0 0 1 0 1.5H2.75A1.75 1.75 0 0 1 1 13.25V1.75C1 .784 1.784 0 2.75 0h8.5C12.216 0 13 .784 13 1.75v7.736a.75.75 0 0 1-1.5 0V1.75a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13.274 9.537v-.001l-4.557 4.45a.75.75 0 0 1-1.055-.008l-1.943-1.95a.75.75 0 0 1 1.062-1.058l1.419 1.425 4.026-3.932a.75.75 0 1 1 1.048 1.074ZM4.75 4h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM4 7.75A.75.75 0 0 1 4.75 7h2a.75.75 0 0 1 0 1.5h-2A.75.75 0 0 1 4 7.75Z"/></svg></button>
+              title="Mark read — row stays visible"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-mark-read"/></svg></button>
       {# Snooze — active variant wakes on click; trigger variant opens the
          duration popover and wears an inline ▾ disclosure (Done does not —
          only Snooze opens a menu). Active state shows amber fill (or grey
@@ -420,12 +420,12 @@
               hx-post="/set/{{ n.id }}/snooze"
               hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters"
               aria-label="Wake from snooze"
-              title="{% if n.snooze_quiet %}Snoozed quietly (unsubscribed) — wakes &amp; re-subscribes in {{ n.snooze_wakes_in }}; click to wake now{% else %}Snoozed — wakes in {{ n.snooze_wakes_in }}; click to wake now{% endif %}"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm7-3.25v2.992l2.028.812a.75.75 0 0 1-.557 1.392l-2.5-1A.751.751 0 0 1 7 8.25v-3.5a.75.75 0 0 1 1.5 0Z"/></svg></button>
+              title="{% if n.snooze_quiet %}Snoozed quietly (unsubscribed) — wakes &amp; re-subscribes in {{ n.snooze_wakes_in }}; click to wake now{% else %}Snoozed — wakes in {{ n.snooze_wakes_in }}; click to wake now{% endif %}"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-clock"/></svg></button>
       {% else %}
       <button type="button" class="action-segment seg-snooze{% if ai_act in ['snooze', 'snooze_quiet'] %} ai-suggests{% endif %}"
               popovertarget="pop-snooze-{{ n.id }}"
               style="anchor-name: --pop-snooze-{{ n.id }}"
-              aria-label="Snooze" title="Snooze — hide until N days pass (or new activity, whichever first)"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm7-3.25v2.992l2.028.812a.75.75 0 0 1-.557 1.392l-2.5-1A.751.751 0 0 1 7 8.25v-3.5a.75.75 0 0 1 1.5 0Z"/></svg><span class="disclosure" aria-hidden="true">▾</span></button>
+              aria-label="Snooze" title="Snooze — hide until N days pass (or new activity, whichever first)"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-clock"/></svg><span class="disclosure" aria-hidden="true">▾</span></button>
       {% endif %}
       <button type="button"
               class="action-segment seg-done{% if is_done_active %} active{% endif %}{% if ai_act == 'done' %} ai-suggests{% endif %}"
@@ -434,7 +434,7 @@
               hx-swap="outerHTML"
               hx-include="#filters"
               aria-label="Done"
-              title="Done — hide row; new activity brings it back"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v1.5A1.75 1.75 0 0 1 14.25 6H1.75A1.75 1.75 0 0 1 0 4.25ZM1.75 7a.75.75 0 0 1 .75.75v5.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-5.5a.75.75 0 0 1 1.5 0v5.5A1.75 1.75 0 0 1 13.25 15H2.75A1.75 1.75 0 0 1 1 13.25v-5.5A.75.75 0 0 1 1.75 7Zm0-4.5a.25.25 0 0 0-.25.25v1.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-1.5a.25.25 0 0 0-.25-.25ZM6.25 8h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1 0-1.5Z"/></svg></button>
+              title="Done — hide row; new activity brings it back"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-archive"/></svg></button>
     </div>
     {% if not n.snooze_until %}
     {# Shell only — HTMX fetches /snooze-menu/<id> on each open (the 9
@@ -465,7 +465,7 @@
               hx-post="/toggle/{{ n.id }}/track"
               hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters"
               aria-label="{{ 'Untrack' if n.is_tracked else 'Track' }}"
-              title="{{ 'Tracked — click to untrack' if n.is_tracked else 'Track this thread' }}"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 2.75C3 1.784 3.784 1 4.75 1h6.5c.966 0 1.75.784 1.75 1.75v11.5a.75.75 0 0 1-1.227.579L8 11.722l-3.773 3.107A.751.751 0 0 1 3 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.91l3.023-2.489a.75.75 0 0 1 .954 0l3.023 2.49V2.75a.25.25 0 0 0-.25-.25Z"/></svg></button>
+              title="{{ 'Tracked — click to untrack' if n.is_tracked else 'Track this thread' }}"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-track"/></svg></button>
       {# Mute + ▾ joined as a segmented sub-group — the partial-mute caret is
          visually Mute's dropdown sibling (full / partial unsubscribe), so they
          share a single border and slot background. #}
@@ -477,7 +477,7 @@
                 hx-swap="outerHTML"
                 hx-include="#filters"
                 aria-label="Mute"
-                title="Mute — archive AND unsubscribe. Won't resurface from new activity. Click again (with Show archived on) to resubscribe and revert."><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m4.182 4.31.016.011 10.104 7.316.013.01 1.375.996a.75.75 0 1 1-.88 1.214L13.626 13H2.518a1.516 1.516 0 0 1-1.263-2.36l1.703-2.554A.255.255 0 0 0 3 7.947V5.305L.31 3.357a.75.75 0 1 1 .88-1.214Zm7.373 7.19L4.5 6.391v1.556c0 .346-.102.683-.294.97l-1.703 2.556a.017.017 0 0 0-.003.01c0 .005.002.009.005.012l.006.004.007.001ZM8 1.5c-.997 0-1.895.416-2.534 1.086A.75.75 0 1 1 4.38 1.55 5 5 0 0 1 13 5v2.373a.75.75 0 0 1-1.5 0V5A3.5 3.5 0 0 0 8 1.5ZM8 16a2 2 0 0 1-1.985-1.75c-.017-.137.097-.25.235-.25h3.5c.138 0 .252.113.235.25A2 2 0 0 1 8 16Z"/></svg></button>
+                title="Mute — archive AND unsubscribe. Won't resurface from new activity. Click again (with Show archived on) to resubscribe and revert."><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-mute"/></svg></button>
         {% if n.mute_kind_options %}
         <button type="button" id="mk-caret-{{ n.id }}"
                 class="row2-btn mute-caret-btn{% if n.muted_kinds %} has-muted{% endif %}{% if sub_pending %} ai-suggests{% endif %}"

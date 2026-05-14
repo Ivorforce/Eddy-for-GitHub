@@ -2625,6 +2625,7 @@
   </script>
 </head>
 <body data-event-seq="{{ event_seq|default(0) }}" data-auto-refresh="{{ auto_refresh|default('live') }}">
+  {% include "_icons.html" %}
   <main class="container">
     {% block content %}{% endblock %}
   </main>
