@@ -437,52 +437,22 @@
               title="Done — hide row; new activity brings it back"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v1.5A1.75 1.75 0 0 1 14.25 6H1.75A1.75 1.75 0 0 1 0 4.25ZM1.75 7a.75.75 0 0 1 .75.75v5.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-5.5a.75.75 0 0 1 1.5 0v5.5A1.75 1.75 0 0 1 13.25 15H2.75A1.75 1.75 0 0 1 1 13.25v-5.5A.75.75 0 0 1 1.75 7Zm0-4.5a.25.25 0 0 0-.25.25v1.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-1.5a.25.25 0 0 0-.25-.25ZM6.25 8h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1 0-1.5Z"/></svg></button>
     </div>
     {% if not n.snooze_until %}
-    {# `hx-vals js:` reads the checkbox at click time so all durations honour
-       it without per-button state. `quiet` ⇒ also unsubscribe for the
-       duration (resubscribe on wake) — see set_snooze. #}
+    {# Shell only — HTMX fetches /snooze-menu/<id> on each open (the 9
+       duration buttons would otherwise add ~9 hx-attributed children per
+       row to every table swap). #}
     <div class="snooze-pop" popover id="pop-snooze-{{ n.id }}"
-         style="position-anchor: --pop-snooze-{{ n.id }}">
-      {% set qv = 'js:{quiet: document.getElementById("snzq-' ~ n.id ~ '").classList.contains("on")}' %}
-      {% if n.ai_verdict and n.ai_verdict.snooze_days %}
-      <button type="button" class="snooze-ai" hx-post="/set/{{ n.id }}/snooze?days={{ n.ai_verdict.snooze_days }}" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters" title="AI's suggestion{% if n.ai_verdict.snooze_quiet %} — quiet (unsubscribe for the duration){% endif %}">~{{ n.ai_verdict.snooze_days }}d · AI{% if n.ai_verdict.snooze_quiet %} · quiet{% endif %}</button>
-      {% endif %}
-      <button type="button" hx-post="/set/{{ n.id }}/snooze?days=1"  hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 day</button>
-      <button type="button" hx-post="/set/{{ n.id }}/snooze?days=3"  hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">3 days</button>
-      <button type="button" hx-post="/set/{{ n.id }}/snooze?days=7"  hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 week</button>
-      <button type="button" hx-post="/set/{{ n.id }}/snooze?days=14" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">2 weeks</button>
-      <button type="button" hx-post="/set/{{ n.id }}/snooze?days=30" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">1 month</button>
-      <button type="button" hx-post="/set/{{ n.id }}/snooze?days=60" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">2 months</button>
-      <button type="button" hx-post="/set/{{ n.id }}/snooze?days=180" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">6 months</button>
-      <button type="button" hx-post="/set/{{ n.id }}/snooze?days=365" hx-vals='{{ qv|safe }}' hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters">12 months</button>
-      <button type="button" class="snooze-quiet-opt{% if n.ai_verdict and n.ai_verdict.snooze_quiet %} on{% endif %}" id="snzq-{{ n.id }}" onclick="this.classList.toggle('on')" title="Unsubscribe on GitHub for the duration; resubscribe on wake{% if n.ai_verdict and n.ai_verdict.snooze_quiet %} — AI suggests this{% endif %}"><span class="check" aria-hidden="true">✓</span>unsubscribe while snoozed</button>
-    </div>
+         style="position-anchor: --pop-snooze-{{ n.id }}"
+         hx-get="/snooze-menu/{{ n.id }}"
+         hx-trigger="toggle[newState=='open'] from:#pop-snooze-{{ n.id }}"
+         hx-target="this" hx-swap="innerHTML"></div>
     {% endif %}
     {% if n.mute_kind_options %}
+    {# Shell only — HTMX fetches /mute-kinds-menu/<id> on each open. #}
     <div class="snooze-pop mutekind-pop" popover id="pop-mutekinds-{{ n.id }}"
-         style="position-anchor: --pop-mutekinds-{{ n.id }}">
-      <div class="mutekind-title">Mute updates</div>
-      {% if sub_sug %}
-      <button type="button"
-              class="mutekind-apply{% if not n.ai_verdict.subscription_pending %} done{% endif %}"
-              hx-post="/ai/{{ n.id }}/apply-mute-suggestion"
-              hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters"
-              {% if not n.ai_verdict.subscription_pending %}disabled{% endif %}
-              title="{% if n.ai_verdict.subscription_pending %}Apply the AI's suggestion{% else %}AI's suggestion — applied{% endif %}">✦ {{ n.ai_verdict.subscription_summary }}</button>
-      {% endif %}
-      {% for key, label, mutable in n.mute_kind_options %}
-      {% if mutable %}
-      <button type="button" name="kind" value="{{ key }}"
-              class="mutekind-opt{% if key in n.muted_kinds %} on{% endif %}{% if sub_sug and key in n.ai_verdict.pending_mute %} ai-mute{% endif %}{% if sub_sug and key in n.ai_verdict.pending_unmute %} ai-unmute{% endif %}"
-              {% if sub_sug and key in n.ai_verdict.mute_suggested %}data-ai-suggest="mute"{% elif sub_sug and key in n.ai_verdict.unmute_suggested %}data-ai-suggest="unmute"{% endif %}
-              hx-post="/set/{{ n.id }}/mute-kinds" hx-swap="none"
-              hx-on::after-request="if (event.detail.successful) muteKindToggled(this)"><span class="mk-lbl">{{ label }}</span></button>
-      {% else %}
-      {# State changes (merge / close / reopen / answered) always notify — a
-         disabled row so the menu doesn't read as a missing toggle. #}
-      <div class="mutekind-opt always-on" title="Always notifies — can't be muted"><span class="mk-lbl">{{ label }}</span></div>
-      {% endif %}
-      {% endfor %}
-    </div>
+         style="position-anchor: --pop-mutekinds-{{ n.id }}"
+         hx-get="/mute-kinds-menu/{{ n.id }}"
+         hx-trigger="toggle[newState=='open'] from:#pop-mutekinds-{{ n.id }}"
+         hx-target="this" hx-swap="innerHTML"></div>
     {% endif %}
     <div class="action-row2">
       {# Row 2 — subscription posture: Track (bookmark, raises priority) ·

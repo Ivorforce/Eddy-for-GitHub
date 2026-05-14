@@ -1,0 +1,28 @@
+{# Inner content of the per-thread mute-kinds popover. Rendered lazily by
+   GET /mute-kinds-menu/<thread_id> on first popover-open (and on every reopen)
+   so the per-row table swap doesn't carry up to 5 hx-attributed buttons × N rows.
+   sub_sug mirrors the _row.html expression: AI mode with a verdict carrying
+   a subscription suggestion (applied or not). #}
+{% set sub_sug = triage_mode == 'ai' and n.ai_verdict and n.ai_verdict.has_subscription_suggestion %}
+<div class="mutekind-title">Mute updates</div>
+{% if sub_sug %}
+<button type="button"
+        class="mutekind-apply{% if not n.ai_verdict.subscription_pending %} done{% endif %}"
+        hx-post="/ai/{{ n.id }}/apply-mute-suggestion"
+        hx-target="closest tr" hx-swap="outerHTML" hx-include="#filters"
+        {% if not n.ai_verdict.subscription_pending %}disabled{% endif %}
+        title="{% if n.ai_verdict.subscription_pending %}Apply the AI's suggestion{% else %}AI's suggestion — applied{% endif %}">✦ {{ n.ai_verdict.subscription_summary }}</button>
+{% endif %}
+{% for key, label, mutable in n.mute_kind_options %}
+{% if mutable %}
+<button type="button" name="kind" value="{{ key }}"
+        class="mutekind-opt{% if key in n.muted_kinds %} on{% endif %}{% if sub_sug and key in n.ai_verdict.pending_mute %} ai-mute{% endif %}{% if sub_sug and key in n.ai_verdict.pending_unmute %} ai-unmute{% endif %}"
+        {% if sub_sug and key in n.ai_verdict.mute_suggested %}data-ai-suggest="mute"{% elif sub_sug and key in n.ai_verdict.unmute_suggested %}data-ai-suggest="unmute"{% endif %}
+        hx-post="/set/{{ n.id }}/mute-kinds" hx-swap="none"
+        hx-on::after-request="if (event.detail.successful) muteKindToggled(this)"><span class="mk-lbl">{{ label }}</span></button>
+{% else %}
+{# State changes (merge / close / reopen / answered) always notify — a
+   disabled row so the menu doesn't read as a missing toggle. #}
+<div class="mutekind-opt always-on" title="Always notifies — can't be muted"><span class="mk-lbl">{{ label }}</span></div>
+{% endif %}
+{% endfor %}

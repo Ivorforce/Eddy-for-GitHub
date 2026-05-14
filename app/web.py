@@ -2321,6 +2321,29 @@ def thread_timeline(thread_id: str):
     return render_template("_timeline_list.html", timeline=timeline, thread_id=thread_id)
 
 
+@app.get("/snooze-menu/<thread_id>")
+def snooze_menu(thread_id: str):
+    """Render the snooze duration popover's inner content. The row template
+    ships the popover empty; HTMX fetches this on popover-open (re-fetched
+    each open). Keeps ~9 hx-attributed duration buttons per row out of every
+    table swap."""
+    n = _load_one(thread_id)
+    if not n:
+        return ("", 404)
+    return render_template("_snooze_menu.html", n=n)
+
+
+@app.get("/mute-kinds-menu/<thread_id>")
+def mute_kinds_menu(thread_id: str):
+    """Render the per-thread mute-kinds popover's inner content. Same lazy
+    pattern as /snooze-menu — keeps the kind toggles (+ optional AI
+    apply-suggestion button) off the per-row markup."""
+    n = _load_one(thread_id)
+    if not n or not n.get("mute_kind_options"):
+        return ("", 404)
+    return render_template("_mutekinds_menu.html", n=n, triage_mode=_get_triage_mode())
+
+
 @app.post("/settings/ai_auto_judge")
 def set_ai_auto_judge():
     """Toggle background AI judgment on incoming activity. The change
