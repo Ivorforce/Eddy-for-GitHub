@@ -18,12 +18,23 @@ import hashlib
 import sqlite3
 import threading
 
-# Guards both _seq and _last_fingerprint. notify_all() wakes every SSE
-# generator currently parked in wait() — they each re-check _seq against
-# their own last_seen and emit if it's moved.
+# Guards _seq, _last_fingerprint, and the named-message ring buffer below.
+# notify_all() wakes every SSE generator currently parked in wait() — they
+# each re-check their cursors and emit whatever's new.
 _cond = threading.Condition()
 _seq = 0
 _last_fingerprint: str | None = None
+
+# Parallel push channel for per-thread "AI is judging this row" markers.
+# Used so the auto-judge batch can light up the row's pill pulse while the
+# Anthropic call is in flight — equivalent to HTMX adding `.htmx-request`
+# during a manual click. A monotonic `_msg_seq` and a ring buffer so a
+# briefly-disconnected client can replay anything it missed on reconnect;
+# the end-of-batch fingerprint bump (existing channel) clears the marker
+# by replacing the row HTML, so we don't emit an explicit "done" event.
+_MSG_RING = 256
+_msg_seq = 0
+_msgs: list[tuple[int, str, str]] = []  # (seq, kind, thread_id)
 
 
 def compute_fingerprint(conn: sqlite3.Connection) -> str:
@@ -80,3 +91,43 @@ def wait(last_seen: int, timeout: float) -> int:
             return _seq
         _cond.wait(timeout=timeout)
         return _seq
+
+
+def notify_judging(thread_id: str) -> None:
+    """Push a per-thread `judging` marker out the SSE channel. Fired at the
+    start of every AI judgment (manual click or auto-batch) so the row's
+    pill can animate while the API call is in flight. No matching "done"
+    event — the fingerprint bump that lands the verdict replaces the row
+    HTML, dropping the class. Multiple emissions for the same thread are
+    safe; the client just re-applies the same class."""
+    global _msg_seq
+    with _cond:
+        _msg_seq += 1
+        _msgs.append((_msg_seq, "judging", thread_id))
+        if len(_msgs) > _MSG_RING:
+            del _msgs[: len(_msgs) - _MSG_RING]
+        _cond.notify_all()
+
+
+def current_msg_seq() -> int:
+    with _cond:
+        return _msg_seq
+
+
+def drain_msgs_since(last_seen: int) -> list[tuple[int, str, str]]:
+    """Snapshot of buffered messages newer than `last_seen`. Empty list when
+    the caller is caught up or the buffer has wrapped past their cursor."""
+    with _cond:
+        return [m for m in _msgs if m[0] > last_seen]
+
+
+def wait_for_any(last_seq: int, last_msg_seq: int, timeout: float) -> tuple[int, int]:
+    """Block until either channel advances or `timeout` elapses; return both
+    cursors. Used by the SSE generator to multiplex the seq channel
+    (full-table refresh trigger) with the named-message channel (per-row
+    judging markers)."""
+    with _cond:
+        if _seq > last_seq or _msg_seq > last_msg_seq:
+            return _seq, _msg_seq
+        _cond.wait(timeout=timeout)
+        return _seq, _msg_seq

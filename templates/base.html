@@ -2134,6 +2134,15 @@
         if (!target) return;
         htmx.ajax("GET", "/list", { source: "#filters", target, swap: "innerHTML" });
       });
+      // Per-row "AI is judging" marker fired by the auto-judge batch. Add the
+      // same `htmx-request` class HTMX uses for manual clicks so the existing
+      // pulse rule covers both paths. The next table refresh (when the
+      // verdict lands) replaces the row HTML and the class goes with it; no
+      // explicit "done" event needed.
+      sse.addEventListener("judging", (e) => {
+        const row = document.getElementById("row-" + e.data);
+        if (row) row.classList.add("htmx-request");
+      });
       let sseDisconnected = false;
       let sseErrorTimer = null;
       sse.addEventListener("open", () => {

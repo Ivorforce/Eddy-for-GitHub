@@ -40,7 +40,7 @@ from pathlib import Path
 
 import anthropic
 
-from . import db, github, settings
+from . import db, events, github, settings
 
 log = logging.getLogger(__name__)
 
@@ -1020,6 +1020,12 @@ def judge(
     ts_start = int(time.time())
     if not _enter_judge(thread_id):
         raise AIBusy(f"judgment already in flight for {thread_id}")
+    # Push a `judging` SSE event so the open tab can animate the row's pill
+    # while we work. Manual clicks already get the pulse via HTMX's
+    # `hx-indicator=closest tr` (the per-request `.htmx-request` class); this
+    # signal covers auto-judge passes, which never produce a per-row HTMX
+    # request the client could attach an indicator to.
+    events.notify_judging(thread_id)
     try:
         # Block until the row's enrichment is up to date — judging against a
         # half-built thread_events timeline would feed the model stale context

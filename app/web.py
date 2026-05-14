@@ -2441,13 +2441,22 @@ def sse_events():
     same DB the seq describes."""
     def gen():
         last_seen = events.current_seq()
+        last_msg = events.current_msg_seq()
         yield f"data: {last_seen}\n\n"
         while True:
-            seq = events.wait(last_seen, timeout=15.0)
+            seq, msg_seq = events.wait_for_any(last_seen, last_msg, timeout=15.0)
+            if msg_seq > last_msg:
+                # Per-thread judging markers — emit named SSE events so the
+                # client can mark the matching row's pill in flight without a
+                # full table refresh. Drain in order; the seq bump (if any)
+                # rides this same wake and lands the actual verdict.
+                for (_n, kind, tid) in events.drain_msgs_since(last_msg):
+                    yield f"event: {kind}\ndata: {tid}\n\n"
+                last_msg = msg_seq
             if seq > last_seen:
                 last_seen = seq
                 yield f"data: {seq}\n\n"
-            else:
+            if seq == last_seen and msg_seq == last_msg:
                 yield ": ping\n\n"
     resp = Response(gen(), mimetype="text/event-stream")
     resp.headers["Cache-Control"] = "no-cache"
