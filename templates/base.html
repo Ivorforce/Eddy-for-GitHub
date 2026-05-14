@@ -1266,6 +1266,12 @@
     .ai-verdict-popover .timeline-event.review-superseded {
       opacity: 0.45;
     }
+    /* Extra space above an event that sits >=30 days past the prior one
+       (see web._mark_large_gaps). Lets time-clustered bursts read as
+       clusters instead of one even cadence. */
+    .ai-verdict-popover .timeline-event.gap-before {
+      margin-top: 0.9rem;
+    }
     .ai-verdict-popover .timeline-line {
       display: flex;
       gap: 0.4rem;

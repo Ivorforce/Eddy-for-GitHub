@@ -1074,6 +1074,23 @@ def _mark_superseded_reviews(events: list[dict]) -> list[dict]:
     return events
 
 
+_LARGE_GAP_SECONDS = 30 * 86400
+
+
+def _mark_large_gaps(
+    events: list[dict], threshold: int = _LARGE_GAP_SECONDS,
+) -> list[dict]:
+    """Flag events whose `at_ts` sits more than `threshold` past the prior
+    event so the template can widen the margin above them. Activity on a
+    long-lived thread tends to arrive in time-clustered bursts; spacing the
+    clusters lets the eye see "and then nothing for half a year" without
+    reading every per-row age. Mutates events in place; returns the list."""
+    for prev, cur in zip(events, events[1:]):
+        if cur["at_ts"] - prev["at_ts"] >= threshold:
+            cur["gap_before"] = True
+    return events
+
+
 def _drop_superseded_verdicts(events: list[dict]) -> list[dict]:
     """Keep only the latest `ai_verdict` event in the rendered timeline. A
     verdict is the AI's standing take as of its timestamp; earlier ones are
@@ -1529,6 +1546,7 @@ def _build_timeline(
     timeline = _coalesce_code_pushes(timeline)
     timeline = _coalesce_comments(timeline)
     timeline = _mark_superseded_reviews(timeline)
+    timeline = _mark_large_gaps(timeline)
     return timeline
 
 
