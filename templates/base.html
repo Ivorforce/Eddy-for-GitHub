@@ -1381,8 +1381,9 @@
       color: var(--pico-muted-color);
       cursor: default;
     }
-    /* Hover for the pill's recency segment: the standing take, then the
-       since-last-verdict breakdown below a hairline. */
+    /* Hover for the pill's recency segment: the standing take, then a
+       small uppercase "since" label and the comma-joined breakdown below
+       a hairline. Review-state spans inherit the timeline-view colors. */
     .custom-tooltip .tip-recency-desc,
     .custom-tooltip .tip-recency-since { white-space: normal; }
     .custom-tooltip .tip-recency-desc { opacity: 0.8; }
@@ -1391,6 +1392,15 @@
       padding-top: 0.3rem;
       border-top: 1px solid rgba(255, 255, 255, 0.18);
     }
+    .custom-tooltip .tip-recency-label {
+      font-size: 0.72em;
+      opacity: 0.6;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.15rem;
+    }
+    .custom-tooltip .state-approved          { color: var(--state-good); font-weight: 500; }
+    .custom-tooltip .state-changes-requested { color: var(--state-bad-muted); font-weight: 500; }
     /* Age-pill tooltip: two sections (creation, last activity), each with a
        small uppercase label, the humanized delta, then the raw ISO muted
        below. Hairline mirrors .tip-recency above. */

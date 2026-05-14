@@ -1452,37 +1452,54 @@ def _recency_summary(
     def _plural(n: int, noun: str) -> str:
         return f"+{n} {noun}{'' if n == 1 else 's'}"
 
-    parts: list[str] = []        # inline pill text — plain counts
-    detail: list[str] = []       # hover line — counts + review-state notes
+    parts: list[str] = []          # inline pill text — plain counts
+    detail: list[Markup] = []      # hover line — same shape, with state notes colored
     if mentions:
         parts.append("+ mentioned")
-        detail.append("+ mentioned")
+        detail.append(Markup("+ mentioned"))
     if reviews:
         parts.append(_plural(reviews, "review"))
         cr = sum(1 for s in review_states if s == "CHANGES_REQUESTED")
         ap = sum(1 for s in review_states if s == "APPROVED")
-        notes = [f"{cr} changes requested"] if cr else []
+        # State breakdown inherits the timeline-view colors
+        # (state-approved / state-changes-requested).
+        notes: list[Markup] = []
+        if cr:
+            notes.append(Markup(
+                '<span class="state-changes-requested">{} changes requested</span>'
+            ).format(cr))
         if ap:
-            notes.append(f"{ap} approved")
-        detail.append(_plural(reviews, "review") + (f" ({', '.join(notes)})" if notes else ""))
+            notes.append(Markup(
+                '<span class="state-approved">{} approved</span>'
+            ).format(ap))
+        line = Markup(_plural(reviews, "review"))
+        if notes:
+            line = line + Markup(" (") + Markup(", ").join(notes) + Markup(")")
+        detail.append(line)
     for verb in lifecycle_verbs:
         parts.append(verb)
-        detail.append(verb)
+        detail.append(Markup(verb))
     if pushes:
         label = "code pushed" if pushes == 1 else f"+{pushes} code pushes"
         parts.append(label)
-        detail.append(label)
+        detail.append(Markup(label))
     if body_edits:
         label = "description edited" if body_edits == 1 else f"{body_edits} description edits"
         parts.append(label)
-        detail.append(label)
+        detail.append(Markup(label))
     if comments:
         label = "+ you commented" if user_comments == comments else _plural(comments, "comment")
         parts.append(label)
-        detail.append(label)
+        detail.append(Markup(label))
 
-    tip_html = desc_part + Markup('<div class="tip-recency-since">{}{}</div>').format(
-        since_prefix, ", ".join(detail))
+    # Strip the trailing ": " from the legacy prefix so CSS can render it
+    # as a small uppercase label above the line (same shape as age-tip).
+    label_text = since_prefix.rstrip(": ")
+    tip_html = desc_part + Markup(
+        '<div class="tip-recency-since">'
+        '<div class="tip-recency-label">{}</div>'
+        '<div class="tip-recency-line">{}</div>'
+        '</div>').format(label_text, Markup(", ").join(detail))
     return {"text": ", ".join(parts), "tip_html": tip_html}
 
 
