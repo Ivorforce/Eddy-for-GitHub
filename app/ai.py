@@ -136,10 +136,13 @@ TOOL_DEF: dict = {
                 "enum": ["track", "untrack"],
                 "description": (
                     "Per-turn change to the item-level tracked flag. *Omit* to leave it as-is "
-                    "(the default — nothing to do this turn). Use 'track' only when preferences "
-                    "explicitly direct, or when a `user_chat` asks to track it; 'untrack' only "
-                    "when the user explicitly asks. The user's own use of the flag ('I want to "
-                    "come back to this') isn't something you can infer — don't try."
+                    "(the default — nothing to do this turn). Use 'track' on a first-person "
+                    "signal from the user — preferences directing it, a `user_chat` saying so, "
+                    "or a thread comment expressing intent (\"I'll take this\") or stake "
+                    "(\"I really need this feature\"); use 'untrack' symmetrically when that "
+                    "signal is withdrawn (the user's part is done, handing it off, dropping "
+                    "out). Routine reading or visits aren't a drop signal. Unspoken stake "
+                    "isn't inferrable — don't try."
                 ),
             },
             "priority_score": {
