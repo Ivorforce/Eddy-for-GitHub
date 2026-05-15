@@ -927,6 +927,12 @@ _COMMENT_COALESCE_GAP_SECS = 30 * 86400
 # adjacent streak (handled by _coalesce_user_actions).
 _RECURRING_ACTIONS = {"visited", "done", "read", "read_on_github"}
 
+# `read` and `read_on_github` share a bucket — both mean "the row got marked
+# read", just locally vs externally — so only the latest of either survives.
+# The surviving event's own label ("Marked read" vs "Marked read remotely")
+# still reflects which channel cleared it last.
+_RECURRING_ACTION_BUCKET = {"read_on_github": "read"}
+
 
 def _coalesce_recurring_actions(events: list[dict]) -> list[dict]:
     """For each action in _RECURRING_ACTIONS, keep only its latest occurrence
@@ -939,7 +945,8 @@ def _coalesce_recurring_actions(events: list[dict]) -> list[dict]:
             continue
         action = (ev.get("payload") or {}).get("action")
         if action in _RECURRING_ACTIONS:
-            latest_idx[action] = i
+            bucket = _RECURRING_ACTION_BUCKET.get(action, action)
+            latest_idx[bucket] = i
     keep = set(latest_idx.values())
     def is_superseded(i: int, ev: dict) -> bool:
         if ev.get("kind") != "user_action":
