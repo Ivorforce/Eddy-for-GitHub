@@ -342,9 +342,10 @@
       {% if triage_mode == 'ai' %}
       {# Composer. Two acts: Note (Enter — saves a user_chat event, no AI
          call; the AI sees it next time it judges this thread) and the AI
-         button (Ctrl+Enter — re-judge; label "↻ Re-ask" when empty,
-         "Send to AI" with text, in which case the text is saved as a
-         user_chat event first and the verdict may carry a `reply`).
+         button (Ctrl+Enter — re-judge; label "✦ Assess" first run /
+         "↻ Re-assess" once a verdict exists / "Send to AI" with text, in
+         which case the text is saved as a user_chat event first and the
+         verdict may carry a `reply`).
          Shift+Enter inserts a newline. Note is disabled when the textarea
          is empty. The textarea clears via hx-on::after-request after a
          successful Note so subsequent notes append rather than re-saving
@@ -375,7 +376,7 @@
                   hx-include="#filters, closest .ai-chat-form"
                   hx-indicator="closest tr"
                   hx-on::before-request="aiBusyOn(this)"
-                  title="Empty: re-assess from current state. With text: send it to the AI and re-assess (Ctrl+Enter)."><span class="rejudge-label">↻ Re-ask</span></button>
+                  title="{% if v %}Re-assess incorporating recent activity{% else %}Ask AI to assess this thread{% endif %}. With text: send it to the AI first (Ctrl+Enter)."><span class="rejudge-label">{% if v %}↻ Re-assess{% else %}✦ Assess{% endif %}</span></button>
         </div>
       </div>
       {% endif %}
