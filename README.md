@@ -1,11 +1,10 @@
-# Eddy for GitHub — see what matters in your feed
+# Eddy for GitHub
 
-A small local web app that helps you keep up with your GitHub notifications
-without scrolling through everything. Just a python script that runs on
-your machine, no server needed.
+A small local web app that helps you keep up with your GitHub notifications.
+Eddy is designed to be lightweight and integrate into your workflow.
 
 Eddy shows your GitHub notifications, assigned issues and PRs, and anything
-else you want to add, as one ranked list. Decide what's worth your attention
+else you want to add, as one ranked list. Decide what needs your attention
 and take notes for later.
 
 ![Eddy](materials/screenshot.png)
@@ -27,10 +26,9 @@ you'd like and still feel behind, give it a try.
 
 ## The Eddy workflow
 
-Eddy is designed for a two-mode loop. When new activity arrives, you skim items as they
-come in, set a priority, and move on. When you have time to act, sort by priority and
-pick one. It's lightweight by design: full triage is best done elsewhere; Eddy is just
-for your personal queue.
+Eddy is designed for a two-mode loop. New items arrive via GitHub notifications. You skim them,
+set a priority, and move on. When you have time to act, sort by priority and pick one.
+It's lightweight by design: full triage is best done elsewhere; Eddy is just for your personal queue.
 
 If you prefer, you can use the optional AI assistant to do the triage pass for you,
 based on a `preferences.md` you write.
