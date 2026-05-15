@@ -309,6 +309,12 @@ def _identity_block(user_login: str | None, user_teams) -> str | None:
             + ", ".join(team_strs)
             + ". A requested_teams entry matching one of these is a team-level review request to the user."
         )
+    parts.append(
+        "Each requested_reviewers / requested_teams entry's `as_code_owner` is "
+        "`true` when CODEOWNERS auto-routed (less directed than an explicit ask), "
+        "`false` when explicitly requested, `null` when the org's OAuth "
+        "restrictions hid per-entry attribution."
+    )
     return " ".join(parts)
 
 
@@ -360,10 +366,12 @@ def _summarize_details(d: dict, subject_type: str) -> dict:
         # message, committed_at, author, total}. None until first enrichment.
         out["last_commit"] = d.get("last_commit")
         out["requested_reviewers"] = [
-            (r or {}).get("login") for r in (d.get("requested_reviewers") or []) if (r or {}).get("login")
+            {"login": (r or {}).get("login"), "as_code_owner": (r or {}).get("as_code_owner")}
+            for r in (d.get("requested_reviewers") or []) if (r or {}).get("login")
         ]
         out["requested_teams"] = [
-            (t or {}).get("slug") for t in (d.get("requested_teams") or []) if (t or {}).get("slug")
+            {"slug": (t or {}).get("slug"), "as_code_owner": (t or {}).get("as_code_owner")}
+            for t in (d.get("requested_teams") or []) if (t or {}).get("slug")
         ]
         # Per-file diff stats as a compact string list — "path +N/-M". String
         # form is ~2.5x cheaper in tokens than the equivalent JSON objects,

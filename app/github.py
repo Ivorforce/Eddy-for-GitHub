@@ -815,6 +815,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       assignees(first: 10) { nodes { login } }
       reviewRequests(first: 20) {
         nodes {
+          asCodeOwner
           requestedReviewer {
             __typename
             ... on User { login }
@@ -1259,14 +1260,72 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         for a in (pr.get("assignees") or {}).get("nodes") or []
         if (a or {}).get("login")
     ]
+    # Per-entry CODEOWNERS routing flag rides on the ReviewRequest itself
+    # (scalar — survives org OAuth restrictions that null out the union below).
+    # When the union resolves, attach the flag to the entry directly.
+    # When the union is null'd (FORBIDDEN on restricted orgs), stash the flag
+    # so the REST fallback below can apply it after recovering identities.
     requested_reviewers: list[dict] = []
     requested_teams: list[dict] = []
+    unresolved_flags: list[bool] = []
     for rr in (pr.get("reviewRequests") or {}).get("nodes") or []:
+        flag = bool(rr.get("asCodeOwner"))
         rev = rr.get("requestedReviewer") or {}
         if rev.get("__typename") == "User" and rev.get("login"):
-            requested_reviewers.append({"login": rev["login"]})
+            requested_reviewers.append({"login": rev["login"], "as_code_owner": flag})
         elif rev.get("__typename") == "Team" and rev.get("slug"):
-            requested_teams.append({"slug": rev["slug"]})
+            requested_teams.append({"slug": rev["slug"], "as_code_owner": flag})
+        else:
+            unresolved_flags.append(flag)
+
+    if unresolved_flags:
+        # GraphQL gave us N anonymous entries (identity blocked by the org's
+        # OAuth-app restriction). REST /pulls/{n} isn't subject to the same
+        # gate and returns the user / team identities directly. Merge them in,
+        # attributing the as_code_owner flag uniformly when all unresolved
+        # entries agree (the common case — CODEOWNERS routes everyone on a
+        # path identically); otherwise mark them None to signal "can't tell".
+        merged_flag: bool | None = (
+            unresolved_flags[0] if len(set(unresolved_flags)) == 1 else None
+        )
+        known_logins = {(r or {}).get("login") for r in requested_reviewers}
+        known_slugs = {(t or {}).get("slug") for t in requested_teams}
+        try:
+            rest = _session.get(
+                f"https://api.github.com/repos/{owner}/{name}/pulls/{number}",
+                headers=_auth_headers(token), timeout=15,
+            )
+            if rest.status_code == 200:
+                rj = rest.json() or {}
+                for u in rj.get("requested_reviewers") or []:
+                    login = (u or {}).get("login")
+                    if login and login not in known_logins:
+                        requested_reviewers.append(
+                            {"login": login, "as_code_owner": merged_flag}
+                        )
+                for t in rj.get("requested_teams") or []:
+                    slug = (t or {}).get("slug")
+                    if slug and slug not in known_slugs:
+                        requested_teams.append(
+                            {"slug": slug, "as_code_owner": merged_flag}
+                        )
+                log.info(
+                    "PR %s/%s#%s: REST fallback recovered %d reviewer(s) / "
+                    "%d team(s) hidden by GraphQL union restrictions",
+                    owner, name, number,
+                    len(rj.get("requested_reviewers") or []),
+                    len(rj.get("requested_teams") or []),
+                )
+            else:
+                log.warning(
+                    "PR %s/%s#%s: REST fallback for review requests returned %s",
+                    owner, name, number, rest.status_code,
+                )
+        except Exception:
+            log.exception(
+                "PR %s/%s#%s: REST fallback for review requests failed",
+                owner, name, number,
+            )
 
     labels = [
         {
