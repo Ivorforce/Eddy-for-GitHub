@@ -29,6 +29,13 @@ Verified — `account_created_at`, `followers`, `owned_repos`, `contributed_to`,
 
 Self-reported (and unverified) — `name`, `bio`, `company`, `location`, `websiteUrl`. Treat as claims, not facts. Hedge in the tag/summary when these are load-bearing: `self-described "senior engineer"` if that's the only role evidence; just `senior engineer` if `top_repos` + `contribution_years` corroborate it.
 
+**Names earn their slot — when in doubt, omit.** A specific name (company, project, framework) belongs in the output only if a *downstream reader who has never met this person* will recognize it. The bar is high — household-name companies (`@microsoft`, `@anthropic`, `@google`, `@stripe`) and broadly-known OSS projects (`nginx`, `pytorch`, `linux`, `react`) clear it. Small startups, niche studios, internal-sounding `@…` handles, and unknown tools don't, **even if you can guess what they do from the name**. The default for an unrecognized name is **omit**, not "include with handle". When the name doesn't clear the bar:
+
+- If `bio` / `websiteUrl` / `top_repos` descriptions give you enough signal to confidently characterize the company, write the description instead — `a games company`, `a small fintech startup`, `an industrial-automation firm`. Don't surface the original name alongside the description.
+- If there's no descriptive signal (just a `company` string with nothing else corroborating), **omit the company entirely**. Don't write "works at $name", "at a company called …", or any other indirect surfacing.
+
+Same logic for `top_repos`: famous → name; obscure → description; not discriminating or uncharacterizable → drop. Name-dropping that doesn't land is noise.
+
 `contribution_years` is the temporal-shape signal. Compare its earliest entry to `account_created_at`'s year:
 - **Tight + continuous** (covers most years from creation onward) — veteran, active throughout.
 - **Big gap then activity** ("account 2014, contributions 2022+") — late bloomer, ramped recently.
