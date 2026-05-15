@@ -2016,6 +2016,17 @@
        at the tooltip's plain white. */
     .custom-tooltip .mention.is-tracked { color: var(--accent-amber); }
 
+    /* Pico ships `code,kbd,samp { display:inline-block; padding:.375rem;
+       line-height:initial }` — inline-block + .375rem of vertical padding
+       pushes every line that contains one of these elements taller than its
+       neighbours. Reset to a flush inline box; specific contexts below can
+       still paint a pill via background + horizontal padding. */
+    code, kbd, samp {
+      display: inline;
+      padding: 0;
+      line-height: inherit;
+    }
+
     /* Inline GitHub-markdown bits (see app/ghmd.py): `code` spans in titles /
        chat bubbles / the AI tooltip, plus #ref and @mention links. */
     .item-title-text code,
@@ -2025,7 +2036,7 @@
       font-size: 0.88em;
       color: #f0f0f2;  /* a touch brighter than body text — the grey pill bg dims it otherwise */
       background: rgba(127, 127, 127, 0.18);
-      padding: 0.1em 0.3em;
+      padding: 0 0.3em;
       border-radius: 3px;
     }
     /* `#NN` / repo#NN / URL refs from ghmd.render — same look in timeline
