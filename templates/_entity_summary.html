@@ -23,17 +23,17 @@
 {% endset %}
 {% if summary_present %}
   <div class="entity-summary-ai">
-    <button type="button" class="entity-summary-retriage" title="{{ retriage_label }}" aria-label="Re-triage" {{ retriage_btn_attrs }}>↻</button>
+    {% if ai_key_present %}<button type="button" class="entity-summary-retriage" title="{{ retriage_label }}" aria-label="Re-triage" {{ retriage_btn_attrs }}>↻</button>{% endif %}
     <div>
       <span class="entity-summary-tag">{{ u.ai_summary_tag }}</span>
       {% if not u.summary_fresh %}<span class="entity-summary-stale" title="Summary is stale (older than 90 days)">stale</span>{% endif %}
     </div>
     {% if u.ai_summary_body %}<div class="entity-summary-body">{{ u.ai_summary_body }}</div>{% endif %}
   </div>
-{% else %}
-  {# Manual generation is always available, even when the auto-triage
-     setting is off — the setting only controls whether summaries are
-     generated automatically during thread judgments. #}
+{% elif ai_key_present %}
+  {# Manual generation is always available when a key is set, even when
+     the auto-triage setting is off — the setting only controls whether
+     summaries are generated automatically during thread judgments. #}
   <div class="entity-summary-empty">
     <button type="button" class="entity-summary-generate" {{ retriage_btn_attrs }}>✦ Generate AI summary</button>
   </div>

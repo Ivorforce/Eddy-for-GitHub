@@ -2602,6 +2602,7 @@ def _render_entity_summary(data: dict):
         u=data,
         ai_entity_triage_on=settings.get("ai_entity_triage"),
         triage_mode=_get_triage_mode(),
+        ai_key_present=ai.has_api_key(),
     )
 
 
