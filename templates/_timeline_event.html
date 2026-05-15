@@ -100,11 +100,16 @@
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
+  {% elif ev.kind in ('user_action', 'priority_change') %}
+    {# Row-state changes the user (or GitHub, for read_on_github / woken /
+       absorbed) made on this row — not events on the underlying thread.
+       Centered meta-line, no chip, no left rail dot — signals "this is
+       annotation, not content". #}
+    <div class="timeline-meta-line">{{ ev.summary }} · {{ ev.age_text }}</div>
   {% else %}
-    {# Fallback for kinds whose `actor` is a role label ("GitHub", "You")
-       rather than a real login — `mention`, `priority_change`, and any
-       `user_action` whose source collapses to GitHub/You. Plain text, no
-       chip. #}
+    {# Fallback for kinds whose `actor` is a role label rather than a
+       real login (currently only `mention`, which has its own branch above
+       — kept as a safety net for new kinds). Plain text, no chip. #}
     <div class="timeline-line">
       <span class="timeline-actor-mini">{{ ev.actor }}</span>
       <span class="timeline-summary">{{ ev.summary }}</span>

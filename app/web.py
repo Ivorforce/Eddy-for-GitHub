@@ -867,23 +867,27 @@ def _short_duration(secs: int) -> str:
     return f"{secs // 86400}d"
 
 
-# Display labels for user_action events in the popover timeline. Source
-# of truth for action strings is web._apply_action; keep this in sync if
-# it grows new action labels. Unknown actions render as the raw key
-# (forward-compat).
+# Display labels for user_action events in the popover timeline. Verb
+# only — the formatter prefixes "you " when source=user (the row-state
+# change came from the user clicking in this app); source=github keeps
+# the bare verb (the event happened externally, like an auto-clear or
+# the snooze timer firing — "marked read on github" / "woke from
+# snooze" read self-contained). Source of truth for action strings is
+# web._apply_action; keep this in sync if it grows new action labels.
+# Unknown actions render as the raw key (forward-compat).
 _USER_ACTION_LABELS = {
-    "visited":          "Last opened link",
-    "read":             "Marked read",
-    "read_on_github":   "Marked read remotely",
-    "muted":            "Muted",
-    "done":             "Archived",
-    "undone":           "Restored from archive",
-    "kept_unread":      "Kept unread",
-    "unmuted":          "Unmuted",
-    "snoozed":          "Snoozed",
-    "unsnoozed":        "Un-snoozed",
-    "woken":            "Woke from snooze",
-    "absorbed":         "Absorbed — muted activity",
+    "visited":          "opened the link",
+    "read":             "marked read",
+    "read_on_github":   "marked read on github",
+    "muted":            "muted",
+    "done":             "archived",
+    "undone":           "restored from archive",
+    "kept_unread":      "kept unread",
+    "unmuted":          "unmuted",
+    "snoozed":          "snoozed",
+    "unsnoozed":        "un-snoozed",
+    "woken":            "woke from snooze",
+    "absorbed":         "absorbed muted activity",
 }
 
 
@@ -1347,11 +1351,14 @@ def _format_event_for_render(
         out["review_state_label"] = label
         out["review_state_class"] = cls
     elif kind == "user_action":
-        # GitHub observed the state change without us doing anything
-        # locally; otherwise the user clicked something in our app.
-        out["actor"] = "GitHub" if source == "github" else "You"
         action = payload.get("action") or "?"
-        out["summary"] = _USER_ACTION_LABELS.get(action, action)
+        verb = _USER_ACTION_LABELS.get(action, action)
+        # source=user → "you marked read"; source=github → bare verb
+        # ("marked read on github", "woke from snooze") that's already
+        # self-contained. Either way the event renders as a centered
+        # meta-line, not as an authored row (these are row-state
+        # actions, not thread content).
+        out["summary"] = f"you {verb}" if source == "user" else verb
     elif kind == "lifecycle":
         actor = payload.get("actor") or "?"
         out["actor"] = actor
@@ -1423,14 +1430,15 @@ def _format_event_for_render(
         # — no actor chip ("GitHub mentioned you" reads awkwardly).
         out["is_team"] = (payload.get("reason") == "team_mention")
     elif kind == "priority_change":
-        out["actor"] = "You"
+        # Same meta-line treatment as user_action: a row-state change the
+        # user made in this app, not something that happened on the thread.
         to_val = payload.get("to")
         if isinstance(to_val, (int, float)):
-            out["summary"] = f"set priority → {_score_to_priority_level(to_val).capitalize()}"
+            out["summary"] = f"you set priority → {_score_to_priority_level(to_val).capitalize()}"
         elif to_val:  # legacy: band name stored directly
-            out["summary"] = f"set priority → {str(to_val).capitalize()}"
+            out["summary"] = f"you set priority → {str(to_val).capitalize()}"
         else:
-            out["summary"] = "cleared priority (auto)"
+            out["summary"] = "priority cleared (auto)"
     return out
 
 

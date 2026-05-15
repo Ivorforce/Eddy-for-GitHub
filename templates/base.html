@@ -1453,6 +1453,32 @@
       color: var(--pico-muted-color);
       flex-shrink: 0;
     }
+    /* Meta-lines: row-state actions the user (or GitHub, for the
+       read_on_github / woken / absorbed source=github cases) took on
+       this row. Visually system-message: centered, italic, muted, with
+       em-dash bookends, and the rail dot suppressed so they read as
+       marginalia between content events rather than another row. */
+    .ai-verdict-popover .timeline-event.kind-user_action::before,
+    .ai-verdict-popover .timeline-event.kind-priority_change::before {
+      display: none;
+    }
+    .ai-verdict-popover .timeline-event.kind-user_action,
+    .ai-verdict-popover .timeline-event.kind-priority_change {
+      text-align: center;
+    }
+    .ai-verdict-popover .timeline-meta-line {
+      display: inline-block;
+      font-style: italic;
+      font-size: 0.68rem;
+      color: var(--pico-muted-color);
+      opacity: 0.75;
+    }
+    .ai-verdict-popover .timeline-meta-line::before,
+    .ai-verdict-popover .timeline-meta-line::after {
+      content: "—";
+      opacity: 0.5;
+      margin: 0 0.5em;
+    }
     /* Chat bubbles for ai_verdict + user_chat. The two share a
        container shape; the side / tint distinguishes who spoke. */
     .ai-verdict-popover .timeline-bubble {
