@@ -84,18 +84,17 @@
           <span class="check" aria-hidden="true">✓</span> AI auto-judge
         </a>
       </li>
-      {# Entity-triage is orthogonal to triage_mode (no .ai-dependent):
-         summaries feed both the thread-judge prompt and the entity
-         popovers, so they're useful even with manual thread triage.
-         Umbrella over user / org / repo — single toggle gates generation
-         for all three kinds. Gated only by ANTHROPIC_API_KEY since it's
-         still a Haiku call. #}
-      <li>
+      {# Entity-triage auto-fires during thread judgments, which only
+         happen in AI triage_mode — so the toggle is .ai-dependent (greys
+         out in manual mode) the same way `ai_auto_judge` is. Manual
+         Generate / ↻ clicks in entity popovers always work regardless;
+         the setting only controls automatic generation. #}
+      <li class="ai-dependent">
         {% if ai_key_present %}
         <a href="#" class="options-toggle{% if ai_entity_triage %} on{% endif %}"
            hx-post="/settings/ai_entity_triage" hx-swap="none"
            hx-on::after-request="if (event.detail.successful) this.classList.toggle('on')"
-           title="AI generates per-entity profile summaries — for users, orgs, and repos — cached 90d. Shown in the relevant popovers; replaces raw fields in the thread-judge prompt when present.">
+           title="Auto-generate AI summaries (users, orgs, repos) during thread judgments, cached 90d.">
           <span class="check" aria-hidden="true">✓</span> AI entity triage
         </a>
         {% else %}

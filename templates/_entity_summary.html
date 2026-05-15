@@ -30,12 +30,11 @@
     </div>
     {% if u.ai_summary_body %}<div class="entity-summary-body">{{ u.ai_summary_body }}</div>{% endif %}
   </div>
-{% elif ai_entity_triage_on %}
-  <div class="entity-summary-empty">
-    <button type="button" class="entity-summary-generate" {{ retriage_btn_attrs }}>✦ Generate AI summary</button>
-  </div>
 {% else %}
-  <div class="entity-summary-empty entity-summary-disabled" title="Enable `AI entity triage` in Options to auto-generate summaries">
+  {# Manual generation is always available, even when the auto-triage
+     setting is off — the setting only controls whether summaries are
+     generated automatically during thread judgments. #}
+  <div class="entity-summary-empty">
     <button type="button" class="entity-summary-generate" {{ retriage_btn_attrs }}>✦ Generate AI summary</button>
   </div>
 {% endif %}

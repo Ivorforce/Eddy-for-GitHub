@@ -50,13 +50,15 @@ ai_auto_judge = false
 enrich_involved_people = true
 
 # AI entity-triage (umbrella: users, orgs, repos). When `true`, the
-# thread-judge picks up cached per-entity summaries — short tag + one
-# sentence — for each participant, the repo, and the repo's org. Generated
-# by separate Haiku calls per (kind, key), cached on a 90-day TTL across
-# threads. Public GitHub data only; orthogonal between kinds (the org
-# summary doesn't enumerate repos, the repo summary doesn't credit the
-# org). Setting controls *generation*; existing cached summaries are
-# still used regardless. Honors the daily AI cost cap shared with
-# thread-judge. See `ai.triage_user` / `ai.triage_org` / `ai.triage_repo`
-# + the three `app/ai_*_triage_prompt.md` files.
+# thread-judge automatically generates cached per-entity summaries —
+# short tag + one sentence — for each participant, the repo, and the
+# repo's owner, during every thread judgment. Cached on a 90-day TTL
+# across threads. Public GitHub data only; orthogonal between kinds (the
+# org summary doesn't enumerate repos, the repo summary doesn't credit
+# the org). The setting only controls *automatic* generation — manual
+# Generate / ↻ clicks in each entity popover always work, and existing
+# cached summaries are always surfaced to the thread-judge and the
+# popover regardless. Honors the daily AI cost cap shared with
+# thread-judge. See `ai.triage_user` / `ai.triage_org` /
+# `ai.triage_repo` + the three `app/ai_*_triage_prompt.md` files.
 ai_entity_triage = false
