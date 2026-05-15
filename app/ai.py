@@ -732,11 +732,55 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
     return ctx
 
 
+# Per-call mode preambles, prepended above the JSON payload in the user
+# message. Per-call gated behavior lives with per-call data — the alternative
+# is cataloging all three modes in the cached system prompt and making the
+# model scan for its row. Cross-cutting rules (Brevity, the standing-take
+# property of `description`, when `skip` is offered) stay in the system
+# prompt; the per-mode rules here only cover what differs by mode.
+_MODE_PREAMBLES: dict[str, str] = {
+    "summary": (
+        "# This call: summary\n\n"
+        "First judgment of this thread — no prior verdict, nothing to inherit. "
+        "Every field given fresh."
+    ),
+    "re_evaluate": (
+        "# This call: re-evaluate\n\n"
+        "A prior verdict is in the timeline. Anchor on `changes_since_last_verdict` "
+        "first — it's the rollup of everything since; the `timeline` is there for "
+        "the bodies and detail the rollup omits, not for re-walking from the top.\n\n"
+        "Reuse a standing field (omit it) when your fresh value would be exactly "
+        "the same; rephrase when the thread has moved. When *every* standing field "
+        "would be unchanged and nothing else needs setting, call `skip` instead — "
+        "a `{}` rollup with no `user_chat` steering is the cleanest cue. "
+        "Reconsider `subscription_changes` from scratch (a prior verdict not "
+        "setting it is no evidence one isn't warranted).\n\n"
+        "Whatever you write, the `description` reads as it would on a first pass — "
+        "don't let the delta leak into it."
+    ),
+    "chat": (
+        "# This call: chat\n\n"
+        "The user just typed at you — the latest `user_chat` event is what they're "
+        "saying. Their message is authoritative for this thread; let it shape the "
+        "verdict, then decide whether to `reply`. Answer if they asked something or "
+        "you have grounds to push back; omit `reply` if their message was instruction "
+        "or context with nothing to answer — the updated verdict *is* your response, "
+        "an acknowledgement bubble is noise.\n\n"
+        "`description` stays the standing take regardless. No `skip` here — always "
+        "`judge_thread`, inheriting whichever standing fields genuinely held."
+    ),
+}
+
+
 def _build_user_message(ctx: dict) -> str:
-    """Render the per-thread context as a compact JSON payload.
-    Sorted keys so the same row produces the same bytes — important for
-    later cache hits on re-judgment."""
-    return json.dumps(ctx, sort_keys=True, indent=2, ensure_ascii=False)
+    """Render the per-thread context: the active mode's preamble at the
+    top, then the payload as a JSON object. Sorted keys so the same row
+    produces the same bytes."""
+    preamble = _MODE_PREAMBLES.get(ctx.get("invocation_mode", ""), "")
+    payload = json.dumps(ctx, sort_keys=True, indent=2, ensure_ascii=False)
+    if preamble:
+        return f"{preamble}\n\n# Payload\n\n{payload}"
+    return payload
 
 
 # ---- Cost + cap ---------------------------------------------------------
@@ -1001,11 +1045,14 @@ def judge(
     assignee / reviewer / commenter fields. Both default to None so this
     module remains callable without web's app context.
 
-    invocation_mode — one of `summary` / `re_evaluate` / `chat`. Surfaced
-    in the user message; it tells the model why this judgment is firing
-    (fresh thread / Re-ask / the user sent a chat) — not what the output
-    should look like, which is the same across modes (see ai_system_prompt.md
-    §Invocation modes). Defaults to `summary` for callers that don't supply it.
+    invocation_mode — one of `summary` / `re_evaluate` / `chat`. Selects
+    the per-call preamble that sits above the JSON payload in the user
+    message (see `_MODE_PREAMBLES`); it tells the model why this judgment
+    is firing (fresh thread / Re-ask / the user sent a chat) and what
+    differs for that mode — the output shape itself (Brevity, the
+    standing-take property of `description`) is the same across modes and
+    stays in the system prompt. Defaults to `summary` for callers that
+    don't supply it.
 
     On a re-judgment (a prior verdict exists) the model may omit
     `disposition` / `priority_score` / `description` from `judge_thread` — the
