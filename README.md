@@ -1,6 +1,6 @@
 # Eddy for GitHub — see what matters in your feed
 
-A small local app that helps you keep up with your GitHub notifications
+A small local web app that helps you keep up with your GitHub notifications
 without scrolling through everything. Just a python script that runs on
 your machine, no server needed.
 
