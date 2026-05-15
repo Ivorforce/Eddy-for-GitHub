@@ -1232,11 +1232,31 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
     # projectItems) come with usable `data` alongside the `errors` list — log
     # and continue; the per-field parsers already handle null inputs. We only
     # bail when the core object itself is missing.
-    if payload.get("errors"):
-        log.warning(
-            "GraphQL errors fetching PR %s/%s#%s: %s",
-            owner, name, number, payload["errors"],
+    errors = payload.get("errors") or []
+    if errors:
+        # Org OAuth-App restrictions null out reviewRequests[*].requestedReviewer
+        # (User/Team union the app isn't authorized to resolve) — handled by the
+        # REST fallback below, so just note it once instead of dumping the full
+        # error blob per blocked reviewer.
+        hidden_reviewers = sum(
+            1 for e in errors
+            if e.get("type") == "FORBIDDEN"
+            and (e.get("path") or [])[-1:] == ["requestedReviewer"]
         )
+        other = [e for e in errors if not (
+            e.get("type") == "FORBIDDEN"
+            and (e.get("path") or [])[-1:] == ["requestedReviewer"]
+        )]
+        if hidden_reviewers and not other:
+            log.info(
+                "PR %s/%s#%s: %d reviewer(s) hidden by org OAuth restrictions",
+                owner, name, number, hidden_reviewers,
+            )
+        else:
+            log.warning(
+                "GraphQL errors fetching PR %s/%s#%s: %s",
+                owner, name, number, other or errors,
+            )
     pr = ((payload.get("data") or {}).get("repository") or {}).get("pullRequest")
     if not pr:
         return None
