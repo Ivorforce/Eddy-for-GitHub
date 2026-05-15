@@ -1998,6 +1998,109 @@ def ensure_org_membership_fresh(
         _upsert_org_membership(conn, login, org, membership, now)
 
 
+# User-triage input fetch (separate path from the involved-people cache).
+# Returns the full public-data payload for one login in a single GraphQL
+# roundtrip, shaped for direct serialization into the user-triage prompt
+# (see `app/ai_user_triage_prompt.md`). Generic per-login data only — no
+# org context, no Eddy preferences, no repo filtering. The summary it
+# feeds into is reused across every thread the login appears on.
+_USER_TRIAGE_QUERY = """
+query($login: String!) {
+  user(login: $login) {
+    name
+    bio
+    company
+    location
+    websiteUrl
+    createdAt
+    followers { totalCount }
+    repositories(first: 1, ownerAffiliations: OWNER) { totalCount }
+    repositoriesContributedTo(first: 1, includeUserRepositories: false,
+      contributionTypes: [COMMIT, PULL_REQUEST, ISSUE]) { totalCount }
+    pinnedItems(first: 6, types: [REPOSITORY]) {
+      nodes { ... on Repository { name description primaryLanguage { name } stargazerCount } }
+    }
+    topRepos: repositories(first: 10, ownerAffiliations: OWNER, isFork: false,
+                           orderBy: {field: STARGAZERS, direction: DESC}) {
+      nodes { name description primaryLanguage { name } stargazerCount pushedAt }
+    }
+    contributionsCollection { contributionYears }
+  }
+}
+"""
+
+
+def _truncate_text(s: str | None, n: int) -> str | None:
+    if not s:
+        return None
+    s = s.strip()
+    if not s:
+        return None
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _flatten_repo_node(n: dict | None) -> dict | None:
+    if not n or not n.get("name"):
+        return None
+    out: dict = {
+        "name": n["name"],
+        "stars": n.get("stargazerCount") or 0,
+    }
+    if (n.get("primaryLanguage") or {}).get("name"):
+        out["language"] = n["primaryLanguage"]["name"]
+    desc = _truncate_text(n.get("description"), 200)
+    if desc:
+        out["description"] = desc
+    if n.get("pushedAt"):
+        out["pushed_at"] = n["pushedAt"]
+    return out
+
+
+def fetch_user_triage_inputs(token: str, login: str) -> dict | None:
+    """One GraphQL roundtrip → flat dict shaped for the user-triage prompt.
+    Returns None when the login is unknown (404 / null user) — caller writes
+    a tombstone so we don't refetch every call. Bot logins (`*[bot]`) aren't
+    resolvable here and should be filtered upstream."""
+    if _is_bot_login(login):
+        return None
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    r = _session.post(
+        _GRAPHQL_URL, headers=headers,
+        json={"query": _USER_TRIAGE_QUERY, "variables": {"login": login}},
+        timeout=20,
+    )
+    r.raise_for_status()
+    data = (r.json() or {}).get("data") or {}
+    u = data.get("user")
+    if not u:
+        return None
+    out: dict = {"login": login}
+    for k in ("name", "company", "location", "websiteUrl"):
+        if u.get(k):
+            out[k] = u[k]
+    if u.get("bio"):
+        out["bio"] = _truncate_text(u["bio"], 300)
+    if u.get("createdAt"):
+        out["account_created_at"] = u["createdAt"]
+    out["followers"] = (u.get("followers") or {}).get("totalCount") or 0
+    out["owned_repos"] = (u.get("repositories") or {}).get("totalCount") or 0
+    out["contributed_to"] = (u.get("repositoriesContributedTo") or {}).get("totalCount") or 0
+    years = ((u.get("contributionsCollection") or {}).get("contributionYears")) or []
+    if years:
+        # Ascending order reads more naturally in the prompt ("public
+        # activity in 2013, 2014, 2018-...").
+        out["contribution_years"] = sorted(years)
+    pinned = [_flatten_repo_node(n) for n in ((u.get("pinnedItems") or {}).get("nodes") or [])]
+    pinned = [p for p in pinned if p]
+    if pinned:
+        out["pinned"] = pinned
+    top = [_flatten_repo_node(n) for n in ((u.get("topRepos") or {}).get("nodes") or [])]
+    top = [p for p in top if p]
+    if top:
+        out["top_repos"] = top
+    return out
+
+
 def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
     """Fetch full details for up to ENRICHMENT_PER_POLL notifications that need it.
 

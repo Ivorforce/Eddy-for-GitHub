@@ -2042,7 +2042,7 @@ def _load_notifications(show_archived: bool = True):
 def _load_repo_options(show_archived: bool = False) -> tuple[list[str], list[str]]:
     """Distinct owners and repo names from notifications. Drives the Owner
     and Repo filter dropdowns. Names are de-duplicated across owners — if
-    'godot' shows up under two owners it appears once. Archived rows are
+    'foo' shows up under two owners it appears once. Archived rows are
     excluded unless `show_archived` is set, so the dropdowns mirror what's
     visible in the table under the active filter."""
     conn = db.connect()
@@ -2340,6 +2340,7 @@ def index():
         ai_key_present=ai.has_api_key(),
         quiet_bystanders=_get_quiet_bystanders(),
         ai_auto_judge=_get_ai_auto_judge(),
+        ai_user_triage=settings.get("ai_user_triage"),
         auto_refresh=_get_auto_refresh(),
         type_labels=TYPE_LABELS_LONG,
         action_labels=ACTION_FILTER_LABELS,
@@ -2382,6 +2383,84 @@ def thread_timeline(thread_id: str):
     return render_template("_timeline_list.html", timeline=timeline, thread_id=thread_id)
 
 
+def _load_user_summary(conn, login: str) -> dict:
+    """Pull everything the popover's user-summary partial needs in one
+    query — cached profile fields + AI summary, plus the freshness flag
+    so the template can pick the right rendering branch."""
+    row = conn.execute(
+        "SELECT login, avatar_url, bio, company, account_created_at, "
+        "       followers, is_bot, ai_summary_tag, ai_summary_body, "
+        "       ai_summary_at, fetched_at "
+        "  FROM people WHERE login = ?",
+        (login,),
+    ).fetchone()
+    out: dict = {"login": login, "exists": row is not None}
+    if not row:
+        return out
+    for k in ("bio", "company", "account_created_at", "followers",
+              "is_bot", "ai_summary_tag", "ai_summary_body", "ai_summary_at"):
+        out[k] = row[k]
+    if row["account_created_at"]:
+        created = db.iso_to_unix(row["account_created_at"])
+        if created is not None:
+            out["account_age_years"] = round(
+                (time.time() - created) / (365.25 * 86400), 1
+            )
+    out["summary_fresh"] = bool(
+        row["ai_summary_tag"]
+        and row["ai_summary_at"] is not None
+        and (int(time.time()) - int(row["ai_summary_at"])) < ai._USER_TRIAGE_TTL_SECONDS
+    )
+    return out
+
+
+@app.get("/user/<login>/summary")
+def user_summary(login: str):
+    """Render the user-summary popover content. Lazily fetched on the
+    first popover-open per row. Shows the AI summary (when present) +
+    cached raw profile fields + a ↻ retriage / Generate button."""
+    conn = db.connect()
+    try:
+        # If the people row is missing entirely (no involved-people fetch
+        # has run for this login yet), prime it so the popover has fields
+        # to show. Cheap on a cache hit.
+        github.ensure_user_fresh(conn, login)
+        data = _load_user_summary(conn, login)
+    finally:
+        conn.close()
+    return render_template(
+        "_user_summary.html",
+        u=data,
+        ai_user_triage_on=settings.get("ai_user_triage"),
+        triage_mode=_get_triage_mode(),
+    )
+
+
+@app.post("/user/<login>/retriage")
+def user_retriage(login: str):
+    """Force a fresh AI user-triage summary, regardless of TTL or toggle.
+    The toggle gates *automatic* generation; this is the manual override
+    from the popover's ↻ button. Returns the re-rendered partial so the
+    popover swaps in place."""
+    conn = db.connect()
+    try:
+        try:
+            ai.triage_user(conn, login)
+        except ai.AIBusy:
+            pass  # another caller is generating; the next render shows it
+        except ai.AIError as e:
+            log.warning("user_retriage: %s failed: %s", login, e)
+        data = _load_user_summary(conn, login)
+    finally:
+        conn.close()
+    return render_template(
+        "_user_summary.html",
+        u=data,
+        ai_user_triage_on=settings.get("ai_user_triage"),
+        triage_mode=_get_triage_mode(),
+    )
+
+
 @app.get("/snooze-menu/<thread_id>")
 def snooze_menu(thread_id: str):
     """Render the snooze duration popover's inner content. The row template
@@ -2418,6 +2497,22 @@ def set_ai_auto_judge():
     else:
         new = not _get_ai_auto_judge()
     _set_ai_auto_judge(new)
+    return ("", 204)
+
+
+@app.post("/settings/ai_user_triage")
+def set_ai_user_triage():
+    """Toggle AI user-triage. Controls *generation* of per-login summaries;
+    existing summaries are still used by the thread prompt regardless. Same
+    204-and-flip-the-checkmark-client-side pattern as the other AI toggles."""
+    requested = (request.values.get("on") or "").strip().lower()
+    if requested in ("1", "true", "on"):
+        new = True
+    elif requested in ("0", "false", "off"):
+        new = False
+    else:
+        new = not settings.get("ai_user_triage")
+    settings.set("ai_user_triage", new)
     return ("", 204)
 
 

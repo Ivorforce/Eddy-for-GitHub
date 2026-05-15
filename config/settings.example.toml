@@ -48,3 +48,13 @@ ai_auto_judge = false
 # the enrichment entirely (no extra calls, no `involved_people` block in
 # the prompt). See `github.ensure_user_fresh` / `_build_involved_people`.
 enrich_involved_people = true
+
+# AI user-triage. When `true`, each participant in a judged thread gets a
+# separate Haiku call that produces a generic per-login profile summary
+# (one tag + one sentence), cached on a 90-day TTL. The thread-judge
+# prompt then uses the tag in place of raw fields, and the popover shows
+# the sentence. Public GitHub data only — no Eddy preferences, no org
+# context. Setting controls *generation*; existing summaries are still
+# used regardless. Honors the daily AI cost cap shared with thread-judge.
+# See `ai.triage_user` / `app/ai_user_triage_prompt.md`.
+ai_user_triage = false

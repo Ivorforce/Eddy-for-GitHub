@@ -3,7 +3,7 @@
 Free-form notes for the AI about what counts as signal vs. noise *for you*.
 The AI sees this verbatim on every judgment, so be specific. Vague preferences
 ("I care about quality") are weaker than concrete ones ("Anything touching
-`renderer/` in `godotengine/godot` is high priority").
+`auth/` in `acme/api` is high priority").
 
 Copy this file to `config/preferences.md` and edit it. The app reads
 `config/preferences.md`; this `.example.md` ships as a template.
@@ -13,7 +13,7 @@ Copy this file to `config/preferences.md` and edit it. The app reads
 What you're working on right now and would want surfaced. Repo paths,
 subsystems, project areas, ongoing initiatives. Examples:
 
-- Anything touching `renderer/` or `drivers/vulkan/` in `godotengine/godot`
+- Anything touching `runtime/` or `drivers/` in `acme/engine`
 - T-wave annotation, ECG signal processing
 - The auth migration work in `myorg/api`
 
@@ -28,7 +28,7 @@ Whose threads always matter, regardless of repo. Examples:
 
 Repos where most threads are worth at least skimming. Examples:
 
-- godotengine/godot
+- acme/engine
 - myorg/internal-tools
 
 ## Noise patterns

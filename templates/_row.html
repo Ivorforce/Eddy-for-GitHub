@@ -114,6 +114,15 @@
                  data-kind="person" data-thread-id="{{ n.id }}"
                  style="position-anchor: --pop-person-{{ n.id }}">
               <div class="popover-title"><span class="popover-kind">person</span> <a class="popover-name" href="https://github.com/{{ n.author_login }}" target="_blank" rel="noopener">{{ n.author_login }}</a></div>
+              {# Lazy-loaded user-summary block: cached profile fields and
+                 (when triaged) the AI tag + sentence + ↻ retriage button.
+                 Fetched on first popover-open via the native `toggle` event;
+                 a single placeholder div so the popover layout stabilizes
+                 before content arrives. #}
+              <div class="user-summary"
+                   hx-get="/user/{{ n.author_login }}/summary"
+                   hx-trigger="toggle[newState=='open'] from:#pop-person-{{ n.id }} once"
+                   hx-target="this" hx-swap="innerHTML"></div>
               <button type="button" class="popover-track-btn"
                       hx-post="/people/{{ n.author_login }}/track"
                       hx-vals='{"thread_id": "{{ n.id }}"}'

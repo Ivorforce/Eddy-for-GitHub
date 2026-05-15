@@ -35,10 +35,12 @@ import re
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 import anthropic
+import requests
 
 from . import db, events, github, settings
 
@@ -628,8 +630,13 @@ def _build_involved_people(
     *, repo_owner: str | None, self_login: str | None,
 ) -> list[dict]:
     """Refresh the cache for each involved login (lazy 7d TTL inside
-    `github.ensure_*_fresh`) then render the AI-facing list. Empty entries
-    (a login we couldn't fetch with no useful cached fields) are dropped."""
+    `github.ensure_*_fresh`) then render the AI-facing list. When the
+    `ai_user_triage` setting is on, also ensure each login has a fresh
+    AI summary (90d TTL); the summary `tag` then replaces the soft profile
+    fields (`bio` / `company` / `account_age_years` / `followers`) in the
+    rendered entry, keeping the verified anchors (`is_bot`, `teams`). Empty
+    entries (a login we couldn't fetch with no useful cached fields) are
+    dropped."""
     logins = _collect_involved_logins(item, timeline, self_login=self_login)
     if not logins:
         return []
@@ -639,11 +646,46 @@ def _build_involved_people(
         else:
             github.ensure_user_fresh(conn, login)
 
+    # AI user-triage gate: refresh stale/missing summaries before rendering.
+    # Parallel so a thread with 5 unfamiliar participants doesn't serialize
+    # 5 × ~1s Haiku calls. Worker count is small — the daily cap is the
+    # ultimate brake, and our SQLite is local so the connection is single-
+    # threaded — but the AI calls themselves are network-bound, so the
+    # parallelism wins on wall time. AIError("cap_exceeded") stops the
+    # batch; other errors are swallowed inside ensure_user_triaged.
+    if settings.get("ai_user_triage"):
+        stale = [
+            login for login in logins
+            if not github._is_bot_login(login)
+               and not _summary_is_fresh(conn, login, _USER_TRIAGE_TTL_SECONDS)
+        ]
+        if stale:
+            with ThreadPoolExecutor(max_workers=min(4, len(stale))) as pool:
+                # Each worker opens its own DB connection — SQLite
+                # connections are thread-affine and the calling connection
+                # is the AI judge's. Writes from each worker are autocommit
+                # under our wal+isolation_level=None setup.
+                def _worker(login: str) -> None:
+                    wconn = db.connect()
+                    try:
+                        ensure_user_triaged(wconn, login)
+                    finally:
+                        wconn.close()
+                # Drain futures so cap_exceeded surfaces before render.
+                for fut in [pool.submit(_worker, login) for login in stale]:
+                    try:
+                        fut.result()
+                    except AIError as e:
+                        if "cap" in str(e).lower():
+                            log.info("user-triage: daily cap hit; rendering partial summaries")
+                            break
+
     now_unix = datetime.now(tz=timezone.utc).timestamp()
     out: list[dict] = []
     for login in logins:
         person = conn.execute(
-            "SELECT bio, company, account_created_at, followers, is_bot "
+            "SELECT bio, company, account_created_at, followers, is_bot, "
+            "       ai_summary_tag, ai_summary_at "
             "  FROM people WHERE login = ?",
             (login,),
         ).fetchone()
@@ -652,21 +694,31 @@ def _build_involved_people(
         entry: dict[str, Any] = {"login": login}
         if person["is_bot"]:
             entry["is_bot"] = True
-        if person["bio"]:
-            entry["bio"] = person["bio"]
-        if person["company"]:
-            entry["company"] = person["company"]
-        if person["account_created_at"]:
-            # Float years (1 decimal) instead of an ISO + age suffix —
-            # ~10 tokens cheaper per entry and the AI doesn't need the
-            # exact date, just the magnitude.
-            created_unix = db.iso_to_unix(person["account_created_at"])
-            if created_unix is not None:
-                age_years = round((now_unix - created_unix) / (365.25 * 86400), 1)
-                if age_years >= 0:
-                    entry["account_age_years"] = age_years
-        if person["followers"]:
-            entry["followers"] = person["followers"]
+
+        summary_fresh = (
+            person["ai_summary_tag"]
+            and person["ai_summary_at"] is not None
+            and (int(now_unix) - int(person["ai_summary_at"])) < _USER_TRIAGE_TTL_SECONDS
+        )
+        if summary_fresh:
+            # AI summary takes over the soft credibility fields. The
+            # popover still shows the raw fields to the human; only the
+            # prompt sees just the tag.
+            entry["tag"] = person["ai_summary_tag"]
+        else:
+            if person["bio"]:
+                entry["bio"] = person["bio"]
+            if person["company"]:
+                entry["company"] = person["company"]
+            if person["account_created_at"]:
+                created_unix = db.iso_to_unix(person["account_created_at"])
+                if created_unix is not None:
+                    age_years = round((now_unix - created_unix) / (365.25 * 86400), 1)
+                    if age_years >= 0:
+                        entry["account_age_years"] = age_years
+            if person["followers"]:
+                entry["followers"] = person["followers"]
+
         if repo_owner and not person["is_bot"]:
             mem = conn.execute(
                 "SELECT teams_json FROM org_memberships "
@@ -1011,18 +1063,22 @@ def _log_call(
     cost_usd: float,
     error: str | None,
     status: str,
+    kind: str = "thread_judge",
 ) -> int:
     """Insert an ai_calls row and return its id. Callers on the success
     path use the id as the external_id of the resulting ai_verdict
     thread_event so the timeline can join back to the full request /
-    response pair for audit + prompt tuning."""
+    response pair for audit + prompt tuning. `kind` distinguishes thread
+    judgments (default) from user-triage calls; for user-triage,
+    `thread_id` carries the login (the column was named pre-V32, but
+    user-triage rows aren't joined into thread timelines)."""
     cursor = conn.execute(
         """
         INSERT INTO ai_calls (
             thread_id, created_at, model, request_json, response_json,
             input_tokens, cache_read_tokens, cache_creation_tokens,
-            output_tokens, cost_usd, error, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            output_tokens, cost_usd, error, status, kind
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             thread_id,
@@ -1037,6 +1093,7 @@ def _log_call(
             cost_usd,
             error,
             status,
+            kind,
         ),
     )
     return int(cursor.lastrowid)
@@ -1670,3 +1727,254 @@ def auto_judge_eligible(
         except Exception:
             log.exception("auto-judge: %s crashed", thread_id)
     return judged
+
+
+# ---- User triage --------------------------------------------------------
+#
+# Separate AI call that produces a generic per-login profile summary
+# (tag + sentence), cached on `people` with a 90d TTL. The thread-triage
+# prompt's involved_people block uses the tag in place of raw fields when
+# a fresh summary exists; the popover shows the sentence. The summary is
+# generic — no Eddy preferences, no org context, no thread-specific input.
+# See app/ai_user_triage_prompt.md.
+
+_USER_TRIAGE_TTL_SECONDS = 90 * 24 * 3600
+
+_USER_TRIAGE_SYSTEM_PROMPT_PATH = Path(__file__).parent / "ai_user_triage_prompt.md"
+
+_USER_TRIAGE_TOOL_DEF = {
+    "name": "triage_user",
+    "description": "Record a generic per-login GitHub profile summary.",
+    "input_schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "tag": {
+                "type": "string",
+                "description": (
+                    "2-5 words. Categorical role + credibility shorthand "
+                    "(e.g. `framework maintainer`, `senior ML researcher`, "
+                    "`recreational gamedev hobbyist`, `vibe coder, <1yr`, "
+                    "`drive-by reporter`). No quotes, no trailing punctuation."
+                ),
+            },
+            "summary": {
+                "type": "string",
+                "description": (
+                    "One short sentence (15-30 tokens). Human-readable "
+                    "context for the popover — what they do / have built / "
+                    "their activity shape. Self-contained; don't restate "
+                    "the tag."
+                ),
+            },
+        },
+        "required": ["tag", "summary"],
+    },
+}
+
+
+def _read_user_triage_prompt() -> str:
+    try:
+        return _USER_TRIAGE_SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        log.warning("ai_user_triage_prompt.md not found; using minimal fallback")
+        return (
+            "You summarize one GitHub user from their public profile. "
+            "Call triage_user exactly once with `tag` (2-5 words) and "
+            "`summary` (one short sentence)."
+        )
+
+
+_TRIAGE_IN_FLIGHT_LOCK = threading.Lock()
+_TRIAGE_IN_FLIGHT: set[str] = set()
+
+
+def _enter_triage(login: str) -> bool:
+    with _TRIAGE_IN_FLIGHT_LOCK:
+        if login in _TRIAGE_IN_FLIGHT:
+            return False
+        _TRIAGE_IN_FLIGHT.add(login)
+        return True
+
+
+def _exit_triage(login: str) -> None:
+    with _TRIAGE_IN_FLIGHT_LOCK:
+        _TRIAGE_IN_FLIGHT.discard(login)
+
+
+def _summary_is_fresh(conn: sqlite3.Connection, login: str, ttl: int) -> bool:
+    row = conn.execute(
+        "SELECT ai_summary_at, ai_summary_tag FROM people WHERE login = ?",
+        (login,),
+    ).fetchone()
+    if not row or row["ai_summary_at"] is None or not row["ai_summary_tag"]:
+        return False
+    return (int(time.time()) - int(row["ai_summary_at"])) < ttl
+
+
+def triage_user(conn: sqlite3.Connection, login: str) -> dict | None:
+    """Run the AI summary call for one login. Returns the verdict dict
+    `{tag, summary}` on success, or None when the call could not proceed
+    (bot login, no token, fetch returned no user, AI cap hit, etc. —
+    these are non-exceptional, the caller falls back to raw fields).
+    Persists to `people.ai_summary_{tag,body,at,model}` and logs to
+    `ai_calls` with kind='user_triage'."""
+    if not login or github._is_bot_login(login):
+        return None
+    if not _enter_triage(login):
+        raise AIBusy(f"user triage already in flight for {login}")
+    try:
+        return _triage_user_locked(conn, login)
+    finally:
+        _exit_triage(login)
+
+
+def _triage_user_locked(conn: sqlite3.Connection, login: str) -> dict | None:
+    model = _model_id()
+    cap = _daily_cap()
+    spent = _spent_today(conn)
+    if spent >= cap:
+        msg = f"Daily AI cap of ${cap:.2f} reached (${spent:.4f} spent). Set AI_DAILY_CAP_USD higher to continue."
+        _log_call(
+            conn, thread_id=login, model=model, kind="user_triage",
+            request={}, response=None, usage=None, cost_usd=0.0,
+            error=msg, status="cap_exceeded",
+        )
+        raise AIError(msg)
+
+    token = github._resolve_cached_token()
+    if not token:
+        log.warning("triage_user: no token available for %s", login)
+        return None
+    try:
+        payload = github.fetch_user_triage_inputs(token, login)
+    except (requests.RequestException, ValueError) as e:
+        log.warning("triage_user: fetch failed for %s (%s)", login, e)
+        return None
+    if payload is None:
+        return None
+
+    now_dt = datetime.now(tz=timezone.utc)
+    now_iso = now_dt.isoformat().replace("+00:00", "Z")
+    ctx: dict = {"now": now_iso, **payload}
+    _annotate_ages(ctx, now_dt.timestamp())
+    ctx["now"] = now_iso
+
+    system_prompt = _read_user_triage_prompt()
+    user_msg = json.dumps(ctx, sort_keys=True, indent=2, ensure_ascii=False)
+
+    request_log = {
+        "model": model,
+        "max_tokens": DEFAULT_MAX_TOKENS,
+        "thinking": {"type": "disabled"},
+        "tool_choice": {"type": "tool", "name": "triage_user"},
+        "system": [system_prompt],
+        "user_message": user_msg,
+        "tools": [_USER_TRIAGE_TOOL_DEF],
+    }
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        msg = "ANTHROPIC_API_KEY not set"
+        _log_call(
+            conn, thread_id=login, model=model, kind="user_triage",
+            request=request_log, response=None, usage=None, cost_usd=0.0,
+            error=msg, status="error",
+        )
+        raise AIError(msg)
+
+    client = anthropic.Anthropic(api_key=api_key)
+    try:
+        response = client.messages.create(
+            model=model,
+            max_tokens=DEFAULT_MAX_TOKENS,
+            thinking={"type": "disabled"},
+            system=[{"type": "text", "text": system_prompt,
+                     "cache_control": {"type": "ephemeral"}}],
+            tools=[_USER_TRIAGE_TOOL_DEF],
+            tool_choice={"type": "tool", "name": "triage_user"},
+            messages=[{"role": "user", "content": user_msg}],
+        )
+    except anthropic.APIError as e:
+        msg = f"{type(e).__name__}: {e}"
+        _log_call(
+            conn, thread_id=login, model=model, kind="user_triage",
+            request=request_log, response=None, usage=None, cost_usd=0.0,
+            error=msg, status="error",
+        )
+        raise AIError(msg) from e
+
+    response_dict = response.model_dump() if hasattr(response, "model_dump") else None
+    usage = (response_dict or {}).get("usage") or {}
+    cost = _estimate_cost(model, usage)
+
+    tool_use = next(
+        (b for b in response.content
+         if getattr(b, "type", None) == "tool_use"
+         and getattr(b, "name", None) == "triage_user"),
+        None,
+    )
+    if tool_use is None:
+        _log_call(
+            conn, thread_id=login, model=model, kind="user_triage",
+            request=request_log, response=response_dict, usage=usage,
+            cost_usd=cost, error="Model did not call triage_user", status="error",
+        )
+        raise AIError("Model did not call triage_user")
+
+    raw = getattr(tool_use, "input", None) or {}
+    tag = (raw.get("tag") or "").strip()
+    summary = (raw.get("summary") or "").strip()
+    if not tag or not summary:
+        _log_call(
+            conn, thread_id=login, model=model, kind="user_triage",
+            request=request_log, response=response_dict, usage=usage,
+            cost_usd=cost, error="triage_user missing tag/summary", status="error",
+        )
+        raise AIError("triage_user missing tag/summary")
+
+    now_unix = int(time.time())
+    # Upsert keyed on login; the row may not exist if this login was a bot
+    # tombstone or never seen via the involved-people path. INSERT-with-
+    # default-fetched_at keeps the row valid for both code paths.
+    conn.execute(
+        "INSERT INTO people (login, ai_summary_tag, ai_summary_body, "
+        "  ai_summary_at, ai_summary_model) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(login) DO UPDATE SET "
+        "  ai_summary_tag   = excluded.ai_summary_tag, "
+        "  ai_summary_body  = excluded.ai_summary_body, "
+        "  ai_summary_at    = excluded.ai_summary_at, "
+        "  ai_summary_model = excluded.ai_summary_model",
+        (login, tag, summary, now_unix, model),
+    )
+    _log_call(
+        conn, thread_id=login, model=model, kind="user_triage",
+        request=request_log, response=response_dict, usage=usage,
+        cost_usd=cost, error=None, status="ok",
+    )
+    return {"tag": tag, "summary": summary}
+
+
+def ensure_user_triaged(
+    conn: sqlite3.Connection, login: str,
+    *, ttl: int = _USER_TRIAGE_TTL_SECONDS,
+) -> None:
+    """No-op when the login already has a fresh AI summary (within TTL).
+    Otherwise runs `triage_user`. Swallows AIBusy / non-cap AIError —
+    stale or missing summaries fall back to raw fields on the thread side,
+    so a transient failure shouldn't block thread triage."""
+    if not login or github._is_bot_login(login):
+        return
+    if _summary_is_fresh(conn, login, ttl):
+        return
+    try:
+        triage_user(conn, login)
+    except AIBusy:
+        log.debug("ensure_user_triaged: %s already in flight", login)
+    except AIError as e:
+        if "cap" in str(e).lower():
+            raise  # propagate cap-exceeded so callers can stop the batch
+        log.warning("ensure_user_triaged: %s failed: %s", login, e)
+    except Exception:
+        log.exception("ensure_user_triaged: %s crashed", login)
