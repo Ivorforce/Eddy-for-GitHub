@@ -414,6 +414,26 @@ ALTER TABLE ai_calls ADD COLUMN kind TEXT NOT NULL DEFAULT 'thread_judge';
 """
 
 
+# Extend the V32 AI-summary cache shape to orgs and repos. Same four
+# columns, same 90d TTL, same forced-tool Haiku call — just per-entity
+# fetchers (github.fetch_org_triage_inputs / fetch_repo_triage_inputs)
+# and per-entity prompts (app/ai_org_triage_prompt.md /
+# app/ai_repo_triage_prompt.md). ai_calls.kind ('user_triage' /
+# 'org_triage' / 'repo_triage') already exists from V32; no kind enum
+# constraint, just TEXT values.
+SCHEMA_V33 = """
+ALTER TABLE orgs  ADD COLUMN ai_summary_tag   TEXT;
+ALTER TABLE orgs  ADD COLUMN ai_summary_body  TEXT;
+ALTER TABLE orgs  ADD COLUMN ai_summary_at    INTEGER;
+ALTER TABLE orgs  ADD COLUMN ai_summary_model TEXT;
+
+ALTER TABLE repos ADD COLUMN ai_summary_tag   TEXT;
+ALTER TABLE repos ADD COLUMN ai_summary_body  TEXT;
+ALTER TABLE repos ADD COLUMN ai_summary_at    INTEGER;
+ALTER TABLE repos ADD COLUMN ai_summary_model TEXT;
+"""
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, isolation_level=None, check_same_thread=False)
@@ -555,6 +575,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V32)
             _set_version(conn, 32)
             version = 32
+        if version < 33:
+            conn.executescript(SCHEMA_V33)
+            _set_version(conn, 33)
+            version = 33
     finally:
         conn.close()
 

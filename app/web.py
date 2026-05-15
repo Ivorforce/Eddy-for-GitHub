@@ -2340,7 +2340,7 @@ def index():
         ai_key_present=ai.has_api_key(),
         quiet_bystanders=_get_quiet_bystanders(),
         ai_auto_judge=_get_ai_auto_judge(),
-        ai_user_triage=settings.get("ai_user_triage"),
+        ai_entity_triage=settings.get("ai_entity_triage"),
         auto_refresh=_get_auto_refresh(),
         type_labels=TYPE_LABELS_LONG,
         action_labels=ACTION_FILTER_LABELS,
@@ -2383,82 +2383,163 @@ def thread_timeline(thread_id: str):
     return render_template("_timeline_list.html", timeline=timeline, thread_id=thread_id)
 
 
-def _load_user_summary(conn, login: str) -> dict:
-    """Pull everything the popover's user-summary partial needs in one
-    query — cached profile fields + AI summary, plus the freshness flag
-    so the template can pick the right rendering branch."""
-    row = conn.execute(
-        "SELECT login, avatar_url, bio, company, account_created_at, "
-        "       followers, is_bot, ai_summary_tag, ai_summary_body, "
-        "       ai_summary_at, fetched_at "
-        "  FROM people WHERE login = ?",
-        (login,),
-    ).fetchone()
-    out: dict = {"login": login, "exists": row is not None}
-    if not row:
-        return out
-    for k in ("bio", "company", "account_created_at", "followers",
-              "is_bot", "ai_summary_tag", "ai_summary_body", "ai_summary_at"):
-        out[k] = row[k]
-    if row["account_created_at"]:
-        created = db.iso_to_unix(row["account_created_at"])
-        if created is not None:
-            out["account_age_years"] = round(
-                (time.time() - created) / (365.25 * 86400), 1
-            )
+def _load_entity_summary(conn, kind: str, key: str) -> dict:
+    """Pull the popover partial's input in one query — cached raw fields
+    + AI summary + freshness flag. `kind` is "user" / "org" / "repo".
+    Returns a dict whose `kind` key drives the template's branch."""
+    out: dict = {"kind": kind, "key": key, "exists": False}
+    if kind == "user":
+        row = conn.execute(
+            "SELECT login, avatar_url, bio, company, account_created_at, "
+            "       followers, is_bot, ai_summary_tag, ai_summary_body, "
+            "       ai_summary_at "
+            "  FROM people WHERE login = ?", (key,),
+        ).fetchone()
+        if row:
+            out["exists"] = True
+            for k in ("bio", "company", "account_created_at", "followers",
+                      "is_bot", "ai_summary_tag", "ai_summary_body",
+                      "ai_summary_at"):
+                out[k] = row[k]
+            if row["account_created_at"]:
+                created = db.iso_to_unix(row["account_created_at"])
+                if created is not None:
+                    out["account_age_years"] = round(
+                        (time.time() - created) / (365.25 * 86400), 1
+                    )
+    elif kind == "org":
+        row = conn.execute(
+            "SELECT name, is_tracked, note_user, ai_summary_tag, "
+            "       ai_summary_body, ai_summary_at "
+            "  FROM orgs WHERE name = ?", (key,),
+        ).fetchone()
+        if row:
+            out["exists"] = True
+            for k in ("is_tracked", "note_user",
+                      "ai_summary_tag", "ai_summary_body", "ai_summary_at"):
+                out[k] = row[k]
+    elif kind == "repo":
+        row = conn.execute(
+            "SELECT name, is_tracked, note_user, ai_summary_tag, "
+            "       ai_summary_body, ai_summary_at "
+            "  FROM repos WHERE name = ?", (key,),
+        ).fetchone()
+        if row:
+            out["exists"] = True
+            for k in ("is_tracked", "note_user",
+                      "ai_summary_tag", "ai_summary_body", "ai_summary_at"):
+                out[k] = row[k]
+    else:
+        raise ValueError(f"unknown entity kind: {kind}")
+
     out["summary_fresh"] = bool(
-        row["ai_summary_tag"]
-        and row["ai_summary_at"] is not None
-        and (int(time.time()) - int(row["ai_summary_at"])) < ai._USER_TRIAGE_TTL_SECONDS
+        out.get("ai_summary_tag")
+        and out.get("ai_summary_at") is not None
+        and (int(time.time()) - int(out["ai_summary_at"])) < ai._USER_TRIAGE_TTL_SECONDS
     )
     return out
 
 
-@app.get("/user/<login>/summary")
-def user_summary(login: str):
-    """Render the user-summary popover content. Lazily fetched on the
-    first popover-open per row. Shows the AI summary (when present) +
-    cached raw profile fields + a ↻ retriage / Generate button."""
-    conn = db.connect()
-    try:
-        # If the people row is missing entirely (no involved-people fetch
-        # has run for this login yet), prime it so the popover has fields
-        # to show. Cheap on a cache hit.
-        github.ensure_user_fresh(conn, login)
-        data = _load_user_summary(conn, login)
-    finally:
-        conn.close()
+def _render_entity_summary(data: dict):
     return render_template(
-        "_user_summary.html",
+        "_entity_summary.html",
         u=data,
-        ai_user_triage_on=settings.get("ai_user_triage"),
+        ai_entity_triage_on=settings.get("ai_entity_triage"),
         triage_mode=_get_triage_mode(),
     )
+
+
+@app.get("/user/<login>/summary")
+def user_summary(login: str):
+    """Render the user-summary popover content. Lazily fetched on first
+    popover-open per row. Shows the AI summary (when present) + cached
+    raw profile fields + a ↻ retriage / Generate button."""
+    conn = db.connect()
+    try:
+        # Prime the people row if it doesn't exist yet — gives the popover
+        # something to show even before any involved-people fetch has run.
+        github.ensure_user_fresh(conn, login)
+        data = _load_entity_summary(conn, "user", login)
+    finally:
+        conn.close()
+    return _render_entity_summary(data)
 
 
 @app.post("/user/<login>/retriage")
 def user_retriage(login: str):
     """Force a fresh AI user-triage summary, regardless of TTL or toggle.
     The toggle gates *automatic* generation; this is the manual override
-    from the popover's ↻ button. Returns the re-rendered partial so the
-    popover swaps in place."""
+    from the popover's ↻ button."""
     conn = db.connect()
     try:
         try:
             ai.triage_user(conn, login)
         except ai.AIBusy:
-            pass  # another caller is generating; the next render shows it
+            pass
         except ai.AIError as e:
             log.warning("user_retriage: %s failed: %s", login, e)
-        data = _load_user_summary(conn, login)
+        data = _load_entity_summary(conn, "user", login)
     finally:
         conn.close()
-    return render_template(
-        "_user_summary.html",
-        u=data,
-        ai_user_triage_on=settings.get("ai_user_triage"),
-        triage_mode=_get_triage_mode(),
-    )
+    return _render_entity_summary(data)
+
+
+@app.get("/orgs/<name>/summary")
+def org_summary(name: str):
+    """Render the org-summary popover content. Lazily fetched."""
+    conn = db.connect()
+    try:
+        data = _load_entity_summary(conn, "org", name)
+    finally:
+        conn.close()
+    return _render_entity_summary(data)
+
+
+@app.post("/orgs/<name>/retriage")
+def org_retriage(name: str):
+    """Force a fresh org-triage summary; manual override from the popover."""
+    conn = db.connect()
+    try:
+        try:
+            ai.triage_org(conn, name)
+        except ai.AIBusy:
+            pass
+        except ai.AIError as e:
+            log.warning("org_retriage: %s failed: %s", name, e)
+        data = _load_entity_summary(conn, "org", name)
+    finally:
+        conn.close()
+    return _render_entity_summary(data)
+
+
+@app.get("/repos/<owner>/<name>/summary")
+def repo_summary(owner: str, name: str):
+    """Render the repo-summary popover content. Lazily fetched."""
+    full = f"{owner}/{name}"
+    conn = db.connect()
+    try:
+        data = _load_entity_summary(conn, "repo", full)
+    finally:
+        conn.close()
+    return _render_entity_summary(data)
+
+
+@app.post("/repos/<owner>/<name>/retriage")
+def repo_retriage(owner: str, name: str):
+    """Force a fresh repo-triage summary; manual override from the popover."""
+    full = f"{owner}/{name}"
+    conn = db.connect()
+    try:
+        try:
+            ai.triage_repo(conn, full)
+        except ai.AIBusy:
+            pass
+        except ai.AIError as e:
+            log.warning("repo_retriage: %s failed: %s", full, e)
+        data = _load_entity_summary(conn, "repo", full)
+    finally:
+        conn.close()
+    return _render_entity_summary(data)
 
 
 @app.get("/snooze-menu/<thread_id>")
@@ -2500,10 +2581,11 @@ def set_ai_auto_judge():
     return ("", 204)
 
 
-@app.post("/settings/ai_user_triage")
-def set_ai_user_triage():
-    """Toggle AI user-triage. Controls *generation* of per-login summaries;
-    existing summaries are still used by the thread prompt regardless. Same
+@app.post("/settings/ai_entity_triage")
+def set_ai_entity_triage():
+    """Toggle AI entity-triage (umbrella: user + org + repo). Controls
+    *generation* of per-entity summaries; existing cached summaries are
+    still used by the thread prompt and popovers regardless. Same
     204-and-flip-the-checkmark-client-side pattern as the other AI toggles."""
     requested = (request.values.get("on") or "").strip().lower()
     if requested in ("1", "true", "on"):
@@ -2511,8 +2593,8 @@ def set_ai_user_triage():
     elif requested in ("0", "false", "off"):
         new = False
     else:
-        new = not settings.get("ai_user_triage")
-    settings.set("ai_user_triage", new)
+        new = not settings.get("ai_entity_triage")
+    settings.set("ai_entity_triage", new)
     return ("", 204)
 
 

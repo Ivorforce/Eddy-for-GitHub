@@ -559,25 +559,26 @@
       padding: 0.3rem 0.45rem;
       resize: both;
     }
-    /* User-summary section inside the person popover. Sits above the
-       Track button + note textarea; loaded lazily via HTMX. Empty until
-       the first popover-open. AI block borrows the timeline popover's
-       bubble-ai tint so the affordance reads consistently across surfaces.
-       Width is pinned to the textarea below so a long summary wraps
-       inside the existing popover envelope rather than stretching it. */
-    .user-summary {
+    /* Entity-summary section inside the person / repo / org popovers.
+       Sits above the Track button + note textarea; loaded lazily via
+       HTMX, empty until the first popover-open. AI block borrows the
+       timeline popover's bubble-ai tint so the affordance reads
+       consistently across surfaces. Width is pinned to the textarea
+       below so a long summary wraps inside the existing popover
+       envelope rather than stretching it. */
+    .entity-summary {
       font-size: 0.78rem;
       width: 15.9rem;
       max-width: 15.9rem;
       box-sizing: border-box;
       overflow-wrap: anywhere;
     }
-    .user-summary:empty { display: none; }
-    .user-summary.htmx-request { opacity: 0.55; }
+    .entity-summary:empty { display: none; }
+    .entity-summary.htmx-request { opacity: 0.55; }
 
     /* The AI-summary card — tag headline + sentence body + ↻ retriage
        icon-button. Same soft-purple tint as the timeline AI bubble. */
-    .user-summary-ai {
+    .entity-summary-ai {
       margin: 0 0 0.4rem;
       padding: 0.35rem 0.5rem;
       border-radius: 0.4rem;
@@ -585,19 +586,19 @@
       border: 1px solid rgba(var(--ai-accent-rgb), 0.22);
       position: relative;
     }
-    .user-summary-tag {
+    .entity-summary-tag {
       font-weight: 600;
       color: var(--ai-accent);
       letter-spacing: 0.01em;
     }
-    .user-summary-stale {
+    .entity-summary-stale {
       margin-left: 0.35rem;
       font-size: 0.65rem;
       color: var(--pico-muted-color);
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
-    .user-summary-body {
+    .entity-summary-body {
       margin-top: 0.2rem;
       color: var(--pico-color);
       opacity: 0.85;
@@ -606,7 +607,7 @@
     /* Re-triage icon sits in the AI card's top-right corner so it's
        visually associated with the summary, like ai-verdict-rerun lives
        inside the verdict pill. */
-    .user-summary-retriage {
+    .entity-summary-retriage {
       position: absolute;
       top: 0.2rem;
       right: 0.25rem;
@@ -619,14 +620,14 @@
       cursor: pointer;
       border-radius: 0.2rem;
     }
-    .user-summary-retriage:hover {
+    .entity-summary-retriage:hover {
       background: rgba(var(--ai-accent-rgb), 0.13);
     }
 
     /* Generate-summary call-to-action — purple to match the "run the AI"
        affordance used by ai-verdict-rerun and the Re-ask buttons. */
-    .user-summary-empty { margin: 0 0 0.4rem; }
-    .user-summary-generate {
+    .entity-summary-empty { margin: 0 0 0.4rem; }
+    .entity-summary-generate {
       display: inline-block;
       padding: 0.18rem 0.5rem;
       font-size: 0.74rem;
@@ -638,19 +639,19 @@
       cursor: pointer;
       font-weight: 500;
     }
-    .user-summary-generate:hover {
+    .entity-summary-generate:hover {
       background: rgba(var(--ai-accent-rgb), 0.13);
       border-color: rgba(var(--ai-accent-rgb), 0.5);
     }
-    .user-summary-disabled .user-summary-generate {
+    .entity-summary-disabled .entity-summary-generate {
       opacity: 0.55;
       cursor: help;
     }
 
-    /* Raw cached fields — one compact line of inline pairs, separated by
-       middots. Sits below the AI block (or the Generate button) as a
-       quiet definition list. */
-    .user-summary-fields {
+    /* Raw cached fields (user only) — one compact line of inline pairs,
+       separated by middots. Sits below the AI block (or the Generate
+       button) as a quiet definition list. */
+    .entity-summary-fields {
       display: flex;
       flex-wrap: wrap;
       gap: 0 0.5rem;
@@ -660,20 +661,20 @@
       color: var(--pico-muted-color);
       line-height: 1.4;
     }
-    .user-summary-fields .pair { white-space: nowrap; }
-    .user-summary-fields .pair + .pair::before {
+    .entity-summary-fields .pair { white-space: nowrap; }
+    .entity-summary-fields .pair + .pair::before {
       content: "·";
       margin-right: 0.5rem;
       margin-left: -0.25rem;
       opacity: 0.5;
     }
-    .user-summary-fields .pair dt {
+    .entity-summary-fields .pair dt {
       display: inline;
       font-weight: 500;
       margin-right: 0.2rem;
     }
-    .user-summary-fields .pair dt::after { content: ":"; }
-    .user-summary-fields .pair dd {
+    .entity-summary-fields .pair dt::after { content: ":"; }
+    .entity-summary-fields .pair dd {
       display: inline;
       margin: 0;
       color: var(--pico-color);
@@ -681,11 +682,11 @@
     }
     /* `bio` gets its own line — bios run long and look awkward as an
        inline pair next to numeric stats. */
-    .user-summary-fields .pair.bio {
+    .entity-summary-fields .pair.bio {
       flex-basis: 100%;
       white-space: normal;
     }
-    .user-summary-fields .pair.bio + .pair::before { content: none; }
+    .entity-summary-fields .pair.bio + .pair::before { content: none; }
     /* title meta-row — discussion category, PR diff (if any), and labels
        share one wrapping line so they fit when narrow but stay grouped when
        wide. (The type lives in the .type-spine to the left, not here.) */

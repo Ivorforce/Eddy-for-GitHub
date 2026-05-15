@@ -2131,6 +2131,215 @@ def fetch_user_triage_inputs(token: str, login: str) -> dict | None:
     return out
 
 
+# Org-triage input fetch. One GraphQL roundtrip, public-data-only.
+# `membersWithRole.totalCount` is intentionally *not* requested — that
+# field requires OAuth app approval on the org, and when forbidden it
+# nullifies the entire parent `organization` field for the whole query
+# (we hit this on OAuth-restricted orgs). The public-member count isn't
+# worth losing the rest of the org data over; everything else here is
+# accessible regardless of OAuth approval. Same reason `fundingLinks`
+# is omitted on the repo side.
+_ORG_TRIAGE_QUERY = """
+query($org: String!) {
+  organization(login: $org) {
+    name
+    description
+    websiteUrl
+    email
+    location
+    createdAt
+    isVerified
+    repositories { totalCount }
+    topRepos: repositories(first: 10, isFork: false,
+                           orderBy: {field: STARGAZERS, direction: DESC}) {
+      nodes { name description primaryLanguage { name } stargazerCount pushedAt }
+    }
+  }
+}
+"""
+
+
+def fetch_org_triage_inputs(token: str, org: str) -> dict | None:
+    """One GraphQL roundtrip → flat dict shaped for the org-triage prompt.
+    Returns None when the org doesn't exist or is invisible to the token."""
+    if not org:
+        return None
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    r = _session.post(
+        _GRAPHQL_URL, headers=headers,
+        json={"query": _ORG_TRIAGE_QUERY, "variables": {"org": org}},
+        timeout=20,
+    )
+    r.raise_for_status()
+    data = (r.json() or {}).get("data") or {}
+    o = data.get("organization")
+    if not o:
+        return None
+    out: dict = {"login": org}
+    if o.get("name"):
+        out["name"] = o["name"]
+    if o.get("description"):
+        out["description"] = _truncate_text(o["description"], 300)
+    for k_src, k_out in (
+        ("websiteUrl", "website_url"),
+        ("location", "location"),
+        ("email", "email"),
+    ):
+        if o.get(k_src):
+            out[k_out] = o[k_src]
+    if o.get("createdAt"):
+        out["created_at"] = o["createdAt"]
+    out["is_verified"] = bool(o.get("isVerified"))
+    out["total_repos"] = (o.get("repositories") or {}).get("totalCount") or 0
+    top = [_flatten_repo_node(n) for n in ((o.get("topRepos") or {}).get("nodes") or [])]
+    top = [p for p in top if p]
+    if top:
+        out["top_repos"] = top
+    return out
+
+
+# Repo-triage input fetch. One roundtrip, public-data-only, returns a
+# flat dict for the prompt. README + CONTRIBUTING bodies are fetched as
+# Blob.text and truncated client-side — README for the elevator-pitch /
+# domain signal, CONTRIBUTING for triage-actionable rules ("PRs require
+# prior issue discussion", "in maintenance mode"). Filename variants
+# aliased in one query; the parser picks the first non-null match.
+# `fundingLinks` is intentionally omitted — its `url` field requires
+# `public_repo` scope (see project memory `private_repo_scope`).
+_REPO_TRIAGE_QUERY = """
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    description
+    homepageUrl
+    createdAt
+    pushedAt
+    isArchived
+    isFork
+    hasIssuesEnabled
+    hasDiscussionsEnabled
+    stargazerCount
+    forkCount
+    issues(states: OPEN) { totalCount }
+    pullRequests(states: OPEN) { totalCount }
+    primaryLanguage { name }
+    licenseInfo { spdxId name }
+    codeOfConduct { name }
+    repositoryTopics(first: 10) { nodes { topic { name } } }
+    readme_md:    object(expression: "HEAD:README.md")    { ... on Blob { text } }
+    readme_rst:   object(expression: "HEAD:README.rst")   { ... on Blob { text } }
+    readme_plain: object(expression: "HEAD:README")       { ... on Blob { text } }
+    contributing_md:     object(expression: "HEAD:CONTRIBUTING.md")          { ... on Blob { text } }
+    contributing_rst:    object(expression: "HEAD:CONTRIBUTING.rst")         { ... on Blob { text } }
+    contributing_github: object(expression: "HEAD:.github/CONTRIBUTING.md")  { ... on Blob { text } }
+    defaultBranchRef {
+      target { ... on Commit { history(first: 1) { totalCount } } }
+    }
+  }
+}
+"""
+
+
+# Markdown badge / HTML-comment noise at the top of READMEs (build-status
+# shields, sponsor banners, comment placeholders) eats truncation budget
+# without adding signal. Strip the cheap-to-recognise forms.
+_README_BADGE_RE = re.compile(r"\[?!\[[^\]]*\]\([^)]*\)\]?\([^)]*\)|!\[[^\]]*\]\([^)]*\)")
+_README_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _clean_readme(text: str | None, n: int) -> str | None:
+    """Light-touch markdown cleanup: drop badge images + HTML comments,
+    collapse blank-line runs, truncate. Keeps the prose without doing a
+    real markdown parse — Haiku skims past minor noise fine, this is
+    just about not eating the first 200 chars with shields.io URLs."""
+    if not text:
+        return None
+    cleaned = _README_BADGE_RE.sub("", text)
+    cleaned = _README_HTML_COMMENT_RE.sub("", cleaned)
+    # Collapse 3+ consecutive newlines into 2.
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    if not cleaned:
+        return None
+    return cleaned if len(cleaned) <= n else cleaned[: n - 1] + "…"
+
+
+def fetch_repo_triage_inputs(
+    token: str, owner: str, name: str,
+) -> dict | None:
+    """One GraphQL roundtrip → flat dict shaped for the repo-triage
+    prompt. Returns None when the repo doesn't exist or is invisible."""
+    if not owner or not name:
+        return None
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    r = _session.post(
+        _GRAPHQL_URL, headers=headers,
+        json={"query": _REPO_TRIAGE_QUERY,
+              "variables": {"owner": owner, "name": name}},
+        timeout=20,
+    )
+    r.raise_for_status()
+    data = (r.json() or {}).get("data") or {}
+    rp = data.get("repository")
+    if not rp:
+        return None
+    out: dict = {"full_name": f"{owner}/{name}"}
+    if rp.get("description"):
+        out["description"] = _truncate_text(rp["description"], 300)
+    if rp.get("homepageUrl"):
+        out["homepage_url"] = rp["homepageUrl"]
+    if rp.get("createdAt"):
+        out["created_at"] = rp["createdAt"]
+    if rp.get("pushedAt"):
+        out["pushed_at"] = rp["pushedAt"]
+    out["is_archived"] = bool(rp.get("isArchived"))
+    out["is_fork"] = bool(rp.get("isFork"))
+    out["has_issues_enabled"] = bool(rp.get("hasIssuesEnabled"))
+    out["has_discussions_enabled"] = bool(rp.get("hasDiscussionsEnabled"))
+    out["stars"] = rp.get("stargazerCount") or 0
+    out["forks"] = rp.get("forkCount") or 0
+    out["open_issues"] = (rp.get("issues") or {}).get("totalCount") or 0
+    out["open_prs"] = (rp.get("pullRequests") or {}).get("totalCount") or 0
+    if (rp.get("primaryLanguage") or {}).get("name"):
+        out["primary_language"] = rp["primaryLanguage"]["name"]
+    license_info = rp.get("licenseInfo") or {}
+    if license_info.get("spdxId") or license_info.get("name"):
+        out["license"] = license_info.get("spdxId") or license_info.get("name")
+    coc = rp.get("codeOfConduct") or {}
+    if coc.get("name"):
+        out["code_of_conduct"] = coc["name"]
+    topics = [
+        ((n.get("topic") or {}).get("name") or "")
+        for n in ((rp.get("repositoryTopics") or {}).get("nodes") or [])
+        if n and (n.get("topic") or {}).get("name")
+    ]
+    if topics:
+        out["topics"] = topics
+    # First non-null candidate wins for each of README + CONTRIBUTING.
+    # README budget is larger (1200 chars) than CONTRIBUTING (800) —
+    # README often has a richer elevator pitch; CONTRIBUTING rules tend
+    # to be concise.
+    for alias in ("readme_md", "readme_rst", "readme_plain"):
+        blob = rp.get(alias) or {}
+        text = blob.get("text")
+        if text:
+            cleaned = _clean_readme(text, 1200)
+            if cleaned:
+                out["readme"] = cleaned
+            break
+    for alias in ("contributing_md", "contributing_rst", "contributing_github"):
+        blob = rp.get(alias) or {}
+        text = blob.get("text")
+        if text:
+            cleaned = _clean_readme(text, 800)
+            if cleaned:
+                out["contributing"] = cleaned
+            break
+    commits = (((rp.get("defaultBranchRef") or {}).get("target") or {})
+               .get("history") or {}).get("totalCount")
+    if commits is not None:
+        out["total_commits"] = commits
+    return out
+
+
 def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
     """Fetch full details for up to ENRICHMENT_PER_POLL notifications that need it.
 

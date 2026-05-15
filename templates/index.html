@@ -84,24 +84,25 @@
           <span class="check" aria-hidden="true">✓</span> AI auto-judge
         </a>
       </li>
-      {# User-triage is orthogonal to triage_mode (no .ai-dependent): summaries
-         feed both the thread-judge prompt and the person-popover, so it's
-         useful even with manual thread triage. Gated only by ANTHROPIC_API_KEY
-         since it's still a Haiku call — same disabled-state rationale as the
-         triage_mode row above. #}
+      {# Entity-triage is orthogonal to triage_mode (no .ai-dependent):
+         summaries feed both the thread-judge prompt and the entity
+         popovers, so they're useful even with manual thread triage.
+         Umbrella over user / org / repo — single toggle gates generation
+         for all three kinds. Gated only by ANTHROPIC_API_KEY since it's
+         still a Haiku call. #}
       <li>
         {% if ai_key_present %}
-        <a href="#" class="options-toggle{% if ai_user_triage %} on{% endif %}"
-           hx-post="/settings/ai_user_triage" hx-swap="none"
+        <a href="#" class="options-toggle{% if ai_entity_triage %} on{% endif %}"
+           hx-post="/settings/ai_entity_triage" hx-swap="none"
            hx-on::after-request="if (event.detail.successful) this.classList.toggle('on')"
-           title="AI generates a per-login profile summary (cached 90d). Shown in the person popover; replaces raw profile fields in the thread-judge prompt when present.">
-          <span class="check" aria-hidden="true">✓</span> AI user triage
+           title="AI generates per-entity profile summaries — for users, orgs, and repos — cached 90d. Shown in the relevant popovers; replaces raw fields in the thread-judge prompt when present.">
+          <span class="check" aria-hidden="true">✓</span> AI entity triage
         </a>
         {% else %}
         <a href="#" class="options-toggle disabled" aria-disabled="true"
            onclick="event.preventDefault()"
-           title="Set ANTHROPIC_API_KEY in .env to enable AI user triage.">
-          <span class="check" aria-hidden="true">✓</span> AI user triage
+           title="Set ANTHROPIC_API_KEY in .env to enable AI entity triage.">
+          <span class="check" aria-hidden="true">✓</span> AI entity triage
         </a>
         {% endif %}
       </li>

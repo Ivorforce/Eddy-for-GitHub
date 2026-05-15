@@ -53,7 +53,7 @@ SPEC: dict[str, tuple[Any, Callable[[Any], Any]]] = {
     "quiet_bystanders": (True, _bool),
     "ai_auto_judge": (False, _bool),
     "enrich_involved_people": (True, _bool),
-    "ai_user_triage": (False, _bool),
+    "ai_entity_triage": (False, _bool),
 }
 
 DEFAULTS = {k: default for k, (default, _) in SPEC.items()}

@@ -653,11 +653,11 @@ def _build_involved_people(
     # threaded — but the AI calls themselves are network-bound, so the
     # parallelism wins on wall time. AIError("cap_exceeded") stops the
     # batch; other errors are swallowed inside ensure_user_triaged.
-    if settings.get("ai_user_triage"):
+    if settings.get("ai_entity_triage"):
         stale = [
             login for login in logins
             if not github._is_bot_login(login)
-               and not _summary_is_fresh(conn, login, _USER_TRIAGE_TTL_SECONDS)
+               and not _summary_is_fresh(conn, "user_triage", login, _USER_TRIAGE_TTL_SECONDS)
         ]
         if stale:
             with ThreadPoolExecutor(max_workers=min(4, len(stale))) as pool:
@@ -848,8 +848,47 @@ def _load_thread_context(
     }
     activity = {k: v for k, v in activity.items() if v not in (None, [], False)}
 
+    # AI entity-triage gate for repo + org. Per-user triages happen later
+    # inside `_build_involved_people`; lifting org/repo up here means the
+    # entities-block SELECTs below see fresh summaries when warm. Two
+    # parallel single-call refreshes; the daily cap is the brake.
+    if settings.get("ai_entity_triage"):
+        stale_entities: list[tuple[str, str]] = []
+        if repo_owner and not _summary_is_fresh(
+            conn, "org_triage", repo_owner, _USER_TRIAGE_TTL_SECONDS
+        ):
+            stale_entities.append(("org_triage", repo_owner))
+        if repo and not _summary_is_fresh(
+            conn, "repo_triage", repo, _USER_TRIAGE_TTL_SECONDS
+        ):
+            stale_entities.append(("repo_triage", repo))
+        if stale_entities:
+            with ThreadPoolExecutor(max_workers=len(stale_entities)) as pool:
+                def _entity_worker(kind: str, key: str) -> None:
+                    wconn = db.connect()
+                    try:
+                        if kind == "org_triage":
+                            ensure_org_triaged(wconn, key)
+                        else:
+                            ensure_repo_triaged(wconn, key)
+                    finally:
+                        wconn.close()
+                futs = [pool.submit(_entity_worker, k, key) for k, key in stale_entities]
+                for fut in futs:
+                    try:
+                        fut.result()
+                    except AIError as e:
+                        if "cap" in str(e).lower():
+                            log.info("entity-triage: daily cap hit; rendering partial")
+                            break
+
+    def _is_fresh_at(at: int | None) -> bool:
+        return at is not None and (int(time.time()) - int(at)) < _USER_TRIAGE_TTL_SECONDS
+
     # Entity notes: author, repo, org. Only the three relevant to this
-    # thread, not the whole table.
+    # thread, not the whole table. For repo + org, an AI summary attaches
+    # alongside the user-curated overrides (is_tracked / note_user) when
+    # fresh.
     author_login = item.get("author_login")
     entities: dict = {}
     if author_login:
@@ -864,29 +903,43 @@ def _load_thread_context(
         }
     if repo:
         rrow = conn.execute(
-            "SELECT name, is_tracked, note_user FROM repos WHERE name = ?",
+            "SELECT name, is_tracked, note_user, ai_summary_tag, "
+            "       ai_summary_body, ai_summary_at "
+            "  FROM repos WHERE name = ?",
             (repo,),
         ).fetchone()
-        entities["repo"] = {
+        rentry: dict = {
             "name": repo,
             "is_tracked": bool(rrow and rrow["is_tracked"]),
             "note_user": (rrow["note_user"] if rrow else None) or None,
         }
+        if rrow and _is_fresh_at(rrow["ai_summary_at"]) and rrow["ai_summary_tag"]:
+            rentry["tag"] = rrow["ai_summary_tag"]
+            if rrow["ai_summary_body"]:
+                rentry["summary"] = rrow["ai_summary_body"]
+        entities["repo"] = rentry
     if repo_owner:
         orow = conn.execute(
-            "SELECT name, is_tracked, note_user FROM orgs WHERE name = ?",
+            "SELECT name, is_tracked, note_user, ai_summary_tag, "
+            "       ai_summary_body, ai_summary_at "
+            "  FROM orgs WHERE name = ?",
             (repo_owner,),
         ).fetchone()
-        entities["org"] = {
+        oentry: dict = {
             "name": repo_owner,
             "is_tracked": bool(orow and orow["is_tracked"]),
             "note_user": (orow["note_user"] if orow else None) or None,
         }
-    # Drop entities with no signal (no track flag, no note) so the prompt
-    # is shorter and the AI doesn't read into a row of empty defaults.
+        if orow and _is_fresh_at(orow["ai_summary_at"]) and orow["ai_summary_tag"]:
+            oentry["tag"] = orow["ai_summary_tag"]
+            if orow["ai_summary_body"]:
+                oentry["summary"] = orow["ai_summary_body"]
+        entities["org"] = oentry
+    # Drop entries with no signal. A fresh AI summary counts as signal,
+    # alongside the existing track-flag / note levers.
     entities = {
         k: v for k, v in entities.items()
-        if v.get("is_tracked") or v.get("note_user")
+        if v.get("is_tracked") or v.get("note_user") or v.get("tag")
     }
 
     muted_kinds: list[str] = []
@@ -1732,114 +1785,176 @@ def auto_judge_eligible(
     return judged
 
 
-# ---- User triage --------------------------------------------------------
+# ---- Entity triage ------------------------------------------------------
 #
-# Separate AI call that produces a generic per-login profile summary
-# (tag + sentence), cached on `people` with a 90d TTL. The thread-triage
-# prompt's involved_people block uses the tag in place of raw fields when
-# a fresh summary exists; the popover shows the sentence. The summary is
-# generic — no Eddy preferences, no org context, no thread-specific input.
-# See app/ai_user_triage_prompt.md.
+# Three separate AI calls that produce generic per-entity profile summaries
+# (tag + sentence), cached on `people` / `orgs` / `repos` with a 90d TTL.
+# The thread-judge's `involved_people` block uses the user tag/summary in
+# place of raw fields; the `entities` block does the same for repo + org.
+# All three are *generic* — no Eddy preferences, no thread context, no
+# cross-entity bleed (the prompts enforce orthogonality). See:
+#   app/ai_user_triage_prompt.md
+#   app/ai_org_triage_prompt.md
+#   app/ai_repo_triage_prompt.md
+#
+# The implementation is one shared core (`_triage_entity_locked`)
+# parameterized by a per-kind config (`_TRIAGE_KINDS`). The public
+# `triage_user` / `triage_org` / `triage_repo` are thin wrappers.
 
 _USER_TRIAGE_TTL_SECONDS = 90 * 24 * 3600
 
 _USER_TRIAGE_SYSTEM_PROMPT_PATH = Path(__file__).parent / "ai_user_triage_prompt.md"
+_ORG_TRIAGE_SYSTEM_PROMPT_PATH = Path(__file__).parent / "ai_org_triage_prompt.md"
+_REPO_TRIAGE_SYSTEM_PROMPT_PATH = Path(__file__).parent / "ai_repo_triage_prompt.md"
 
-_USER_TRIAGE_TOOL_DEF = {
-    "name": "triage_user",
-    "description": "Record a generic per-login GitHub profile summary.",
-    "input_schema": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "tag": {
-                "type": "string",
-                "description": (
-                    "2-5 words. Categorical role + credibility shorthand "
-                    "(e.g. `framework maintainer`, `senior ML researcher`, "
-                    "`recreational gamedev hobbyist`, `vibe coder, <1yr`, "
-                    "`drive-by reporter`). No quotes, no trailing punctuation."
-                ),
+
+def _make_tool_def(tool_name: str, tag_hint: str) -> dict:
+    return {
+        "name": tool_name,
+        "description": f"Record a generic GitHub profile summary via {tool_name}.",
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "tag": {"type": "string", "description": tag_hint},
+                "summary": {
+                    "type": "string",
+                    "description": (
+                        "One short sentence (15-30 tokens). Human-readable "
+                        "context for the popover. Self-contained; don't restate the tag."
+                    ),
+                },
             },
-            "summary": {
-                "type": "string",
-                "description": (
-                    "One short sentence (15-30 tokens). Human-readable "
-                    "context for the popover — what they do / have built / "
-                    "their activity shape. Self-contained; don't restate "
-                    "the tag."
-                ),
-            },
+            "required": ["tag", "summary"],
         },
-        "required": ["tag", "summary"],
+    }
+
+
+_USER_TRIAGE_TOOL_DEF = _make_tool_def(
+    "triage_user",
+    "2-5 words. Categorical role + credibility shorthand "
+    "(e.g. `framework maintainer`, `senior ML researcher`, "
+    "`vibe coder, <1yr`, `drive-by reporter`). "
+    "No quotes, no trailing punctuation.",
+)
+_ORG_TRIAGE_TOOL_DEF = _make_tool_def(
+    "triage_org",
+    "2-5 words. Categorical org-type shorthand "
+    "(e.g. `household-name tech company`, `mid-size SaaS firm`, "
+    "`open-source foundation`, `personal-brand alias`). "
+    "No quotes, no trailing punctuation.",
+)
+_REPO_TRIAGE_TOOL_DEF = _make_tool_def(
+    "triage_repo",
+    "2-5 words. Categorical kind + activity state "
+    "(e.g. `active major OSS library`, `well-curated CLI tool`, "
+    "`abandoned side project`, `archived (no longer maintained)`). "
+    "No quotes, no trailing punctuation.",
+)
+
+
+def _read_triage_prompt(path: Path, fallback: str) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        log.warning("%s not found; using minimal fallback", path.name)
+        return fallback
+
+
+# Per-kind config: prompt path/fallback, tool def, fetcher (callable
+# taking (token, key) → payload dict | None), table + key-column for the
+# cache row, and the SQL columns to upsert. All three kinds share the
+# `ai_summary_*` column shape, so only table + key-column differ.
+_TRIAGE_KINDS: dict[str, dict] = {
+    "user_triage": {
+        "tool_def": _USER_TRIAGE_TOOL_DEF,
+        "prompt_path": _USER_TRIAGE_SYSTEM_PROMPT_PATH,
+        "fallback_prompt": (
+            "You summarize one GitHub user from their public profile. "
+            "Call triage_user exactly once with `tag` (2-5 words) and "
+            "`summary` (one short sentence)."
+        ),
+        "fetch": lambda token, key: github.fetch_user_triage_inputs(token, key),
+        "table": "people",
+        "key_col": "login",
+    },
+    "org_triage": {
+        "tool_def": _ORG_TRIAGE_TOOL_DEF,
+        "prompt_path": _ORG_TRIAGE_SYSTEM_PROMPT_PATH,
+        "fallback_prompt": (
+            "You summarize one GitHub organization from its public profile. "
+            "Call triage_org exactly once with `tag` (2-5 words) and "
+            "`summary` (one short sentence)."
+        ),
+        "fetch": lambda token, key: github.fetch_org_triage_inputs(token, key),
+        "table": "orgs",
+        "key_col": "name",
+    },
+    "repo_triage": {
+        "tool_def": _REPO_TRIAGE_TOOL_DEF,
+        "prompt_path": _REPO_TRIAGE_SYSTEM_PROMPT_PATH,
+        "fallback_prompt": (
+            "You summarize one GitHub repository from its public profile. "
+            "Call triage_repo exactly once with `tag` (2-5 words) and "
+            "`summary` (one short sentence)."
+        ),
+        # Repo keys are "owner/name" strings; split for the fetcher.
+        "fetch": lambda token, key: (
+            github.fetch_repo_triage_inputs(token, *key.split("/", 1))
+            if "/" in key else None
+        ),
+        "table": "repos",
+        "key_col": "name",
     },
 }
 
 
-def _read_user_triage_prompt() -> str:
-    try:
-        return _USER_TRIAGE_SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        log.warning("ai_user_triage_prompt.md not found; using minimal fallback")
-        return (
-            "You summarize one GitHub user from their public profile. "
-            "Call triage_user exactly once with `tag` (2-5 words) and "
-            "`summary` (one short sentence)."
-        )
-
-
 _TRIAGE_IN_FLIGHT_LOCK = threading.Lock()
-_TRIAGE_IN_FLIGHT: set[str] = set()
+_TRIAGE_IN_FLIGHT: set[tuple[str, str]] = set()
 
 
-def _enter_triage(login: str) -> bool:
+def _enter_triage(kind: str, key: str) -> bool:
     with _TRIAGE_IN_FLIGHT_LOCK:
-        if login in _TRIAGE_IN_FLIGHT:
+        if (kind, key) in _TRIAGE_IN_FLIGHT:
             return False
-        _TRIAGE_IN_FLIGHT.add(login)
+        _TRIAGE_IN_FLIGHT.add((kind, key))
         return True
 
 
-def _exit_triage(login: str) -> None:
+def _exit_triage(kind: str, key: str) -> None:
     with _TRIAGE_IN_FLIGHT_LOCK:
-        _TRIAGE_IN_FLIGHT.discard(login)
+        _TRIAGE_IN_FLIGHT.discard((kind, key))
 
 
-def _summary_is_fresh(conn: sqlite3.Connection, login: str, ttl: int) -> bool:
+def _summary_is_fresh(
+    conn: sqlite3.Connection, kind: str, key: str, ttl: int,
+) -> bool:
+    cfg = _TRIAGE_KINDS[kind]
     row = conn.execute(
-        "SELECT ai_summary_at, ai_summary_tag FROM people WHERE login = ?",
-        (login,),
+        f"SELECT ai_summary_at, ai_summary_tag FROM {cfg['table']} "
+        f"WHERE {cfg['key_col']} = ?",
+        (key,),
     ).fetchone()
     if not row or row["ai_summary_at"] is None or not row["ai_summary_tag"]:
         return False
     return (int(time.time()) - int(row["ai_summary_at"])) < ttl
 
 
-def triage_user(conn: sqlite3.Connection, login: str) -> dict | None:
-    """Run the AI summary call for one login. Returns the verdict dict
-    `{tag, summary}` on success, or None when the call could not proceed
-    (bot login, no token, fetch returned no user, AI cap hit, etc. —
-    these are non-exceptional, the caller falls back to raw fields).
-    Persists to `people.ai_summary_{tag,body,at,model}` and logs to
-    `ai_calls` with kind='user_triage'."""
-    if not login or github._is_bot_login(login):
-        return None
-    if not _enter_triage(login):
-        raise AIBusy(f"user triage already in flight for {login}")
-    try:
-        return _triage_user_locked(conn, login)
-    finally:
-        _exit_triage(login)
-
-
-def _triage_user_locked(conn: sqlite3.Connection, login: str) -> dict | None:
+def _triage_entity_locked(
+    conn: sqlite3.Connection, kind: str, key: str,
+) -> dict | None:
+    """Shared core for all three triage kinds. Caller holds the per-(kind,
+    key) in-flight lock. Returns `{tag, summary}` on success or None when
+    the call couldn't proceed (no token, fetch returned no entity)."""
+    cfg = _TRIAGE_KINDS[kind]
+    tool_name = cfg["tool_def"]["name"]
     model = _model_id()
     cap = _daily_cap()
     spent = _spent_today(conn)
     if spent >= cap:
         msg = f"Daily AI cap of ${cap:.2f} reached (${spent:.4f} spent). Set AI_DAILY_CAP_USD higher to continue."
         _log_call(
-            conn, thread_id=login, model=model, kind="user_triage",
+            conn, thread_id=key, model=model, kind=kind,
             request={}, response=None, usage=None, cost_usd=0.0,
             error=msg, status="cap_exceeded",
         )
@@ -1847,12 +1962,12 @@ def _triage_user_locked(conn: sqlite3.Connection, login: str) -> dict | None:
 
     token = github._resolve_cached_token()
     if not token:
-        log.warning("triage_user: no token available for %s", login)
+        log.warning("%s: no token available for %s", kind, key)
         return None
     try:
-        payload = github.fetch_user_triage_inputs(token, login)
+        payload = cfg["fetch"](token, key)
     except (requests.RequestException, ValueError) as e:
-        log.warning("triage_user: fetch failed for %s (%s)", login, e)
+        log.warning("%s: fetch failed for %s (%s)", kind, key, e)
         return None
     if payload is None:
         return None
@@ -1863,24 +1978,25 @@ def _triage_user_locked(conn: sqlite3.Connection, login: str) -> dict | None:
     _annotate_ages(ctx, now_dt.timestamp())
     ctx["now"] = now_iso
 
-    system_prompt = _read_user_triage_prompt()
+    system_prompt = _read_triage_prompt(cfg["prompt_path"], cfg["fallback_prompt"])
     user_msg = json.dumps(ctx, sort_keys=True, indent=2, ensure_ascii=False)
+    tool_def = cfg["tool_def"]
 
     request_log = {
         "model": model,
         "max_tokens": DEFAULT_MAX_TOKENS,
         "thinking": {"type": "disabled"},
-        "tool_choice": {"type": "tool", "name": "triage_user"},
+        "tool_choice": {"type": "tool", "name": tool_name},
         "system": [system_prompt],
         "user_message": user_msg,
-        "tools": [_USER_TRIAGE_TOOL_DEF],
+        "tools": [tool_def],
     }
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         msg = "ANTHROPIC_API_KEY not set"
         _log_call(
-            conn, thread_id=login, model=model, kind="user_triage",
+            conn, thread_id=key, model=model, kind=kind,
             request=request_log, response=None, usage=None, cost_usd=0.0,
             error=msg, status="error",
         )
@@ -1894,14 +2010,14 @@ def _triage_user_locked(conn: sqlite3.Connection, login: str) -> dict | None:
             thinking={"type": "disabled"},
             system=[{"type": "text", "text": system_prompt,
                      "cache_control": {"type": "ephemeral"}}],
-            tools=[_USER_TRIAGE_TOOL_DEF],
-            tool_choice={"type": "tool", "name": "triage_user"},
+            tools=[tool_def],
+            tool_choice={"type": "tool", "name": tool_name},
             messages=[{"role": "user", "content": user_msg}],
         )
     except anthropic.APIError as e:
         msg = f"{type(e).__name__}: {e}"
         _log_call(
-            conn, thread_id=login, model=model, kind="user_triage",
+            conn, thread_id=key, model=model, kind=kind,
             request=request_log, response=None, usage=None, cost_usd=0.0,
             error=msg, status="error",
         )
@@ -1914,70 +2030,137 @@ def _triage_user_locked(conn: sqlite3.Connection, login: str) -> dict | None:
     tool_use = next(
         (b for b in response.content
          if getattr(b, "type", None) == "tool_use"
-         and getattr(b, "name", None) == "triage_user"),
+         and getattr(b, "name", None) == tool_name),
         None,
     )
     if tool_use is None:
         _log_call(
-            conn, thread_id=login, model=model, kind="user_triage",
+            conn, thread_id=key, model=model, kind=kind,
             request=request_log, response=response_dict, usage=usage,
-            cost_usd=cost, error="Model did not call triage_user", status="error",
+            cost_usd=cost, error=f"Model did not call {tool_name}", status="error",
         )
-        raise AIError("Model did not call triage_user")
+        raise AIError(f"Model did not call {tool_name}")
 
     raw = getattr(tool_use, "input", None) or {}
     tag = (raw.get("tag") or "").strip()
     summary = (raw.get("summary") or "").strip()
     if not tag or not summary:
         _log_call(
-            conn, thread_id=login, model=model, kind="user_triage",
+            conn, thread_id=key, model=model, kind=kind,
             request=request_log, response=response_dict, usage=usage,
-            cost_usd=cost, error="triage_user missing tag/summary", status="error",
+            cost_usd=cost, error=f"{tool_name} missing tag/summary", status="error",
         )
-        raise AIError("triage_user missing tag/summary")
+        raise AIError(f"{tool_name} missing tag/summary")
 
     now_unix = int(time.time())
-    # Upsert keyed on login; the row may not exist if this login was a bot
-    # tombstone or never seen via the involved-people path. INSERT-with-
-    # default-fetched_at keeps the row valid for both code paths.
+    # Upsert keyed on the entity's primary key. Row may not exist yet —
+    # the conflict clause covers both inserts and updates.
+    table, key_col = cfg["table"], cfg["key_col"]
     conn.execute(
-        "INSERT INTO people (login, ai_summary_tag, ai_summary_body, "
+        f"INSERT INTO {table} ({key_col}, ai_summary_tag, ai_summary_body, "
         "  ai_summary_at, ai_summary_model) "
         "VALUES (?, ?, ?, ?, ?) "
-        "ON CONFLICT(login) DO UPDATE SET "
+        f"ON CONFLICT({key_col}) DO UPDATE SET "
         "  ai_summary_tag   = excluded.ai_summary_tag, "
         "  ai_summary_body  = excluded.ai_summary_body, "
         "  ai_summary_at    = excluded.ai_summary_at, "
         "  ai_summary_model = excluded.ai_summary_model",
-        (login, tag, summary, now_unix, model),
+        (key, tag, summary, now_unix, model),
     )
     _log_call(
-        conn, thread_id=login, model=model, kind="user_triage",
+        conn, thread_id=key, model=model, kind=kind,
         request=request_log, response=response_dict, usage=usage,
         cost_usd=cost, error=None, status="ok",
     )
     return {"tag": tag, "summary": summary}
 
 
+def _triage_entity(
+    conn: sqlite3.Connection, kind: str, key: str,
+) -> dict | None:
+    """Public wrapper: take the in-flight lock, dispatch to the shared
+    core. Raises AIBusy when another caller is already running this same
+    (kind, key) pair."""
+    if not key:
+        return None
+    if not _enter_triage(kind, key):
+        raise AIBusy(f"{kind} already in flight for {key}")
+    try:
+        return _triage_entity_locked(conn, kind, key)
+    finally:
+        _exit_triage(kind, key)
+
+
+def triage_user(conn: sqlite3.Connection, login: str) -> dict | None:
+    """Generate / refresh the AI profile summary for one GitHub login.
+    Persists to `people.ai_summary_*` and logs to `ai_calls` with
+    `kind='user_triage'`. Returns `{tag, summary}` on success, None on
+    non-exceptional skip (bot login, no token, no user)."""
+    if not login or github._is_bot_login(login):
+        return None
+    return _triage_entity(conn, "user_triage", login)
+
+
+def triage_org(conn: sqlite3.Connection, org: str) -> dict | None:
+    """Generate / refresh the AI profile summary for one GitHub org.
+    Persists to `orgs.ai_summary_*`, logs as `kind='org_triage'`."""
+    if not org:
+        return None
+    return _triage_entity(conn, "org_triage", org)
+
+
+def triage_repo(conn: sqlite3.Connection, repo_full_name: str) -> dict | None:
+    """Generate / refresh the AI profile summary for one GitHub repo.
+    `repo_full_name` is `owner/name`. Persists to `repos.ai_summary_*`,
+    logs as `kind='repo_triage'`."""
+    if not repo_full_name or "/" not in repo_full_name:
+        return None
+    return _triage_entity(conn, "repo_triage", repo_full_name)
+
+
+def _ensure_entity_triaged(
+    conn: sqlite3.Connection, kind: str, key: str, ttl: int,
+) -> None:
+    """No-op when the entity already has a fresh AI summary. Otherwise
+    runs the triage call. Swallows AIBusy / non-cap AIError so a transient
+    failure doesn't block the caller (the entity render falls back to
+    raw fields on missing summary)."""
+    if not key:
+        return
+    if _summary_is_fresh(conn, kind, key, ttl):
+        return
+    try:
+        _triage_entity(conn, kind, key)
+    except AIBusy:
+        log.debug("%s: %s already in flight", kind, key)
+    except AIError as e:
+        if "cap" in str(e).lower():
+            raise  # propagate cap-exceeded so callers can stop the batch
+        log.warning("%s: %s failed: %s", kind, key, e)
+    except Exception:
+        log.exception("%s: %s crashed", kind, key)
+
+
 def ensure_user_triaged(
     conn: sqlite3.Connection, login: str,
     *, ttl: int = _USER_TRIAGE_TTL_SECONDS,
 ) -> None:
-    """No-op when the login already has a fresh AI summary (within TTL).
-    Otherwise runs `triage_user`. Swallows AIBusy / non-cap AIError —
-    stale or missing summaries fall back to raw fields on the thread side,
-    so a transient failure shouldn't block thread triage."""
     if not login or github._is_bot_login(login):
         return
-    if _summary_is_fresh(conn, login, ttl):
+    _ensure_entity_triaged(conn, "user_triage", login, ttl)
+
+
+def ensure_org_triaged(
+    conn: sqlite3.Connection, org: str,
+    *, ttl: int = _USER_TRIAGE_TTL_SECONDS,
+) -> None:
+    _ensure_entity_triaged(conn, "org_triage", org, ttl)
+
+
+def ensure_repo_triaged(
+    conn: sqlite3.Connection, repo_full_name: str,
+    *, ttl: int = _USER_TRIAGE_TTL_SECONDS,
+) -> None:
+    if not repo_full_name or "/" not in repo_full_name:
         return
-    try:
-        triage_user(conn, login)
-    except AIBusy:
-        log.debug("ensure_user_triaged: %s already in flight", login)
-    except AIError as e:
-        if "cap" in str(e).lower():
-            raise  # propagate cap-exceeded so callers can stop the batch
-        log.warning("ensure_user_triaged: %s failed: %s", login, e)
-    except Exception:
-        log.exception("ensure_user_triaged: %s crashed", login)
+    _ensure_entity_triaged(conn, "repo_triage", repo_full_name, ttl)
