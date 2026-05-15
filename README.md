@@ -1,8 +1,39 @@
-# Eddy for GitHub
+# Eddy for GitHub — see what matters in your feed
 
-Local GitHub notification triage app — the calm pocket beside the firehose. Runs a
-Flask server on `localhost:5734` that polls your GitHub notifications every 5 minutes
-and shows them in a table.
+A small local app that helps you keep up with your GitHub notifications
+without scrolling through everything. Just a python script that runs on
+your machine, no server needed.
+
+Eddy shows your GitHub notifications, assigned issues and PRs, and anything
+else you want to add, as one ranked list. Decide what's worth your attention
+and take notes for later.
+
+![Eddy](materials/screenshot.png)
+
+## Who it's for
+
+Anyone whose GitHub feed has grown past the point where scrolling through it
+is reasonable — maintainers, contributors juggling several repos, engineers
+on busy teams. If you've started missing things, or you check more often than
+you'd like and still feel behind, give it a try.
+
+## Features
+
+- **More inbox verbs** — snooze, partial unsubscribe, track; on top of GitHub's read/done/mute.
+- **Priority queue** — rank rows by what matters to you, to find it again later.
+- **Built for digital health** — bystander throttling and your choice of refresh cadence (Live / Hourly / Daily / Manual).
+- **Condensed thread view** — comments and reviews boiled down, with room for your own notes.
+- **Optional AI assistant** — opt-in, suggestion-only; never touches GitHub or your row state.
+
+## The Eddy workflow
+
+Eddy is designed for a two-mode loop. When new activity arrives, you skim items as they
+come in, set a priority, and move on. When you have time to act, sort by priority and
+pick one. It's lightweight by design: full triage is best done elsewhere; Eddy is just
+for your personal queue.
+
+If you prefer, you can use the optional AI assistant to do the triage pass for you,
+based on a `preferences.md` you write.
 
 ## Setup
 
@@ -10,69 +41,34 @@ Requires Python 3.11+.
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e .
 python -m app run
 ```
 
-On first launch Eddy opens github.com in your browser and asks you to
-authorize the app (scopes: `notifications`, `read:org`). The token is
-stored in `data/auth.json` (mode 0600) and reused on subsequent launches.
-Revoke any time at https://github.com/settings/applications.
+First launch opens GitHub in your browser for OAuth (scopes `notifications`,
+`read:org`); the token lives in `data/auth.json`. Then open
+http://127.0.0.1:5734.
 
-Open http://127.0.0.1:5734.
-
-**Restricted orgs.** Some orgs require admin approval before an OAuth App
-can see their private repos or team data — when authorizing, you'll see a
-"Request" button beside them. Until an admin acts, Eddy is limited to
-those orgs' public repos. To skip the gate, set `GITHUB_TOKEN` to a token
-from a `gh` install the org has already approved (or a PAT with broader
-scopes):
-
-```bash
-GITHUB_TOKEN=$(gh auth token) python -m app run
-```
-
-Or paste the value into `.env` to persist it. The same env var doubles as
-the headless / CI escape hatch.
+Licensed under [MIT](./LICENSE.md).
 
 ## Configuration
 
-Optional `.env` (see `.env.example`):
+Most options live in `config/settings.toml` and can be changed in-app.
 
-- `GITHUB_TOKEN` — skip the device-flow prompt and use this token instead
-- `EDDY_OAUTH_CLIENT_ID` — override the OAuth Client ID (for forks)
-- `PORT` — server port (default 5734)
-- `ANTHROPIC_API_KEY` — required for the **Ask AI** triage feature
-- `AI_MODEL` — overrides the default model (`claude-haiku-4-5`)
-- `AI_DAILY_CAP_USD` — soft daily spend cap for AI calls (default `2.0`).
-  When reached, **Ask AI** returns an error toast until the next day or you
-  raise the cap.
+You can also set up a `.env` file with secrets or machine-specific overrides.
+This is also where you configure the AI assistant API key.
 
-## AI triage
+To configure the AI assistant, set up a `config/preferences.md` file with your
+preferences for triage. You can also tweak the system prompts from the `app/`
+folder, if you want.
 
-The **Relevance** column has a brain-icon toggle in its header. Click it to
-swap the column into AI mode: rule-based status pills are replaced with
-per-row **Ask AI** buttons. Click one and Claude returns a verdict —
-priority (0.0–1.0 score), proposed action (`mark_read` / `mute` / `archive`
-/ `none`), tracked-flag change, up to 3 relevant-signal pills, and a short
-description. Nothing mutates until you approve.
+## Something is not working, help!
 
-The verdict shows as a split pill: the left half opens a detail popover
-(description, model, age, **Re-ask** / **Dismiss**); the right ✓ half
-applies the proposed actions directly. The ✓ tooltip says exactly what it
-will do (e.g. *"Mark read and track"*) and disables itself when every
-proposed change is already in effect on the row.
+Please [open an issue](https://github.com/Ivorforce/Eddy-for-GitHub/issues)
+with what you saw and what you expected.
 
-Setup:
+## Building / contributing
 
-1. Set `ANTHROPIC_API_KEY` in `.env`.
-2. `cp config/preferences.example.md config/preferences.md` and edit
-   `config/preferences.md` with what you care about (interests, important
-   repos and people, noise patterns). The AI reads this on every judgment.
-3. Toggle the brain icon in the Relevance column header, then **Ask AI**
-   on any row.
-
-Every API call is logged in `data/notifications.db` (`ai_calls` table) with
-the full request, response, token breakdown, and estimated cost — useful
-for tuning the prompt and verifying the daily cap.
+Python 3.11+, stdlib `venv` + `pip`, no lockfile. Schema migrates via a
+hand-rolled version ladder in `app/db.py`. See [CONTRIBUTING.md](./CONTRIBUTING.md) for more info.
