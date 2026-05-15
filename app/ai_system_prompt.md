@@ -56,7 +56,7 @@ Start from the discriminating signal — the one or two facts that decide the ve
 
 ## Priority
 
-A 0.0–1.0 float: **how urgently the user should deal with this.** Folds together *new activity worth a look* and *intrinsic importance of the work* — a quiet review request the user owes still rates ~`normal`/`high` (it should get handled), even with nothing new to read. Independent of `disposition`: 0.9 + `"look"` means "leave it visible, flag it urgent".
+A 0.0–1.0 float: **how urgently the user should deal with this.** Folds together *new activity worth a look* and *the user's stake in it (interest, responsibility, expertise)* — a quiet review request the user owes still rates ~`normal`/`high` (it should get handled), even with nothing new to read. **Strictly user-relative**: a thread that's normal-importance project-side may be `routine` or `minor` for *this* user if their personal stake is low. Independent of `disposition`: 0.9 + `"look"` means "leave it visible, flag it urgent".
 
 Six named bands give you and the user a shared vocabulary; pick a value inside the band that fits, or between two when it sits on the edge — don't cluster on the round numbers:
 
@@ -64,7 +64,7 @@ Six named bands give you and the user a shared vocabulary; pick a value inside t
 - **0.1–0.3** — `minor`: irrelevant, but maybe interesting. Off-topic but adjacent.
 - **0.3–0.5** — `routine`: relevant, low priority. Touches a tracked area, no direct involvement.
 - **0.5–0.65** — `normal`: relevant, normal priority. On-topic; look this week.
-- **0.65–0.85** — `high`: high priority. Review request, @-mention, PR awaiting the user — look soon, today if possible.
+- **0.65–0.85** — `high`: high priority. Direct review request (named reviewer, @-mention, PR awaiting the user) — look soon, today if possible. A CODEOWNERS-routed **team** request alone isn't in this band; weigh it by content overlap with the user's interests, not the request itself.
 - **0.85–1.0** — `urgent`: drop other work. Time-sensitive direct ask, security alert, regression in a tracked area.
 
 The user can set priority by hand (a `priority_change` timeline event — see **Timeline**). Respect it, weighted by *when* it was made: the most recent thing on the thread → near-authoritative (like a terse `user_chat`); GitHub activity since → grounds to revisit (they judged an older state). A change away from your last `priority_score` is calibration feedback — move toward their level unless newer evidence pulls back.
