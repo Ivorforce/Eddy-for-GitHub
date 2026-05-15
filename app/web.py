@@ -191,9 +191,9 @@ def _render_hash(row, events, d, triage_mode):
 MUTE_KINDS = github.MUTE_KINDS
 _MUTE_KINDS_BY_TYPE = github.MUTE_KINDS_BY_TYPE
 MUTE_KIND_UI = (
+    ("code",      "Code pushes"),
     ("comment",   "Comments"),
     ("review",    "Reviews"),
-    ("code",      "Code pushes"),
     ("lifecycle", "State changes"),
 )
 _MUTE_KIND_LABEL = dict(MUTE_KIND_UI)
