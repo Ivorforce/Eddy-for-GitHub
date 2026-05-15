@@ -362,6 +362,7 @@
         <div class="ai-chat-form-buttons">
           <button type="button" class="ai-send-btn" disabled
                   hx-post="/ai/{{ n.id }}/chat"
+                  hx-include="closest .ai-chat-form"
                   hx-target="#timeline-{{ n.id }}"
                   hx-swap="beforeend"
                   hx-on::before-request="aiBusyOn(this)"
