@@ -118,6 +118,10 @@ def run_loop(
     must fire on time even in manual mode, and a fingerprint that moves
     (e.g., a snooze auto-woke a thread) needs to push to connected clients.
 
+    Enrichment drain (`github._enrich`) runs on wakes when no poll fires —
+    backfill and the slower modes (Hourly / Daily / Manual) leave rows
+    dirty that don't need a notifications fetch to resolve.
+
     `user_login` / `user_teams` are accepted for API stability — earlier the
     poll loop ran `ai.auto_judge_eligible` and needed identity; auto-judge is
     now focus-triggered, so the poll loop itself doesn't use them. Kept on
@@ -140,6 +144,18 @@ def run_loop(
                     db.set_meta(conn, "last_poll_at", str(int(time.time())))
                     conn.commit()
                     force_full = False
+                else:
+                    # Drain pending enrichments every wake regardless of the
+                    # poll cadence — backfill and long-quiet modes (Hourly /
+                    # Daily / Manual) leave rows with details_fetched_at=NULL
+                    # that don't need a notifications fetch to resolve. Cheap
+                    # SELECT when backlog is empty; bounded by
+                    # ENRICHMENT_PER_POLL when not. Doesn't touch last_poll_at
+                    # — this isn't a poll, it's a backlog drain.
+                    enriched = github._enrich(conn, token)
+                    if enriched:
+                        log.info("enrich: %d thread(s)", len(enriched))
+                        conn.commit()
                 woke = _wake_snoozed(conn, token)
                 if woke:
                     log.info("snooze: woke %d thread(s)", woke)
