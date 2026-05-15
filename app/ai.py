@@ -570,6 +570,130 @@ def _annotate_ages(node, now_unix: float) -> None:
                 node[key] = f"{val} ({_humanize_age(delta)} {'ago' if delta >= 0 else 'from now'})"
 
 
+# Per-thread cap on the involved-people block. Author + reviewers + the
+# top commenters by event count, deduped. The AI sees `login` +
+# `author_association` inline on every comment/review regardless of this
+# cap; this just bounds how many profile blocks we render + fetch. Each
+# entry is ~30-40 tokens (login + age + followers + company? + bio? +
+# org_membership?), so 20 lands at ~600-800 tokens total.
+_INVOLVED_PEOPLE_CAP = 20
+
+
+def _collect_involved_logins(
+    item: dict, timeline: list[dict], *, self_login: str | None,
+) -> list[str]:
+    """Ordered, deduped involved logins. Priority: author → requested
+    reviewers → actual reviewers (event order) → commenters by event count.
+    The user's own login is dropped — no point credibility-checking
+    yourself. Capped at `_INVOLVED_PEOPLE_CAP`."""
+    seen: set[str] = set()
+    out: list[str] = []
+
+    def add(login: str | None) -> None:
+        if not login or login in seen:
+            return
+        if self_login and login == self_login:
+            return
+        seen.add(login)
+        out.append(login)
+
+    add(item.get("author_login"))
+    for r in (item.get("requested_reviewers") or []):
+        add((r or {}).get("login"))
+    review_logins: list[str] = []
+    comment_counts: dict[str, int] = {}
+    for ev in timeline:
+        kind = ev.get("kind")
+        author = (ev.get("payload") or {}).get("author")
+        if not author:
+            continue
+        if kind == "review":
+            review_logins.append(author)
+        elif kind == "comment":
+            comment_counts[author] = comment_counts.get(author, 0) + 1
+    for login in review_logins:
+        add(login)
+    # Commenters last, ordered by event count descending (stable on ties).
+    for login, _ in sorted(
+        comment_counts.items(), key=lambda kv: (-kv[1], kv[0]),
+    ):
+        add(login)
+        if len(out) >= _INVOLVED_PEOPLE_CAP:
+            break
+    return out[:_INVOLVED_PEOPLE_CAP]
+
+
+def _build_involved_people(
+    conn: sqlite3.Connection, item: dict, timeline: list[dict],
+    *, repo_owner: str | None, self_login: str | None,
+) -> list[dict]:
+    """Refresh the cache for each involved login (lazy 7d TTL inside
+    `github.ensure_*_fresh`) then render the AI-facing list. Empty entries
+    (a login we couldn't fetch with no useful cached fields) are dropped."""
+    logins = _collect_involved_logins(item, timeline, self_login=self_login)
+    if not logins:
+        return []
+    for login in logins:
+        if repo_owner:
+            github.ensure_org_membership_fresh(conn, login, repo_owner)
+        else:
+            github.ensure_user_fresh(conn, login)
+
+    now_unix = datetime.now(tz=timezone.utc).timestamp()
+    out: list[dict] = []
+    for login in logins:
+        person = conn.execute(
+            "SELECT bio, company, account_created_at, followers, is_bot "
+            "  FROM people WHERE login = ?",
+            (login,),
+        ).fetchone()
+        if person is None:
+            continue
+        entry: dict[str, Any] = {"login": login}
+        if person["is_bot"]:
+            entry["is_bot"] = True
+        if person["bio"]:
+            entry["bio"] = person["bio"]
+        if person["company"]:
+            entry["company"] = person["company"]
+        if person["account_created_at"]:
+            # Float years (1 decimal) instead of an ISO + age suffix —
+            # ~10 tokens cheaper per entry and the AI doesn't need the
+            # exact date, just the magnitude.
+            created_unix = db.iso_to_unix(person["account_created_at"])
+            if created_unix is not None:
+                age_years = round((now_unix - created_unix) / (365.25 * 86400), 1)
+                if age_years >= 0:
+                    entry["account_age_years"] = age_years
+        if person["followers"]:
+            entry["followers"] = person["followers"]
+        if repo_owner and not person["is_bot"]:
+            mem = conn.execute(
+                "SELECT teams_json FROM org_memberships "
+                " WHERE login = ? AND org = ?",
+                (login, repo_owner),
+            ).fetchone()
+            if mem is not None and mem["teams_json"]:
+                try:
+                    teams = json.loads(mem["teams_json"]) or []
+                except (ValueError, TypeError):
+                    teams = []
+                if teams:
+                    # Non-empty teams means the viewer can see the org's
+                    # team graph (i.e. we're in the org) and the login is
+                    # in at least one team — definitive member signal. An
+                    # empty teams_json (or missing row) leaves membership
+                    # unstated; per-comment author_association carries the
+                    # repo-level signal regardless.
+                    entry["teams"] = teams
+        # Drop entries with nothing useful beyond the login (an unfetched
+        # tombstone with no signal). The AI still sees the login itself on
+        # every comment/review event, so omitting here just elides noise.
+        if len(entry) > 1:
+            out.append(entry)
+    return out
+
+
 def _load_thread_context(
     conn: sqlite3.Connection,
     thread_id: str,
@@ -742,6 +866,19 @@ def _load_thread_context(
     now_dt = datetime.now(tz=timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
 
+    # Per-participant credibility backdrop: cached profile + repo-org
+    # membership/teams for the author, reviewers, and top commenters. The
+    # AI already sees `login` + `author_association` per event; this fills
+    # in account age, follower count, top repo, role/teams. Lazy 7d TTL
+    # refresh happens inside the helpers. Gated by setting.
+    involved_people: list[dict] = []
+    if settings.get("enrich_involved_people"):
+        involved_people = _build_involved_people(
+            conn, item, timeline,
+            repo_owner=repo_owner or None,
+            self_login=user_login,
+        )
+
     ctx = {
         "now": now_iso,
         "notification": notification,
@@ -750,6 +887,8 @@ def _load_thread_context(
         "entities": entities,
         "timeline": timeline,
     }
+    if involved_people:
+        ctx["involved_people"] = involved_people
     # Re-judgments only: an explicit, derived delta against the last verdict so
     # the model doesn't reconstruct it from the flat timeline every time. Omit
     # the key entirely on a first judgment (no prior verdict to diff against).

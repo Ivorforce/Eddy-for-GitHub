@@ -39,3 +39,12 @@ quiet_bystanders = true
 # so the existing un-judged pile isn't swept. Honors the daily AI cost cap.
 # Flippable: toolbar Options ▸ "AI auto-judge". See `ai.auto_judge_eligible`.
 ai_auto_judge = false
+
+# Involved-people identity cache. When `true`, AI judgments include a
+# compact profile block per participant (author, reviewers, top commenters)
+# — account age, follower count, top owned repo, plus role/teams in the
+# repo's org. Lazy 7-day TTL: first cold judgment on a thread pays one
+# GraphQL call per unique participant, re-asks are free. Flip off to skip
+# the enrichment entirely (no extra calls, no `involved_people` block in
+# the prompt). See `github.ensure_user_fresh` / `_build_involved_people`.
+enrich_involved_people = true

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sqlite3
 import threading
@@ -11,7 +12,7 @@ from typing import Any
 
 import requests
 
-from . import db, settings
+from . import db, oauth, settings
 
 API_NOTIFICATIONS = "https://api.github.com/notifications"
 API_SEARCH_ISSUES = "https://api.github.com/search/issues"
@@ -1718,6 +1719,283 @@ def fetch_release(token: str, api_url: str | None) -> dict | None:
         "prerelease": rel.get("prerelease"),
         "draft": rel.get("draft"),
     }
+
+
+# Identity cache: per-user profile for AI credibility signal. The AI already
+# sees login + authorAssociation per comment/review; this fills in the kind-
+# of-person backdrop (account age, follower count, top repo, org/team role)
+# that login alone doesn't carry. Refresh is lazy on AI judgment with a 7d
+# TTL — at that cadence the steady state is ~zero extra HTTP per call.
+USER_PROFILE_TTL_SECONDS = 7 * 24 * 3600
+
+_USER_PROFILE_QUERY = """
+query($login: String!) {
+  user(login: $login) {
+    bio
+    company
+    createdAt
+    followers { totalCount }
+  }
+}
+"""
+
+# Combined query: profile + the org's teams the login is in. Saves a
+# roundtrip vs. fetching them separately. `organization` may be null (org
+# doesn't exist or isn't visible to our token); `teams(userLogins:)` only
+# returns nodes when the *viewer* is in the org with permission to list
+# teams — for external orgs it's a no-op (empty list), which is fine:
+# per-comment `author_association` is the authoritative repo-level
+# membership signal the AI relies on anyway.
+_USER_PROFILE_WITH_ORG_QUERY = """
+query($login: String!, $org: String!) {
+  user(login: $login) {
+    bio
+    company
+    createdAt
+    followers { totalCount }
+  }
+  organization(login: $org) {
+    teams(first: 50, userLogins: [$login]) {
+      nodes { slug }
+    }
+  }
+}
+"""
+
+
+def _truncate_bio(s: str | None) -> str | None:
+    if not s:
+        return None
+    s = s.strip()
+    if not s:
+        return None
+    return s if len(s) <= 100 else s[:97] + "…"
+
+
+def _parse_user_profile(user_node: dict | None) -> dict | None:
+    """Flatten a GraphQL `user` node into the column shape `people` stores.
+    Returns None when the login is unknown (404 — caller writes a tombstone
+    with fetched_at set so we don't re-fetch on every call). is_bot is
+    derived caller-side from the login suffix, not from the GraphQL type:
+    bots aren't resolvable via user(login:) at all, so this branch only
+    runs for real Users."""
+    if not user_node:
+        return None
+    return {
+        "is_bot": 0,
+        "bio": _truncate_bio(user_node.get("bio")),
+        "company": (user_node.get("company") or None),
+        "account_created_at": user_node.get("createdAt"),
+        "followers": ((user_node.get("followers") or {}).get("totalCount") or 0),
+    }
+
+
+def _parse_org_membership(org_node: dict | None, login: str) -> dict:
+    """Flatten the `organization.teams` block to a {teams: [slug, ...]}
+    dict. Always returns a dict (empty teams when the org is missing or
+    nothing is visible) so the caller always writes a row and avoids
+    re-querying inside the TTL window."""
+    if not org_node:
+        return {"teams": []}
+    teams = [
+        (n.get("slug") or "")
+        for n in ((org_node.get("teams") or {}).get("nodes") or [])
+        if n and n.get("slug")
+    ]
+    return {"teams": teams}
+
+
+def fetch_user_profile(
+    token: str, login: str, org: str | None = None,
+) -> tuple[dict | None, dict | None]:
+    """One GraphQL roundtrip per call. Returns (profile, org_membership) —
+    either may be None: profile is None when the login 404s; org_membership
+    is None when no `org` was requested. When `org` is given, the membership
+    dict is always returned (even if the login isn't in it), so the caller
+    can persist a tombstone row and skip future calls for the TTL.
+    """
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    if org:
+        body = {
+            "query": _USER_PROFILE_WITH_ORG_QUERY,
+            "variables": {"login": login, "org": org},
+        }
+    else:
+        body = {
+            "query": _USER_PROFILE_QUERY,
+            "variables": {"login": login},
+        }
+    r = _session.post(_GRAPHQL_URL, headers=headers, json=body, timeout=15)
+    r.raise_for_status()
+    data = (r.json() or {}).get("data") or {}
+    profile = _parse_user_profile(data.get("user"))
+    membership = _parse_org_membership(data.get("organization"), login) if org else None
+    return profile, membership
+
+
+def _user_is_fresh(conn: sqlite3.Connection, login: str, ttl: int) -> bool:
+    row = conn.execute(
+        "SELECT fetched_at FROM people WHERE login = ?", (login,),
+    ).fetchone()
+    if not row or row["fetched_at"] is None:
+        return False
+    return (int(time.time()) - int(row["fetched_at"])) < ttl
+
+
+def _org_membership_is_fresh(
+    conn: sqlite3.Connection, login: str, org: str, ttl: int,
+) -> bool:
+    row = conn.execute(
+        "SELECT fetched_at FROM org_memberships WHERE login = ? AND org = ?",
+        (login, org),
+    ).fetchone()
+    if not row:
+        return False
+    return (int(time.time()) - int(row["fetched_at"])) < ttl
+
+
+def _upsert_user_profile(
+    conn: sqlite3.Connection, login: str, profile: dict | None, now: int,
+) -> None:
+    """Persist a fetched profile. `profile is None` means the login 404'd —
+    we still bump fetched_at to suppress re-fetches for the TTL window."""
+    if profile is None:
+        # Tombstone: just stamp fetched_at, leave other fields alone (the
+        # row may not exist yet — `last_seen_at = NULL` is fine).
+        conn.execute(
+            "INSERT INTO people (login, fetched_at) VALUES (?, ?) "
+            "ON CONFLICT(login) DO UPDATE SET fetched_at = excluded.fetched_at",
+            (login, now),
+        )
+        return
+    conn.execute(
+        "INSERT INTO people (login, fetched_at, bio, company, "
+        "  account_created_at, followers, is_bot) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(login) DO UPDATE SET "
+        "  fetched_at         = excluded.fetched_at, "
+        "  bio                = excluded.bio, "
+        "  company            = excluded.company, "
+        "  account_created_at = excluded.account_created_at, "
+        "  followers          = excluded.followers, "
+        "  is_bot             = excluded.is_bot",
+        (login, now, profile["bio"], profile["company"],
+         profile["account_created_at"], profile["followers"],
+         profile["is_bot"]),
+    )
+
+
+def _upsert_org_membership(
+    conn: sqlite3.Connection, login: str, org: str, membership: dict, now: int,
+) -> None:
+    conn.execute(
+        "INSERT INTO org_memberships (login, org, teams_json, fetched_at) "
+        "VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(login, org) DO UPDATE SET "
+        "  teams_json = excluded.teams_json, "
+        "  fetched_at = excluded.fetched_at",
+        (login, org,
+         json.dumps(membership["teams"]) if membership.get("teams") else None,
+         now),
+    )
+
+
+def _resolve_cached_token() -> str | None:
+    """Token lookup for cache-fill paths that don't have one threaded in
+    (the AI judge call chain). Matches auth.get_token's precedence —
+    GITHUB_TOKEN env, then the stored OAuth token — but never triggers the
+    interactive device flow. None means "no token available, skip the call"."""
+    if t := os.environ.get("GITHUB_TOKEN"):
+        return t.strip()
+    return oauth.load_stored_token()
+
+
+def _is_bot_login(login: str) -> bool:
+    """GitHub renders bot logins with a `[bot]` suffix everywhere they
+    surface in API responses — `dependabot[bot]`, `github-actions[bot]`,
+    `renovate[bot]`. The GraphQL `user(login:)` query returns null for
+    these because their type is `Bot`, not `User`, so we short-circuit
+    rather than fetch and discard."""
+    return login.endswith("[bot]")
+
+
+def ensure_user_fresh(
+    conn: sqlite3.Connection, login: str,
+    *, token: str | None = None,
+    ttl: int = USER_PROFILE_TTL_SECONDS,
+) -> None:
+    """No-op when the login is fresh inside the TTL. Otherwise fetches and
+    upserts. `token` is optional: resolved from env / stored OAuth when
+    omitted so AI callers don't have to plumb it through. Swallows network
+    errors (logged) — a stale cache is better than a failed judgment."""
+    if not login or _user_is_fresh(conn, login, ttl):
+        return
+    if _is_bot_login(login):
+        # Bots aren't resolvable via user(login:) — skip the GraphQL hop
+        # and stamp a minimal row so the AI sees is_bot=1 next time it
+        # reads the cache, and the TTL suppresses the lookup.
+        conn.execute(
+            "INSERT INTO people (login, fetched_at, is_bot) VALUES (?, ?, 1) "
+            "ON CONFLICT(login) DO UPDATE SET "
+            "  fetched_at = excluded.fetched_at, "
+            "  is_bot     = 1",
+            (login, int(time.time())),
+        )
+        return
+    tok = token or _resolve_cached_token()
+    if not tok:
+        return
+    try:
+        profile, _ = fetch_user_profile(tok, login, org=None)
+    except (requests.RequestException, ValueError) as e:
+        log.warning("ensure_user_fresh: %s (%s)", login, e)
+        return
+    _upsert_user_profile(conn, login, profile, int(time.time()))
+
+
+def ensure_org_membership_fresh(
+    conn: sqlite3.Connection, login: str, org: str,
+    *, token: str | None = None,
+    ttl: int = USER_PROFILE_TTL_SECONDS,
+) -> None:
+    """Combined fetch: refreshes the user profile too if it's stale, since
+    `fetch_user_profile(..., org=...)` returns both in one roundtrip."""
+    if not login or not org:
+        return
+    user_fresh = _user_is_fresh(conn, login, ttl)
+    org_fresh = _org_membership_is_fresh(conn, login, org, ttl)
+    if user_fresh and org_fresh:
+        return
+    # Bots aren't org members; skip the call but still stamp the tombstone
+    # so we don't re-check every judgment. Both the login-suffix heuristic
+    # and a cached is_bot row count.
+    bot = _is_bot_login(login)
+    if not bot:
+        row = conn.execute(
+            "SELECT is_bot FROM people WHERE login = ?", (login,),
+        ).fetchone()
+        bot = bool(row and row["is_bot"])
+    if bot:
+        # Ensure the people row exists too (with is_bot=1) so the AI side
+        # doesn't try to render a stranger entry from a missing cache.
+        ensure_user_fresh(conn, login, token=token, ttl=ttl)
+        _upsert_org_membership(
+            conn, login, org, {"teams": []}, int(time.time()),
+        )
+        return
+    tok = token or _resolve_cached_token()
+    if not tok:
+        return
+    try:
+        profile, membership = fetch_user_profile(tok, login, org=org)
+    except (requests.RequestException, ValueError) as e:
+        log.warning("ensure_org_membership_fresh: %s @ %s (%s)", login, org, e)
+        return
+    now = int(time.time())
+    if not user_fresh:
+        _upsert_user_profile(conn, login, profile, now)
+    if membership is not None:
+        _upsert_org_membership(conn, login, org, membership, now)
 
 
 def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:

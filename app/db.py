@@ -368,6 +368,33 @@ UPDATE thread_events
 """
 
 
+# Identity cache for AI credibility signal. The AI already sees `login` +
+# `author_association` per comment/review, but it can't tell a 2-week-old
+# account from a 10-year veteran or spot a repo-org maintainer hidden among
+# strangers. Extends `people` (which already exists for avatar/note/tracked)
+# with cached profile fields refreshed on a 7d TTL — `fetched_at` is wall-
+# clock anchored, distinct from `last_seen_at` ("when did we last see this
+# login in a thread"). Adds `org_memberships` keyed on (login, org) for the
+# per-repo-owner role + team slugs, which the user-global block can't carry.
+# See github.fetch_user_profile / ensure_user_fresh / ensure_org_membership_fresh.
+SCHEMA_V31 = """
+ALTER TABLE people ADD COLUMN fetched_at INTEGER;
+ALTER TABLE people ADD COLUMN bio TEXT;
+ALTER TABLE people ADD COLUMN company TEXT;
+ALTER TABLE people ADD COLUMN account_created_at TEXT;
+ALTER TABLE people ADD COLUMN followers INTEGER;
+ALTER TABLE people ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS org_memberships (
+    login       TEXT NOT NULL,
+    org         TEXT NOT NULL,
+    teams_json  TEXT,
+    fetched_at  INTEGER NOT NULL,
+    PRIMARY KEY (login, org)
+);
+"""
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, isolation_level=None, check_same_thread=False)
@@ -501,6 +528,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V30)
             _set_version(conn, 30)
             version = 30
+        if version < 31:
+            conn.executescript(SCHEMA_V31)
+            _set_version(conn, 31)
+            version = 31
     finally:
         conn.close()
 
