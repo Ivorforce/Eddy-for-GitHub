@@ -872,6 +872,19 @@ _LIFECYCLE_LABEL = {
 }
 
 
+# Thread-creation verb by subject type. The synthetic "Created" lifecycle
+# event _build_timeline prepends to anchor the chronology — see
+# `_synthesize_created_event`. Not a real `_LIFECYCLE_LABEL` action (this
+# event never lands in `thread_events`); the synthesizer wires the verb
+# directly onto the dict.
+_CREATED_VERB = {
+    "PullRequest": "opened this PR",
+    "Issue":       "opened this issue",
+    "Discussion":  "started this discussion",
+    "Release":     "published this release",
+}
+
+
 def _verdict_render_dict(
     payload: dict, *, cur_repo: str | None = None,
     tracked_people=frozenset(), notes_people: dict | None = None,
@@ -1506,6 +1519,43 @@ def _recency_summary(
     return {"text": Markup(", ").join(parts), "tip_html": tip_html}
 
 
+def _synthesize_created_event(
+    *, details: dict, now: int, user_login: str | None,
+    tracked_people, author_assocs: dict,
+) -> dict | None:
+    """View-only "Created" entry derived from the thread's own created_at +
+    author. Not stored in thread_events (the AI already gets created_at and
+    body in its context block — a synthetic event would duplicate that), but
+    rendered at the top of the popover timeline as a chronology anchor so
+    the first real event doesn't sit unmoored. Returns None when the row's
+    details_json lacks the bits we'd need (synthetic backfill rows, mostly)."""
+    at_ts = db.iso_to_unix(details.get("created_at"))
+    author = ((details.get("user") or {}).get("login")) or None
+    if at_ts is None or not author:
+        return None
+    subject_type = details.get("type") or ""
+    verb = _CREATED_VERB.get(subject_type, "created this thread")
+    assoc = details.get("author_association")
+    badge = (
+        _author_badge_class(author, assoc, user_login)
+        if assoc or (user_login and author == user_login)
+        else (author_assocs.get(author) or {}).get("badge_class")
+            or _author_badge_class(author, None, user_login)
+    )
+    return {
+        "kind":               "lifecycle",
+        "source":             "github",
+        "at_ts":              at_ts,
+        "age_text":           _humanize_age(now - at_ts),
+        "payload":            {"actor": author, "action": "opened"},
+        "actor":              author,
+        "author_badge_class": badge,
+        "is_tracked":         author in (tracked_people or ()),
+        "lifecycle_verb":     verb,
+        "lifecycle_class":    "lifecycle-neutral",
+    }
+
+
 def _build_timeline(
     thread_id: str, conn: sqlite3.Connection, *,
     cur_repo: str | None = None,
@@ -1530,14 +1580,15 @@ def _build_timeline(
         "SELECT details_json FROM notifications WHERE id = ?",
         (thread_id,),
     ).fetchone()
+    details: dict = {}
     row_author = row_assoc = None
     if nrow and nrow["details_json"]:
         try:
-            details = json.loads(nrow["details_json"])
+            details = json.loads(nrow["details_json"]) or {}
             row_author = ((details.get("user") or {}).get("login")) or None
             row_assoc = details.get("author_association") or None
         except (ValueError, TypeError):
-            pass
+            details = {}
     now = int(time.time())
     user_login = app.config.get("USER_LOGIN")
     author_assocs = _build_author_roster(
@@ -1551,6 +1602,12 @@ def _build_timeline(
         )
         for r in rows
     ]
+    created_event = _synthesize_created_event(
+        details=details, now=now, user_login=user_login,
+        tracked_people=tracked_people, author_assocs=author_assocs,
+    )
+    if created_event is not None:
+        timeline.insert(0, created_event)
     # Order matters: every step that drops events runs before _coalesce_comments,
     # so a "judge after every comment" or "click through, mark read, archive"
     # workflow renders as one comment group rather than N chunks split around
