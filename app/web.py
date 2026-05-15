@@ -938,7 +938,13 @@ def _coalesce_recurring_actions(events: list[dict]) -> list[dict]:
     """For each action in _RECURRING_ACTIONS, keep only its latest occurrence
     in the whole timeline. The AI still sees every occurrence (raw
     thread_events); this only thins the visual popover. Events arrive
-    chronologically, so the last occurrence per kind is the newest."""
+    chronologically, so the last occurrence per kind is the newest.
+
+    Special case: a `visited` event eclipses any earlier `read` —
+    `visited` is the stronger engagement signal, and a later visit
+    contradicts the "dismissed without looking" framing of the earlier
+    read. (A `read` *after* a `visited` does survive — "saw it, then
+    later actively dismissed it" is two distinct facts.)"""
     latest_idx: dict[str, int] = {}
     for i, ev in enumerate(events):
         if ev.get("kind") != "user_action":
@@ -947,6 +953,11 @@ def _coalesce_recurring_actions(events: list[dict]) -> list[dict]:
         if action in _RECURRING_ACTIONS:
             bucket = _RECURRING_ACTION_BUCKET.get(action, action)
             latest_idx[bucket] = i
+    if (
+        "visited" in latest_idx and "read" in latest_idx
+        and latest_idx["read"] < latest_idx["visited"]
+    ):
+        del latest_idx["read"]
     keep = set(latest_idx.values())
     def is_superseded(i: int, ev: dict) -> bool:
         if ev.get("kind") != "user_action":
