@@ -9,3 +9,4 @@ config/preferences.md
 config/settings.toml
 CLAUDE.md
 .claude/
+.idea
