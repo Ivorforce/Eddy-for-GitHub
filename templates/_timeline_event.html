@@ -58,7 +58,7 @@
   {% elif ev.kind == 'comment' %}
     <div class="timeline-line">
       <span class="timeline-summary">
-        {{ author_chip(ev.actor, ev.author_badge_class, ev.payload.author_association or '', ev.is_tracked) }}
+        {{ author_chip(ev.actor, ev.author_badge_class, ev.author_assoc or '', ev.is_tracked) }}
         {{ ev.summary }}
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
@@ -66,14 +66,14 @@
   {% elif ev.kind == 'review' %}
     <div class="timeline-line">
       <span class="timeline-summary">
-        {{ author_chip(ev.actor, ev.author_badge_class, ev.payload.author_association or '', ev.is_tracked) }}: <span class="review-state {{ ev.review_state_class }}">{{ ev.review_state_label }}</span>
+        {{ author_chip(ev.actor, ev.author_badge_class, ev.author_assoc or '', ev.is_tracked) }}: <span class="review-state {{ ev.review_state_class }}">{{ ev.review_state_label }}</span>
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
   {% elif ev.kind == 'lifecycle' %}
     <div class="timeline-line">
       <span class="timeline-summary">
-        {{ author_chip(ev.actor, ev.author_badge_class, '', ev.is_tracked) }}
+        {{ author_chip(ev.actor, ev.author_badge_class, ev.author_assoc or '', ev.is_tracked) }}
         <span class="lifecycle-verb {{ ev.lifecycle_class }}">{{ ev.lifecycle_verb }}</span>
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
@@ -95,7 +95,7 @@
        roster in _format_event_for_render. #}
     <div class="timeline-line">
       <span class="timeline-summary">
-        {{ author_chip(ev.actor, ev.author_badge_class, '', ev.is_tracked) }}
+        {{ author_chip(ev.actor, ev.author_badge_class, ev.author_assoc or '', ev.is_tracked) }}
         {{ ev.summary }}
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>

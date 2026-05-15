@@ -319,6 +319,26 @@ def _author_badge_class(login: str | None, assoc: str | None, user_login: str | 
     return badge[0] if badge else ""
 
 
+# Per-login precedence for resolving "what association best describes this
+# user on this thread". GitHub stamps author_association on each comment /
+# review independently, and a single low-signal observation (e.g. NONE on
+# one stray comment, while a sibling review carries MEMBER) shouldn't
+# downgrade the badge. Higher rank wins; ties keep whichever was already
+# stored. Anything unlisted ranks 0 (treated as no signal).
+_ASSOC_RANK = {
+    "OWNER":                  5,
+    "MEMBER":                 4,
+    "COLLABORATOR":           3,
+    "FIRST_TIMER":            2,
+    "FIRST_TIME_CONTRIBUTOR": 2,
+    "CONTRIBUTOR":            1,
+}
+
+
+def _assoc_rank(assoc: str | None) -> int:
+    return _ASSOC_RANK.get((assoc or "").upper(), 0)
+
+
 def _build_author_roster(
     events, *, row_author: str | None = None, row_assoc: str | None = None,
     user_login: str | None = None,
@@ -327,13 +347,13 @@ def _build_author_roster(
 
     Backfills author_association onto logins that appear elsewhere on the
     thread without it (most notably @mentions inside body text, which
-    GitHub never decorates with an association). Sources, in precedence
-    order:
+    GitHub never decorates with an association). For each login we keep
+    the strongest-seen assoc by `_ASSOC_RANK` — a stray low-signal
+    observation can't downgrade a badge the same user earned on a
+    sibling event. Sources:
 
       1. user_login → always 'self' (wins over anything else).
       2. comment / review events: payload.author + payload.author_association.
-         Last-write-wins, since associations rarely flip and a recent
-         observation is the freshest signal.
       3. The notification row's author + author_assoc, as a fallback.
 
     `events` is the iterable of sqlite Row / dict-likes carrying `kind`
@@ -343,6 +363,9 @@ def _build_author_roster(
 
     def _add(login: str | None, assoc: str | None) -> None:
         if not login:
+            return
+        cur = roster.get(login)
+        if cur and _assoc_rank(cur["assoc"]) >= _assoc_rank(assoc):
             return
         roster[login] = {
             "assoc": assoc or "",
@@ -368,6 +391,29 @@ def _build_author_roster(
     if user_login:
         roster[user_login] = {"assoc": "", "badge_class": "self"}
     return roster
+
+
+def _chip_from_roster(
+    login: str | None, *,
+    roster: dict, user_login: str | None,
+    event_assoc: str | None = None,
+) -> tuple[str, str]:
+    """Single source of truth for "what badge and assoc tooltip should this
+    author render with, on this thread". Combines the per-event assoc with
+    the thread roster's strongest-seen, taking the higher-ranked of the
+    two. Returns (badge_class, resolved_assoc) — `resolved_assoc` is the
+    string the template hands to author_badge_svg for its tooltip, so
+    badge and tooltip stay consistent."""
+    if user_login and login == user_login:
+        return "self", ""
+    if not login:
+        return "", ""
+    roster_assoc = (roster.get(login) or {}).get("assoc") or ""
+    if _assoc_rank(event_assoc) > _assoc_rank(roster_assoc):
+        best = event_assoc or ""
+    else:
+        best = roster_assoc
+    return _author_badge_class(login, best, user_login), best
 
 # GitHub reaction emoji buckets. Same user can react with multiple positives;
 # max() approximates a lower bound on distinct users in that sentiment bucket
@@ -1268,13 +1314,10 @@ def _format_event_for_render(
     def _is_tracked(login: str | None) -> bool:
         return bool(login) and login in (tracked_people or ())
 
-    def _badge_from_roster(login: str | None, assoc: str | None) -> str:
-        """Prefer the event's own association; fall back to roster lookup
-        for kinds that don't carry one (body_edit / code / lifecycle)."""
-        if assoc or (user_login and login == user_login):
-            return _author_badge_class(login, assoc, user_login)
-        info = roster.get(login or "") or {}
-        return info.get("badge_class") or _author_badge_class(login, None, user_login)
+    def _chip(login: str | None, event_assoc: str | None = None) -> tuple[str, str]:
+        return _chip_from_roster(
+            login, roster=roster, user_login=user_login, event_assoc=event_assoc,
+        )
 
     out: dict = {
         "kind":     kind,
@@ -1287,17 +1330,17 @@ def _format_event_for_render(
     if kind == "comment":
         author = payload.get("author") or "?"
         out["actor"] = author
-        out["author_badge_class"] = _author_badge_class(
-            author, payload.get("author_association"), user_login,
-        )
+        badge, assoc = _chip(author, payload.get("author_association"))
+        out["author_badge_class"] = badge
+        out["author_assoc"] = assoc
         out["is_tracked"] = _is_tracked(author)
         out["summary"] = "commented"
     elif kind == "review":
         author = payload.get("author") or "?"
         out["actor"] = author
-        out["author_badge_class"] = _author_badge_class(
-            author, payload.get("author_association"), user_login,
-        )
+        badge, assoc = _chip(author, payload.get("author_association"))
+        out["author_badge_class"] = badge
+        out["author_assoc"] = assoc
         out["is_tracked"] = _is_tracked(author)
         state = (payload.get("state") or "").upper()
         label, cls = _REVIEW_STATE.get(state, (state.title() or "Reviewed", ""))
@@ -1313,10 +1356,11 @@ def _format_event_for_render(
         actor = payload.get("actor") or "?"
         out["actor"] = actor
         # Lifecycle events come from GraphQL timelineItems and don't
-        # carry author_association, so the chip falls through to the
-        # generic icon — unless the actor also commented on this thread
-        # (roster backfill) or is the user (self).
-        out["author_badge_class"] = _badge_from_roster(actor, None)
+        # carry author_association, so the chip falls back to the
+        # roster's strongest-seen assoc (or 'self' when it's the user).
+        badge, assoc = _chip(actor)
+        out["author_badge_class"] = badge
+        out["author_assoc"] = assoc
         out["is_tracked"] = _is_tracked(actor)
         action = payload.get("action") or "?"
         verb, cls = _LIFECYCLE_LABEL.get(action, (action, ""))
@@ -1342,13 +1386,17 @@ def _format_event_for_render(
     elif kind == "body_edit":
         editor = payload.get("editor") or "?"
         out["actor"] = editor
-        out["author_badge_class"] = _badge_from_roster(editor, None)
+        badge, assoc = _chip(editor)
+        out["author_badge_class"] = badge
+        out["author_assoc"] = assoc
         out["is_tracked"] = _is_tracked(editor)
         out["summary"] = "edited the description"
     elif kind == "code":
         actor = payload.get("author") or "?"
         out["actor"] = actor
-        out["author_badge_class"] = _badge_from_roster(actor, None)
+        badge, assoc = _chip(actor)
+        out["author_badge_class"] = badge
+        out["author_assoc"] = assoc
         out["is_tracked"] = _is_tracked(actor)
         adds = payload.get("additions")
         dels = payload.get("deletions")
@@ -1535,12 +1583,9 @@ def _synthesize_created_event(
         return None
     subject_type = details.get("type") or ""
     verb = _CREATED_VERB.get(subject_type, "created this thread")
-    assoc = details.get("author_association")
-    badge = (
-        _author_badge_class(author, assoc, user_login)
-        if assoc or (user_login and author == user_login)
-        else (author_assocs.get(author) or {}).get("badge_class")
-            or _author_badge_class(author, None, user_login)
+    badge, assoc = _chip_from_roster(
+        author, roster=author_assocs, user_login=user_login,
+        event_assoc=details.get("author_association"),
     )
     return {
         "kind":               "lifecycle",
@@ -1550,6 +1595,7 @@ def _synthesize_created_event(
         "payload":            {"actor": author, "action": "opened"},
         "actor":              author,
         "author_badge_class": badge,
+        "author_assoc":       assoc,
         "is_tracked":         author in (tracked_people or ()),
         "lifecycle_verb":     verb,
         "lifecycle_class":    "lifecycle-neutral",
