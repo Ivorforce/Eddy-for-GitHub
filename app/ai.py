@@ -685,7 +685,7 @@ def _build_involved_people(
     for login in logins:
         person = conn.execute(
             "SELECT bio, company, account_created_at, followers, is_bot, "
-            "       ai_summary_tag, ai_summary_at "
+            "       ai_summary_tag, ai_summary_body, ai_summary_at "
             "  FROM people WHERE login = ?",
             (login,),
         ).fetchone()
@@ -701,10 +701,13 @@ def _build_involved_people(
             and (int(now_unix) - int(person["ai_summary_at"])) < _USER_TRIAGE_TTL_SECONDS
         )
         if summary_fresh:
-            # AI summary takes over the soft credibility fields. The
-            # popover still shows the raw fields to the human; only the
-            # prompt sees just the tag.
+            # AI summary takes over the soft credibility fields. Both the
+            # categorical `tag` and the sentence `summary` go in — the
+            # tag is the at-a-glance bucket and the summary carries the
+            # specific activity / context the tag flattens out.
             entry["tag"] = person["ai_summary_tag"]
+            if person["ai_summary_body"]:
+                entry["summary"] = person["ai_summary_body"]
         else:
             if person["bio"]:
                 entry["bio"] = person["bio"]
