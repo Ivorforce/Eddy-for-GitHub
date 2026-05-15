@@ -2340,6 +2340,90 @@ def fetch_repo_triage_inputs(
     return out
 
 
+# Owner-kind probe. Cheap one-field query against the `repositoryOwner`
+# interface — returns `User` or `Organization` (or null for an unknown
+# login). The row template + popover endpoints branch on this so a
+# user-owned repo (e.g. `spensbot/foo`) renders as a person chip going
+# through user-triage instead of failing the org-triage fetch silently.
+_OWNER_KIND_QUERY = (
+    "query($login: String!) { repositoryOwner(login: $login) { __typename } }"
+)
+
+# 30-day TTL on the kind cache — accounts very rarely change between User
+# and Organization, and when they do (rare flip events) a manual refresh
+# is fine. Long TTL keeps row-load latency low.
+_OWNER_KIND_TTL_SECONDS = 30 * 24 * 3600
+
+
+def fetch_owner_kind(token: str, login: str) -> str | None:
+    """Probe whether `login` is a User or an Organization. Returns
+    "User" / "Organization" / None (login doesn't exist or invisible)."""
+    if not login:
+        return None
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    r = _session.post(
+        _GRAPHQL_URL, headers=headers,
+        json={"query": _OWNER_KIND_QUERY, "variables": {"login": login}},
+        timeout=10,
+    )
+    r.raise_for_status()
+    owner = ((r.json() or {}).get("data") or {}).get("repositoryOwner")
+    if not owner:
+        return None
+    typename = owner.get("__typename")
+    if typename in ("User", "Organization"):
+        return typename
+    return None
+
+
+def get_owner_kind(conn: sqlite3.Connection, login: str) -> str | None:
+    """Return the cached owner-kind for `login`, or None when uncached /
+    stale. Doesn't probe — caller decides whether to call
+    `ensure_owner_kind` to refresh."""
+    if not login:
+        return None
+    row = conn.execute(
+        "SELECT kind, fetched_at FROM repo_owners WHERE login = ?", (login,),
+    ).fetchone()
+    if not row:
+        return None
+    if (int(time.time()) - int(row["fetched_at"])) >= _OWNER_KIND_TTL_SECONDS:
+        return None
+    return row["kind"]
+
+
+def ensure_owner_kind(
+    conn: sqlite3.Connection, login: str,
+    *, token: str | None = None,
+) -> str | None:
+    """Resolve and cache the owner-kind for `login` if not already fresh.
+    Returns the kind ("User" / "Organization") or None on failure. Network
+    errors are swallowed (logged) — caller falls back to the org-shaped
+    default render."""
+    if not login:
+        return None
+    cached = get_owner_kind(conn, login)
+    if cached is not None:
+        return cached
+    tok = token or _resolve_cached_token()
+    if not tok:
+        return None
+    try:
+        kind = fetch_owner_kind(tok, login)
+    except (requests.RequestException, ValueError) as e:
+        log.warning("ensure_owner_kind: %s (%s)", login, e)
+        return None
+    if kind is None:
+        return None
+    conn.execute(
+        "INSERT INTO repo_owners (login, kind, fetched_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(login) DO UPDATE SET "
+        "  kind = excluded.kind, fetched_at = excluded.fetched_at",
+        (login, kind, int(time.time())),
+    )
+    return kind
+
+
 def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
     """Fetch full details for up to ENRICHMENT_PER_POLL notifications that need it.
 

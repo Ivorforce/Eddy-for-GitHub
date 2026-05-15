@@ -1756,6 +1756,7 @@ def _row_to_dict(
     last_engaged_at: int | None = None,
     events: list | None = None,
     triage_mode: str | None = None,
+    owner_kinds: dict[str, str] | None = None,
 ) -> dict:
     d = dict(row)
     details_json = d.pop("details_json", None)
@@ -1858,10 +1859,21 @@ def _row_to_dict(
     d["author_badge_label"] = badge[1] if badge else ""
     d["author_is_tracked"] = bool(tracked_people) and d["author_login"] in (tracked_people or set())
     d["repo_is_tracked"] = d["repo"] in (tracked_repos or set())
-    d["org_is_tracked"] = bool(repo_owner) and repo_owner in (tracked_orgs or set())
     d["author_note"] = (notes_people or {}).get(d["author_login"]) if d["author_login"] else None
     d["repo_note"] = (notes_repos or {}).get(d["repo"])
-    d["org_note"] = (notes_orgs or {}).get(repo_owner) if repo_owner else None
+    # Repo-owner kind drives where org_* fields source their data: when
+    # the owner is a User (e.g. `spensbot/foo`), notes + tracked state
+    # live on `people`, not `orgs`, and the chip / popover route to the
+    # /user / /people endpoints. Unknown kind (probe failed or DB-fresh)
+    # defaults to Organization shape — same behaviour as before this
+    # change for any owner we haven't yet resolved.
+    d["owner_kind"] = (owner_kinds or {}).get(repo_owner) if repo_owner else None
+    if repo_owner and d["owner_kind"] == "User":
+        d["org_is_tracked"] = repo_owner in (tracked_people or set())
+        d["org_note"] = (notes_people or {}).get(repo_owner)
+    else:
+        d["org_is_tracked"] = bool(repo_owner) and repo_owner in (tracked_orgs or set())
+        d["org_note"] = (notes_orgs or {}).get(repo_owner) if repo_owner else None
 
     # Cached AI verdict (None if Ask AI hasn't been run on this row).
     # author_assocs roster lets a verdict description's @mentions pick up
@@ -2019,6 +2031,20 @@ def _load_notifications(show_archived: bool = True):
         ).fetchall()
         events_by_thread = _load_pill_events(conn, [r["id"] for r in rows])
         mention_at, engaged_at = _engagement_timestamps(events_by_thread)
+
+        # Resolve each unique repo_owner's kind (User vs Organization) so
+        # the row template can route the owner chip + popover to the right
+        # endpoints. Sequential probes — only fires on cache-miss, and the
+        # cache TTL is 30 days, so the first-load-after-fresh-DB cost is
+        # one-time. After that this is a zero-network O(n) lookup.
+        owners = {r["repo"].partition("/")[0] for r in rows if r["repo"]}
+        owners.discard("")
+        owner_kinds: dict[str, str] = {}
+        for o in owners:
+            kind = github.ensure_owner_kind(conn, o)
+            if kind:
+                owner_kinds[o] = kind
+
         # The timeline popover's event list is fetched lazily (GET /timeline
         # /<id> on open) — see _build_timeline. Eagerly attach only the cheap
         # verdict-derived bits the row itself shows (pill recency, re-run state).
@@ -2031,6 +2057,7 @@ def _load_notifications(show_archived: bool = True):
                 last_engaged_at=engaged_at.get(r["id"]),
                 events=evs,
                 triage_mode=triage_mode,
+                owner_kinds=owner_kinds,
             )
             _attach_pill_status(d, evs)
             out.append(d)

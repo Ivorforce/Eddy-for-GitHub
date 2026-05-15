@@ -15,23 +15,35 @@
       {# Entity name doubles as anchor + popover trigger. Plain left-click opens
          the popover (intercepted in JS); middle/cmd-click navigates as a normal
          <a> link, opening GitHub in a new tab. #}
+      {# Repo-owner chip: routes through /orgs/* for Organization owners
+         and /people/* for User owners. owner_kind unknown → defaults to
+         the Organization shape (same as before this branch existed). The
+         popover ID stays `pop-org-{{ n.id }}` for both kinds so the JS /
+         CSS anchor positioning doesn't need to know. data-kind reflects
+         the actual entity kind so cross-row track/note sync routes to
+         the right [data-tracked-trigger] queries. #}
+      {% set _owner_is_user = n.owner_kind == "User" %}
+      {% set _owner_kind_str = "person" if _owner_is_user else "org" %}
+      {% set _owner_track_url = "/people/" ~ n.repo_owner ~ "/track" if _owner_is_user else "/orgs/" ~ n.repo_owner ~ "/track" %}
+      {% set _owner_note_url = "/people/" ~ n.repo_owner ~ "/note" if _owner_is_user else "/orgs/" ~ n.repo_owner ~ "/note" %}
+      {% set _owner_summary_url = "/user/" ~ n.repo_owner ~ "/summary" if _owner_is_user else "/orgs/" ~ n.repo_owner ~ "/summary" %}
       <a class="repo-owner entity-trigger{% if n.org_is_tracked %} is-tracked{% endif %}{% if n.org_note %} has-note{% endif %}"
          href="https://github.com/{{ n.repo_owner }}"
          target="_blank" rel="noopener"
          data-popover-target="pop-org-{{ n.id }}"
-         data-tracked-trigger data-kind="org" data-key="{{ n.repo_owner }}"
+         data-tracked-trigger data-kind="{{ _owner_kind_str }}" data-key="{{ n.repo_owner }}"
          {% if n.org_note %}title="{{ n.org_note }}"{% endif %}
          style="anchor-name: --pop-org-{{ n.id }}">{{ n.repo_owner }}</a>
       <div class="action-popover" popover id="pop-org-{{ n.id }}"
-           data-kind="org" data-thread-id="{{ n.id }}"
+           data-kind="{{ _owner_kind_str }}" data-thread-id="{{ n.id }}"
            style="position-anchor: --pop-org-{{ n.id }}">
-        <div class="popover-title"><span class="popover-kind">org</span> <a class="popover-name" href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a></div>
+        <div class="popover-title"><span class="popover-kind">{{ "user" if _owner_is_user else "org" }}</span> <a class="popover-name" href="https://github.com/{{ n.repo_owner }}" target="_blank" rel="noopener">{{ n.repo_owner }}</a></div>
         <div class="entity-summary"
-             hx-get="/orgs/{{ n.repo_owner }}/summary"
+             hx-get="{{ _owner_summary_url }}"
              hx-trigger="toggle[newState=='open'] from:#pop-org-{{ n.id }} once"
              hx-target="this" hx-swap="innerHTML"></div>
         <button type="button" class="popover-track-btn"
-                hx-post="/orgs/{{ n.repo_owner }}/track"
+                hx-post="{{ _owner_track_url }}"
                 hx-vals='{"thread_id": "{{ n.id }}"}'
                 hx-target="closest tr"
                 hx-swap="outerHTML"><svg class="track-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-track"/></svg>{% if n.org_is_tracked %}Untrack{% else %}Track{% endif %}</button>
@@ -39,7 +51,7 @@
            focus as Safari's autofill scanned _logicalFormsInPage across ~1000+
            inner forms. hx-post on the textarea works the same. #}
         <textarea name="note_user" rows="3"
-                  hx-post="/orgs/{{ n.repo_owner }}/note"
+                  hx-post="{{ _owner_note_url }}"
                   hx-trigger="keyup changed delay:600ms, blur"
                   hx-swap="none"
                   placeholder="Note about {{ n.repo_owner }} (saved automatically)…">{{ n.org_note or '' }}</textarea>

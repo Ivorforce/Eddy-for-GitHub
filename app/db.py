@@ -434,6 +434,23 @@ ALTER TABLE repos ADD COLUMN ai_summary_model TEXT;
 """
 
 
+# Repo-owner kind cache. GitHub allows both Users and Organizations to
+# own repos; the "owner" chip in our row currently treats every owner as
+# an Org, which silently fails when the owner is actually a User (the
+# `organization(login:)` GraphQL query returns null, the org-triage call
+# no-ops). Lookup-then-cache here, resolved lazily on row load; the
+# template + popover then route to the right table + endpoints (orgs vs
+# people, org-triage vs user-triage) based on kind. See
+# github.ensure_owner_kind.
+SCHEMA_V34 = """
+CREATE TABLE IF NOT EXISTS repo_owners (
+    login       TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL,        -- 'User' or 'Organization'
+    fetched_at  INTEGER NOT NULL
+);
+"""
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, isolation_level=None, check_same_thread=False)
@@ -579,6 +596,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V33)
             _set_version(conn, 33)
             version = 33
+        if version < 34:
+            conn.executescript(SCHEMA_V34)
+            _set_version(conn, 34)
+            version = 34
     finally:
         conn.close()
 

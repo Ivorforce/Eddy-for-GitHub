@@ -848,16 +848,27 @@ def _load_thread_context(
     }
     activity = {k: v for k, v in activity.items() if v not in (None, [], False)}
 
-    # AI entity-triage gate for repo + org. Per-user triages happen later
-    # inside `_build_involved_people`; lifting org/repo up here means the
-    # entities-block SELECTs below see fresh summaries when warm. Two
-    # parallel single-call refreshes; the daily cap is the brake.
+    # AI entity-triage gate for repo + owner. Per-user triages happen
+    # later inside `_build_involved_people`; lifting repo + owner up here
+    # means the entities-block SELECTs below see fresh summaries when
+    # warm. When the repo's owner is a User (not an Organization), the
+    # owner-triage routes through user-triage instead — same kind of
+    # entity as a participant, just sourced from the repo metadata.
+    owner_kind = github.ensure_owner_kind(conn, repo_owner) if repo_owner else None
     if settings.get("ai_entity_triage"):
         stale_entities: list[tuple[str, str]] = []
-        if repo_owner and not _summary_is_fresh(
-            conn, "org_triage", repo_owner, _USER_TRIAGE_TTL_SECONDS
-        ):
-            stale_entities.append(("org_triage", repo_owner))
+        if repo_owner:
+            if owner_kind == "User":
+                if not _summary_is_fresh(
+                    conn, "user_triage", repo_owner, _USER_TRIAGE_TTL_SECONDS
+                ):
+                    stale_entities.append(("user_triage", repo_owner))
+            else:
+                # Organization (or kind unknown — try the org path).
+                if not _summary_is_fresh(
+                    conn, "org_triage", repo_owner, _USER_TRIAGE_TTL_SECONDS
+                ):
+                    stale_entities.append(("org_triage", repo_owner))
         if repo and not _summary_is_fresh(
             conn, "repo_triage", repo, _USER_TRIAGE_TTL_SECONDS
         ):
@@ -869,6 +880,8 @@ def _load_thread_context(
                     try:
                         if kind == "org_triage":
                             ensure_org_triaged(wconn, key)
+                        elif kind == "user_triage":
+                            ensure_user_triaged(wconn, key)
                         else:
                             ensure_repo_triaged(wconn, key)
                     finally:
@@ -919,17 +932,32 @@ def _load_thread_context(
                 rentry["summary"] = rrow["ai_summary_body"]
         entities["repo"] = rentry
     if repo_owner:
-        orow = conn.execute(
-            "SELECT name, is_tracked, note_user, ai_summary_tag, "
-            "       ai_summary_body, ai_summary_at "
-            "  FROM orgs WHERE name = ?",
-            (repo_owner,),
-        ).fetchone()
+        # When the repo's owner is a User account (not an Organization),
+        # source the entity from `people` — same login, same triage
+        # cache the user-triage path writes to. The slot is still keyed
+        # `entities.org` for the prompt's convenience; `kind: "user"`
+        # tells the AI that the org-slot is really a user-as-owner.
+        if owner_kind == "User":
+            orow = conn.execute(
+                "SELECT login AS name, is_tracked, note_user, ai_summary_tag, "
+                "       ai_summary_body, ai_summary_at "
+                "  FROM people WHERE login = ?",
+                (repo_owner,),
+            ).fetchone()
+        else:
+            orow = conn.execute(
+                "SELECT name, is_tracked, note_user, ai_summary_tag, "
+                "       ai_summary_body, ai_summary_at "
+                "  FROM orgs WHERE name = ?",
+                (repo_owner,),
+            ).fetchone()
         oentry: dict = {
             "name": repo_owner,
             "is_tracked": bool(orow and orow["is_tracked"]),
             "note_user": (orow["note_user"] if orow else None) or None,
         }
+        if owner_kind == "User":
+            oentry["kind"] = "user"
         if orow and _is_fresh_at(orow["ai_summary_at"]) and orow["ai_summary_tag"]:
             oentry["tag"] = orow["ai_summary_tag"]
             if orow["ai_summary_body"]:
