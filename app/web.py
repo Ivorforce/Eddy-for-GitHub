@@ -601,39 +601,17 @@ def _split_repo(repo: str) -> tuple[str, str]:
 def _action_needed(
     details: dict, repo_owner: str, current_reason: str, seen: set[str]
 ) -> str | None:
-    """Return one of 'assigned' | 'review_you' | 'review_team' | None.
-
-    Prefers details_json (cached PR/Issue object) for accuracy. Falls back to
-    the notification reason when details aren't available yet."""
-    user_login: str | None = app.config.get("USER_LOGIN")
-    user_teams: set[tuple[str, str]] = app.config.get("USER_TEAMS") or set()
-
-    if details:
-        if user_login and any(
-            (a or {}).get("login") == user_login
-            for a in details.get("assignees") or []
-        ):
-            return "assigned"
-        if user_login and any(
-            (r or {}).get("login") == user_login
-            for r in details.get("requested_reviewers") or []
-        ):
-            return "review_you"
-        if user_teams and repo_owner:
-            for t in details.get("requested_teams") or []:
-                slug = (t or {}).get("slug")
-                if slug and (repo_owner, slug) in user_teams:
-                    return "review_team"
-        return None
-
-    # No cached details — best-effort hint from reason. We don't know you-vs-team
-    # for review_requested without details, so default to review_team (the more
-    # common case for org maintainers); enrichment will correct on next poll.
-    if "assign" in seen or current_reason == "assign":
-        return "assigned"
-    if "review_requested" in seen or current_reason == "review_requested":
-        return "review_team"
-    return None
+    """Thin wrapper around github.compute_action_needed that pulls user
+    identity from app.config. The pure function is shared with the AI /
+    poll path, which doesn't run in a Flask context."""
+    return github.compute_action_needed(
+        details=details,
+        repo_owner=repo_owner,
+        current_reason=current_reason,
+        seen=seen,
+        user_login=app.config.get("USER_LOGIN"),
+        user_teams=app.config.get("USER_TEAMS") or set(),
+    )
 
 
 def _is_author(details: dict) -> bool:

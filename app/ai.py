@@ -570,10 +570,19 @@ def _annotate_ages(node, now_unix: float) -> None:
                 node[key] = f"{val} ({_humanize_age(delta)} {'ago' if delta >= 0 else 'from now'})"
 
 
-def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | None:
+def _load_thread_context(
+    conn: sqlite3.Connection,
+    thread_id: str,
+    *,
+    user_login: str | None = None,
+    user_teams: set[tuple[str, str]] | None = None,
+) -> dict | None:
     """Build the full context dict for one thread. Returns None if not found.
     Mirrors the data web._row_to_dict surfaces in the UI, so the AI sees the
-    same picture the user does — just structured."""
+    same picture the user does — just structured. user_login / user_teams
+    drive the user-relative `activity.action_needed` derivation; with both
+    absent, that field is omitted (the model still has requested_reviewers /
+    requested_teams to reason from)."""
     row = conn.execute(
         """
         SELECT id, repo, type, title, reason, html_url, link_url,
@@ -632,10 +641,24 @@ def _load_thread_context(conn: sqlite3.Connection, thread_id: str) -> dict | Non
     if isinstance(comments, int) and isinstance(baseline, int) and comments > baseline:
         new_comments = comments - baseline
 
+    # Explicit personal-vs-team bucket. Same derivation the web UI uses for
+    # the Action column, but surfaced here so the model doesn't have to
+    # re-cross-reference user_login / user_teams against requested_reviewers /
+    # requested_teams every call. None when the user isn't directly asked.
+    action_needed = github.compute_action_needed(
+        details=details or None,
+        repo_owner=repo_owner or None,
+        current_reason=row["reason"],
+        seen=set(seen),
+        user_login=user_login,
+        user_teams=user_teams or set(),
+    )
+
     activity = {
         "baseline_comments": baseline,
         "new_comments_since_baseline": new_comments,
         "seen_reasons": seen,
+        "action_needed": action_needed,
         "mentioned_since": ("mention" in seen) or ("team_mention" in seen),
         "pr_review_state": row["pr_review_state"],
         "baseline_review_state": row["baseline_review_state"],
@@ -1126,7 +1149,9 @@ def _judge_locked(
         )
         raise AIError(msg)
 
-    ctx = _load_thread_context(conn, thread_id)
+    ctx = _load_thread_context(
+        conn, thread_id, user_login=user_login, user_teams=user_teams,
+    )
     if ctx is None:
         raise AIError(f"Thread {thread_id} not found")
     ctx["invocation_mode"] = invocation_mode

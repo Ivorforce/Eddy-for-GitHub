@@ -208,6 +208,52 @@ def derive_link_url(item: dict[str, Any]) -> str | None:
     return None
 
 
+def compute_action_needed(
+    *,
+    details: dict | None,
+    repo_owner: str | None,
+    current_reason: str | None,
+    seen: set[str],
+    user_login: str | None,
+    user_teams: set[tuple[str, str]],
+) -> str | None:
+    """Bucket a thread by the response it asks of the user — one of
+    `assigned` / `review_you` / `review_team` / None.
+
+    Prefers cached details (`details_json`) for accuracy; falls back to the
+    notification reason when details aren't available yet. Pure function —
+    takes user identity as explicit params so it can be called from web
+    routes (Flask-aware) and from the AI / poll loop (no Flask context).
+    """
+    if details:
+        if user_login and any(
+            (a or {}).get("login") == user_login
+            for a in details.get("assignees") or []
+        ):
+            return "assigned"
+        if user_login and any(
+            (r or {}).get("login") == user_login
+            for r in details.get("requested_reviewers") or []
+        ):
+            return "review_you"
+        if user_teams and repo_owner:
+            for t in details.get("requested_teams") or []:
+                slug = (t or {}).get("slug")
+                if slug and (repo_owner, slug) in user_teams:
+                    return "review_team"
+        return None
+
+    # No cached details — best-effort hint from reason. We don't know
+    # you-vs-team for review_requested without details, so default to
+    # review_team (the more common case for org maintainers); enrichment
+    # will correct on next poll.
+    if "assign" in seen or current_reason == "assign":
+        return "assigned"
+    if "review_requested" in seen or current_reason == "review_requested":
+        return "review_team"
+    return None
+
+
 def _auth_headers(token: str) -> dict[str, str]:
     return {
         "Authorization": f"token {token}",
