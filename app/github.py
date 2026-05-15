@@ -2025,7 +2025,10 @@ query($login: String!) {
                            orderBy: {field: STARGAZERS, direction: DESC}) {
       nodes { name description primaryLanguage { name } stargazerCount pushedAt }
     }
-    contributionsCollection { contributionYears }
+    contributionsCollection {
+      contributionYears
+      hasAnyContributions
+    }
   }
 }
 """
@@ -2091,8 +2094,29 @@ def fetch_user_triage_inputs(token: str, login: str) -> dict | None:
     out["owned_repos"] = (u.get("allOwned") or {}).get("totalCount") or 0
     out["original_owned_repos"] = (u.get("originalOwned") or {}).get("totalCount") or 0
     out["contributed_to"] = (u.get("repositoriesContributedTo") or {}).get("totalCount") or 0
-    years = ((u.get("contributionsCollection") or {}).get("contributionYears")) or []
-    if years:
+    cc = u.get("contributionsCollection") or {}
+    # GitHub has no direct "is private profile" bool. Closest heuristic:
+    # `hasAnyContributions=false` (no contributions in the calendar
+    # window) despite at least one `top_repos[].pushed_at` inside that
+    # same window. Pushes ARE contributions, so a blank calendar with
+    # a live repo means visibility is restricted, not that the user is
+    # inactive. Defaults to a 365-day cutoff to match GitHub's default
+    # contributionsCollection window. When the heuristic fires, the
+    # year list is dropped — it's not informative for private profiles
+    # (GitHub returns the full account-lifetime year list regardless of
+    # visibility, which misleads any reader taking it at face value).
+    has_public = bool(cc.get("hasAnyContributions"))
+    recent_push_cutoff = int(time.time()) - 365 * 86400
+    raw_top_nodes = (u.get("topRepos") or {}).get("nodes") or []
+    has_recent_push = any(
+        (db.iso_to_unix((r or {}).get("pushedAt") or "") or 0) >= recent_push_cutoff
+        for r in raw_top_nodes
+    )
+    profile_likely_private = (not has_public) and has_recent_push
+    years = cc.get("contributionYears") or []
+    if profile_likely_private:
+        out["profile_likely_private"] = True
+    elif years:
         # Ascending order reads more naturally in the prompt ("public
         # activity in 2013, 2014, 2018-...").
         out["contribution_years"] = sorted(years)
