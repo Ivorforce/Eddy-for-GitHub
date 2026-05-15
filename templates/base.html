@@ -1201,18 +1201,29 @@
       color: var(--accent-amber);
     }
 
-    /* Pulse the pill while an AI request is in flight on this row (Ask AI
-       or Re-ask both set hx-indicator="closest tr", so the row gets
-       .htmx-request). The manual pill never triggers a long request of its
-       own, but share the rule so a row-level indicator covers it too. */
-    tr.htmx-request .ai-verdict-pill-group,
-    tr.htmx-request .thread-pill-group {
-      pointer-events: none;
+    /* While an AI request is in flight on this row (Ask AI or Re-ask both
+       set hx-indicator="closest tr", so the row gets .htmx-request): pulse
+       the description text — that's the string about to change — and spin
+       the rerun icon while disabling the button. Leave the main button
+       clickable so the timeline popover still opens, and leave the AI
+       sparkle / take label static (the sparkle doubles as the
+       needs-attention amber signal). */
+    tr.htmx-request .ai-verdict-desc {
       animation: ai-pulse 1.2s ease-in-out infinite;
+    }
+    tr.htmx-request .ai-verdict-rerun {
+      pointer-events: none;
+      color: var(--ai-accent);
+    }
+    tr.htmx-request .ai-verdict-rerun svg {
+      animation: ai-spin 0.9s linear infinite;
     }
     @keyframes ai-pulse {
       0%, 100% { opacity: 0.45; }
       50%      { opacity: 0.85; }
+    }
+    @keyframes ai-spin {
+      to { transform: rotate(360deg); }
     }
 
     /* Priority picker — one row of six cells grouped 2-2-2 under Low /

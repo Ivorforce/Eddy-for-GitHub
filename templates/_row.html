@@ -264,7 +264,7 @@
         <button type="button" class="ai-verdict-main"
                 popovertarget="pop-timeline-{{ n.id }}"
                 style="anchor-name: --pop-timeline-{{ n.id }}"
-                {% if n.recency %}data-tip-html="{{ n.recency.tip_html|forceescape }}"{% endif %}><span class="ai-verdict-take{% if n.needs_attention %} needs-attention{% endif %}"><svg class="ai-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-ai-sparkle"/></svg>{% if not v %}unassessed{% endif %}</span>{% if n.recency and n.recency.text %}<span class="ai-verdict-desc">{{ n.recency.text }}</span>{% elif v and v.description %}<span class="ai-verdict-desc">{{ v.description }}</span>{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
+                {% if n.recency %}data-tip-html="{{ n.recency.tip_html|forceescape }}"{% endif %}><span class="ai-verdict-take{% if n.needs_attention %} needs-attention{% endif %}"><svg class="ai-pill-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#icon-ai-sparkle"/></svg></span>{% if n.recency and n.recency.text %}<span class="ai-verdict-desc">{{ n.recency.text }}</span>{% elif v and v.description %}<span class="ai-verdict-desc">{{ v.description }}</span>{% elif not v %}<span class="ai-verdict-desc">unassessed</span>{% endif %}</button><button type="button" class="ai-verdict-rerun{% if n.ai_uptodate %} current{% endif %}"
                 {% if n.ai_uptodate %}
                 disabled
                 aria-disabled="true"
