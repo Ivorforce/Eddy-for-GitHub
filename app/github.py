@@ -2014,7 +2014,8 @@ query($login: String!) {
     websiteUrl
     createdAt
     followers { totalCount }
-    repositories(first: 1, ownerAffiliations: OWNER) { totalCount }
+    allOwned: repositories(first: 1, ownerAffiliations: OWNER) { totalCount }
+    originalOwned: repositories(first: 1, ownerAffiliations: OWNER, isFork: false) { totalCount }
     repositoriesContributedTo(first: 1, includeUserRepositories: false,
       contributionTypes: [COMMIT, PULL_REQUEST, ISSUE]) { totalCount }
     pinnedItems(first: 6, types: [REPOSITORY]) {
@@ -2083,7 +2084,12 @@ def fetch_user_triage_inputs(token: str, login: str) -> dict | None:
     if u.get("createdAt"):
         out["account_created_at"] = u["createdAt"]
     out["followers"] = (u.get("followers") or {}).get("totalCount") or 0
-    out["owned_repos"] = (u.get("repositories") or {}).get("totalCount") or 0
+    # owned_repos: total under their account (includes forks — a "fork
+    # hoarder" pattern inflates this). original_owned_repos: non-fork
+    # only — the meaningful "things they've actually built" count. The
+    # gap between the two is the size of their fork collection.
+    out["owned_repos"] = (u.get("allOwned") or {}).get("totalCount") or 0
+    out["original_owned_repos"] = (u.get("originalOwned") or {}).get("totalCount") or 0
     out["contributed_to"] = (u.get("repositoriesContributedTo") or {}).get("totalCount") or 0
     years = ((u.get("contributionsCollection") or {}).get("contributionYears")) or []
     if years:

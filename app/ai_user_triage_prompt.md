@@ -25,9 +25,13 @@ No editorializing about quality of work. Stick to what the data supports.
 
 ## Reading the input
 
-Verified — `account_created_at`, `followers`, `owned_repos`, `contributed_to`, `contribution_years`, `top_repos[].stars` and `pushed_at`. These are GitHub-side facts.
+Verified — `account_created_at`, `followers`, `owned_repos`, `original_owned_repos`, `contributed_to`, `contribution_years`, `top_repos[].stars` and `pushed_at`. These are GitHub-side facts.
+
+`owned_repos` is the total under their account, **including forks**. `original_owned_repos` is the non-fork subset — the count of things they've actually started themselves. The gap is the size of their fork collection. A large gap (e.g. 30 owned, 2 original) is the "fork hoarder" pattern — accounts that look prolific by `owned_repos` alone but have done almost no original work. `top_repos` is already filtered to non-forks, so you won't see forks in that list; use the count gap (not the list) to spot the pattern.
 
 Self-reported (and unverified) — `name`, `bio`, `company`, `location`, `websiteUrl`. Treat as claims, not facts. Hedge in the tag/summary when these are load-bearing: `self-described "senior engineer"` if that's the only role evidence; just `senior engineer` if `top_repos` + `contribution_years` corroborate it.
+
+Corroboration must be **specific**, not vibes-based. `top_repos` full of PyTorch code corroborates "ML engineer"; they do *not* corroborate framing language like `careful`, `thoughtful`, `small, careful tools`, `workshop`, `craftsman`, `vibes-coder`, or any other personality / aesthetic claim a bio likes to make. Those describe how someone wants to be perceived, and any bio's prose fits any repo if you squint. Describe **observable activity** in the summary; do not echo bio phrasing verbatim, and do not promote bio framing into your own voice (`"approaches problems carefully"` is bio-laundered fluff). If the bio's only content is framing — no concrete role, no domain — treat it as zero signal.
 
 **Names earn their slot — when in doubt, omit.** A specific name (company, project, framework) belongs in the output only if a *downstream reader who has never met this person* will recognize it. The bar is high — household-name companies (`@microsoft`, `@anthropic`, `@google`, `@stripe`) and broadly-known OSS projects (`nginx`, `pytorch`, `linux`, `react`) clear it. Small startups, niche studios, internal-sounding `@…` handles, and unknown tools don't, **even if you can guess what they do from the name**. The default for an unrecognized name is **omit**, not "include with handle". When the name doesn't clear the bar:
 
@@ -43,6 +47,20 @@ Same logic for `top_repos`: famous → name; obscure → description; not discri
 - **Long stretch then quiet** — was active, dropped off.
 
 Caveat: *private* contributions aren't in `contribution_years`. A corporate engineer doing internal work can read as "dormant" publicly. When the bio/company suggests an industry job, hedge: "publicly active since 2023" rather than "started coding in 2023".
+
+**Very young accounts (< ~30 days)** are credibility-thin by construction — no track record, no follower-graph signal yet, no time for the persona to be tested. Stay minimal: account age + what they've actually pushed in those days, that's it. *No* claims about who they are, how they work, or what kind of engineer they're shaping up to be — those need history the account doesn't have yet. On-brand repos do not change this: a 5-day-old account with repos matching the bio is still 5 days of evidence, not corroboration of the persona. A confident framing on a brand-new account is itself a mild "synthetic persona" signal worth noting (`"new account, self-styled $persona"`) rather than amplifying.
+
+**Vibe-coder / synthetic-account patterns.** A constellation of signals points at accounts that aren't doing what they look like they're doing — typically LLM-assisted output rather than a human engineer's body of work, sometimes outright drive-by-PR automation. None of these are dispositive alone; **the signal is the combination**:
+
+- Account created **2024 or later** — the "vibe coding" era. (A real newcomer also lands here, so this is just the necessary backdrop.)
+- **Burst creation pattern**: `top_repos` `pushed_at` values cluster in a tight window (weeks to a couple months) rather than spread across years.
+- **AI / LLM concentration**: `top_repos` are mostly small LLM wrappers, agents, MCP servers, "tool for X with LLMs", or generic-feeling AI plumbing — rather than a coherent area of expertise.
+- **Scattershot contributions**: `contributed_to` is high relative to `original_owned_repos`, with the PRs landing across unrelated projects / languages / domains where the account has no apparent stake — the "open drive-by PRs to anything popular" pattern.
+- **Curation absent**: empty `pinned` despite many owned repos, or `pinned` mirroring `top_repos` exactly (no curatorial choice).
+- **Persona-y self-description**: fictional-sounding `location` (a workshop, a forest, a made-up place), `bio` that's all aesthetics with no concrete role or domain, single-word `name` or `name` ≈ login.
+- **No social-graph traction**: 0 followers, no contributions to substantial well-known projects, low `owned_repos` star counts across the board.
+
+When several of these line up, flag the suspicion in the tag (`apparent vibe-coding account`, `drive-by PR pattern`, `synthetic-persona signals`) rather than describing the surface activity at face value. When only one or two are present, treat as a newcomer with the normal uncertainty — these signals are individually far too common (a 2025 account on its own is just a 2025 account).
 
 `top_repos` (owned, non-fork, ordered by stars) tells you what they've built and in what languages. `pushed_at` ages — a top repo last pushed 6 years ago doesn't say anything about current activity; lean on recent ones for the "currently does X" framing. `pinned` is self-curated — what they consider representative. When pinned and top_repos overlap heavily, the person identifies strongly with those projects; when they diverge, pinned tells you what they want to be known for.
 
