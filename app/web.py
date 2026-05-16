@@ -1408,19 +1408,15 @@ def _format_event_for_render(
         adds = payload.get("additions")
         dels = payload.get("deletions")
         n_files = payload.get("changed_files")
-        # Diff snippet is "+A/−D (N files)" when totals are present; the row
-        # falls back to bare "pushed code" if the GraphQL response didn't
-        # include the per-PR totals (rare; mostly forks we can't read fully).
-        parts = []
+        # Diffstat is split out so the template can color +A green / −D red
+        # like the title column; the per-PR totals are absent for forks we
+        # can't read fully, in which case the row shows a bare "pushed code".
+        out["summary"] = "pushed code"
         if isinstance(adds, int) or isinstance(dels, int):
-            parts.append(f"+{adds or 0}/−{dels or 0}")
+            out["code_adds"] = adds or 0
+            out["code_dels"] = dels or 0
         if isinstance(n_files, int) and n_files:
-            parts.append(f"{n_files} file{'' if n_files == 1 else 's'}")
-        out["summary"] = (
-            f"pushed code {parts[0]} ({parts[1]})" if len(parts) == 2
-            else f"pushed code {parts[0]}" if parts
-            else "pushed code"
-        )
+            out["code_files"] = n_files
     elif kind == "mention":
         # A GitHub notification re-delivery whose reason was mention /
         # team_mention. The comment that triggered it is already in the

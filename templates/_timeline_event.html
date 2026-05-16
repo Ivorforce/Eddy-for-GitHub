@@ -89,14 +89,26 @@
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
-  {% elif ev.kind in ('body_edit', 'code') %}
-    {# Real-login actors (the editor / pusher) — chip them like comments so
-       badge + tracked-state surface. Badge backfilled from the per-thread
-       roster in _format_event_for_render. #}
+  {% elif ev.kind == 'body_edit' %}
+    {# Real-login actors (the editor) — chip them like comments so badge +
+       tracked-state surface. Badge backfilled from the per-thread roster
+       in _format_event_for_render. #}
     <div class="timeline-line">
       <span class="timeline-summary">
         {{ author_chip(ev.actor, ev.author_badge_class, ev.author_assoc or '', ev.is_tracked) }}
         {{ ev.summary }}
+      </span>
+      <span class="timeline-age">{{ ev.age_text }}</span>
+    </div>
+  {% elif ev.kind == 'code' %}
+    {# Diffstat colored green/red to match the title column; absent for
+       forks we can't read the per-PR totals on. #}
+    <div class="timeline-line">
+      <span class="timeline-summary">
+        {{ author_chip(ev.actor, ev.author_badge_class, ev.author_assoc or '', ev.is_tracked) }}
+        {{ ev.summary }}
+        {% if ev.code_adds is defined %}<span class="stat-add">+{{ ev.code_adds }}</span><span class="stat-del">−{{ ev.code_dels }}</span>{% endif %}
+        {% if ev.code_files %}<span class="timeline-code-files">across {{ ev.code_files }} file{{ '' if ev.code_files == 1 else 's' }}</span>{% endif %}
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
