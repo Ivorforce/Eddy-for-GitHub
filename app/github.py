@@ -45,6 +45,75 @@ def set_user_login(login: str | None) -> None:
     _USER_LOGIN = login
 
 
+# Markdown regions GitHub itself doesn't scan for @-mentions: code never
+# notifies, and a blockquote is almost always re-quoted old content rather
+# than a fresh ping. Stripped before the @login match. PR / Issue mentions
+# come from MENTIONED_EVENT (GitHub already excludes these); this scan only
+# runs for Discussions, which have no timeline / mention-event API.
+_FENCED_CODE_RE = re.compile(
+    r"^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[ \t]*$", re.MULTILINE | re.DOTALL
+)
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`+[^`\n]*`+")
+_BLOCKQUOTE_RE = re.compile(r"^[ \t]*>.*$", re.MULTILINE)
+
+
+def _strip_uncounted_markdown(body: str) -> str:
+    """Drop fenced code, HTML comments, inline code spans, and blockquote
+    lines — fenced first so its inner backticks / `>` don't trip the later
+    passes. Not a markdown parser; indented code blocks are a known gap
+    (their 4-space indent collides with list nesting)."""
+    body = _FENCED_CODE_RE.sub(" ", body)
+    body = _HTML_COMMENT_RE.sub(" ", body)
+    body = _INLINE_CODE_RE.sub(" ", body)
+    body = _BLOCKQUOTE_RE.sub(" ", body)
+    return body
+
+
+def _mentions_user(body: str | None) -> bool:
+    """True if `body` @-mentions the authenticated user, ignoring code /
+    blockquote regions. GitHub logins are case-insensitive and bounded by
+    non-login chars (alnum / hyphen / slash), so a plain substring check
+    would false-match `@userfoo`, `@user/team`, or an email address."""
+    if not body or not _USER_LOGIN:
+        return False
+    return re.search(
+        rf"(?<![A-Za-z0-9-])@{re.escape(_USER_LOGIN)}(?![A-Za-z0-9/-])",
+        _strip_uncounted_markdown(body),
+        re.IGNORECASE,
+    ) is not None
+
+
+def rederive_mention_events(conn: sqlite3.Connection) -> None:
+    """One-time cleanup of `mention` thread_events. The old code logged one
+    event per `reason=mention` re-delivery, but that reason is sticky — a
+    thread mentioned once kept accumulating an event for every later
+    unrelated re-delivery. Drop them all and null `details_fetched_at` on the
+    affected threads so the next few polls re-enrich them; `_enrich` then
+    regenerates the events from the proper anchor (MENTIONED_EVENT for PR /
+    Issue, a body scan for Discussions). Gated on a meta flag — runs once."""
+    if db.get_meta(conn, "mention_events_rederived"):
+        return
+    affected = {
+        r["thread_id"] for r in conn.execute(
+            "SELECT DISTINCT thread_id FROM thread_events WHERE kind = 'mention'"
+        )
+    }
+    affected.update(
+        r["id"] for r in conn.execute(
+            "SELECT id FROM notifications WHERE reason IN ('mention', 'team_mention')"
+        )
+    )
+    conn.execute("DELETE FROM thread_events WHERE kind = 'mention'")
+    for tid in affected:
+        conn.execute(
+            "UPDATE notifications SET details_fetched_at = NULL WHERE id = ?",
+            (tid,),
+        )
+    db.set_meta(conn, "mention_events_rederived", "1")
+    log.info("mention events reset — %d thread(s) queued for re-enrich", len(affected))
+
+
 # Per-thread enrichment signal. A row is "dirty" (enrichment owed) iff
 # `details_fetched_at IS NULL OR datetime(updated_at) > datetime(details_fetched_at,
 # 'unixepoch')` — same predicate the _enrich eligibility query uses. The Event
@@ -961,6 +1030,12 @@ query($owner: String!, $name: String!, $number: Int!) {
           ... on ConvertToDraftEvent  { id createdAt actor { login } }
         }
       }
+      mentionedEvents: timelineItems(last: 100, itemTypes: [MENTIONED_EVENT]) {
+        nodes {
+          __typename
+          ... on MentionedEvent { databaseId createdAt actor { login } }
+        }
+      }
     }
   }
 }
@@ -997,6 +1072,23 @@ def _parse_lifecycle_events(nodes) -> list[dict]:
             "actor":      (n.get("actor") or {}).get("login"),
             "created_at": n.get("createdAt"),
             "reason":     ((n.get("stateReason") or "").lower() or None),
+        })
+    return out
+
+
+def _parse_mentioned_events(nodes) -> list[dict]:
+    """MENTIONED_EVENT timelineItems nodes → [{database_id, login, created_at}].
+    GitHub emits one per (comment, mentioned-person) — already deduped and
+    code-block-aware — and `actor` is the *mentioned* person, not the comment
+    author, so the caller filters on the authenticated user's login."""
+    out: list[dict] = []
+    for n in nodes or []:
+        if n.get("__typename") != "MentionedEvent":
+            continue
+        out.append({
+            "database_id": n.get("databaseId"),
+            "login":       (n.get("actor") or {}).get("login"),
+            "created_at":  n.get("createdAt"),
         })
     return out
 
@@ -1513,6 +1605,9 @@ def fetch_pr(token: str, api_url: str | None) -> dict | None:
         "_lifecycle_events": _parse_lifecycle_events(
             (pr.get("timelineItems") or {}).get("nodes")
         ),
+        "_mentioned_events": _parse_mentioned_events(
+            (pr.get("mentionedEvents") or {}).get("nodes")
+        ),
         "author_association": pr.get("authorAssociation"),
         "user": {
             "login": author.get("login"),
@@ -1582,6 +1677,12 @@ query($owner: String!, $name: String!, $number: Int!) {
           __typename
           ... on ClosedEvent   { id createdAt actor { login } stateReason }
           ... on ReopenedEvent { id createdAt actor { login } }
+        }
+      }
+      mentionedEvents: timelineItems(last: 100, itemTypes: [MENTIONED_EVENT]) {
+        nodes {
+          __typename
+          ... on MentionedEvent { databaseId createdAt actor { login } }
         }
       }
     }
@@ -1689,6 +1790,9 @@ def fetch_issue(token: str, api_url: str | None) -> dict | None:
         "_comment_history": comment_history,
         "_lifecycle_events": _parse_lifecycle_events(
             (issue.get("timelineItems") or {}).get("nodes")
+        ),
+        "_mentioned_events": _parse_mentioned_events(
+            (issue.get("mentionedEvents") or {}).get("nodes")
         ),
         "author_association": issue.get("authorAssociation"),
         "user": {
@@ -2570,7 +2674,8 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
     """
     rows = conn.execute(
         """
-        SELECT id, api_url, type, baseline_head_oid, details_json FROM notifications
+        SELECT id, api_url, type, baseline_head_oid, details_json,
+               reason, updated_at FROM notifications
         WHERE type IN ('PullRequest', 'Issue', 'Discussion', 'Release')
           AND (
             details_json IS NULL
@@ -2618,6 +2723,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
         comment_history = details.pop("_comment_history", None) or []
         pr_reviews = details.pop("_reviews", None) or []
         lifecycle_events = details.pop("_lifecycle_events", None) or []
+        mentioned_events = details.pop("_mentioned_events", None) or []
 
         # COALESCE captures baseline_comments on first enrichment so the
         # '+N new comments' indicator stays alive through Read actions and
@@ -2726,6 +2832,69 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
                 external_id=str(db_id),
                 payload=payload,
             )
+        # Mention events, anchored to the actual mention — keyed so a re-fetch
+        # is idempotent and the ts is when it happened, not when the
+        # notification was last re-delivered (the delivery `reason` is sticky
+        # and over-reports). PR / Issue: GitHub's MENTIONED_EVENT timeline
+        # items, filtered to the user (already deduped per comment and
+        # code-block-aware). Discussion: no timeline API, so text-scan the
+        # discussion body + comment bodies. The fallback below covers what
+        # neither sees — typically an inline review-thread comment.
+        if _USER_LOGIN and row["type"] in ("PullRequest", "Issue"):
+            for m in mentioned_events:
+                db_id = m.get("database_id")
+                if db_id is None or (m.get("login") or "").lower() != _USER_LOGIN.lower():
+                    continue
+                db.write_thread_event(
+                    conn,
+                    thread_id=row["id"],
+                    ts=db.iso_to_unix(m.get("created_at")) or now,
+                    kind="mention",
+                    source="github",
+                    external_id=str(db_id),
+                    payload={"reason": "mention"},
+                )
+        elif _USER_LOGIN and row["type"] == "Discussion":
+            if _mentions_user(details.get("body")):
+                db.write_thread_event(
+                    conn,
+                    thread_id=row["id"],
+                    ts=db.iso_to_unix(details.get("created_at")) or now,
+                    kind="mention",
+                    source="github",
+                    external_id="body",
+                    payload={"reason": "mention"},
+                )
+            for c in comment_history:
+                db_id = c.get("database_id")
+                if db_id is not None and _mentions_user(c.get("body")):
+                    db.write_thread_event(
+                        conn,
+                        thread_id=row["id"],
+                        ts=db.iso_to_unix(c.get("created_at")) or now,
+                        kind="mention",
+                        source="github",
+                        external_id=str(db_id),
+                        payload={"reason": "mention"},
+                    )
+        # Fallback: the delivery reason says we were mentioned but nothing
+        # above accounts for it. Fire exactly once per thread — at the
+        # notification time — gated on "no mention event exists yet", so a
+        # sticky `reason=mention` across re-deliveries never re-fires it.
+        if row["reason"] in ("mention", "team_mention") and not conn.execute(
+            "SELECT 1 FROM thread_events WHERE thread_id = ? AND kind = 'mention' LIMIT 1",
+            (row["id"],),
+        ).fetchone():
+            db.write_thread_event(
+                conn,
+                thread_id=row["id"],
+                ts=db.iso_to_unix(row["updated_at"]) or now,
+                kind="mention",
+                source="github",
+                external_id=row["updated_at"] or str(now),
+                payload={"reason": row["reason"]},
+            )
+
         # State transitions (merged / closed / reopened / draft↔ready).
         # Deduped on the GraphQL global node id; re-fetch leaves them
         # untouched (the events are immutable on GitHub's side once
@@ -3057,22 +3226,10 @@ def _upsert(
         _mark_dirty(item["id"])
     if reason:
         _accumulate_seen_reason(conn, item["id"], reason)
-    if reason in ("mention", "team_mention") and updated_at:
-        # One mention event per notification update where the delivery reason
-        # is mention / team_mention. external_id = updated_at dedups within
-        # a single re-delivery; a fresh poll with the same updated_at is a
-        # no-op (the dedup index UPDATEs the payload in place). Consumed by
-        # the pill ("+ mentioned" when this event's ts is newer than the
-        # latest engagement) and by the AI timeline.
-        db.write_thread_event(
-            conn,
-            thread_id=item["id"],
-            ts=db.iso_to_unix(updated_at) or now,
-            kind="mention",
-            source="github",
-            external_id=updated_at,
-            payload={"reason": reason},
-        )
+    # `mention` thread_events are generated downstream in _enrich, anchored to
+    # the actual comment / review that @-mentions the user — the delivery
+    # `reason` is sticky (stays 'mention' on every re-delivery once you've
+    # been mentioned once), so counting it here over-reports badly.
     if read_advanced:
         # Use github's own `last_read_at` as the event ts — it's the actual
         # moment of engagement, which may be well before `now` (the user
@@ -3154,9 +3311,9 @@ def _clear_engagement_baselines(
     (0 if not yet enriched); pr_review_state from its own column.
 
     The "since-visit" mention signal is event-sourced separately — a `mention`
-    thread_event lands per re-delivery with reason in (mention, team_mention),
-    and the row builder compares its ts against the latest engagement event
-    in thread_events. No column to flip here."""
+    thread_event lands for each comment / review that @-mentions the user, and
+    the row builder compares its ts against the latest engagement event in
+    thread_events. No column to flip here."""
     row = conn.execute(
         "SELECT details_json, pr_review_state FROM notifications WHERE id = ?",
         (thread_id,),

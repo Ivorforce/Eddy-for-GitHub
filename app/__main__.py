@@ -83,6 +83,11 @@ def main() -> int:
     web.app.config["USER_LOGIN"] = user_login
     web.app.config["USER_TEAMS"] = user_teams
     github.set_user_login(user_login)
+    mention_conn = db.connect()
+    try:
+        github.rederive_mention_events(mention_conn)
+    finally:
+        mention_conn.close()
     # Hot-reload Jinja templates on edit. Both the config flag and the env
     # attribute are required: web.py touches app.jinja_env at import (to
     # register the humanize filter), which constructs the env with the config

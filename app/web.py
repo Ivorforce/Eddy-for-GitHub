@@ -1418,12 +1418,11 @@ def _format_event_for_render(
         if isinstance(n_files, int) and n_files:
             out["code_files"] = n_files
     elif kind == "mention":
-        # A GitHub notification re-delivery whose reason was mention /
-        # team_mention. The comment that triggered it is already in the
-        # timeline (kind='comment'); this event just anchors *when* the
-        # mention landed so the pill can compare against the latest
-        # engagement. Rendered telegraphically in its own template branch
-        # — no actor chip ("GitHub mentioned you" reads awkwardly).
+        # An @-mention of the user — a GitHub MENTIONED_EVENT (PR / Issue), a
+        # Discussion body-scan hit, or the once-per-thread reason fallback.
+        # Anchors *when* the mention landed so the pill can compare against
+        # the latest engagement. Rendered telegraphically in its own template
+        # branch — no actor chip ("GitHub mentioned you" reads awkwardly).
         out["is_team"] = (payload.get("reason") == "team_mention")
     elif kind == "priority_change":
         # Same meta-line treatment as user_action: a row-state change the
