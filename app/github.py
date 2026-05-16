@@ -2043,11 +2043,21 @@ query($login: String!) {
     }
     topRepos: repositories(first: 10, ownerAffiliations: OWNER, isFork: false,
                            orderBy: {field: STARGAZERS, direction: DESC}) {
-      nodes { name description primaryLanguage { name } stargazerCount pushedAt }
+      nodes {
+        name description primaryLanguage { name } stargazerCount pushedAt
+        defaultBranchRef { target { ... on Commit { history { totalCount } } } }
+      }
     }
     contributionsCollection {
       contributionYears
       hasAnyContributions
+      commitContributionsByRepository(maxRepositories: 10) {
+        contributions { totalCount }
+        repository {
+          nameWithOwner description primaryLanguage { name }
+          stargazerCount isPrivate isFork
+        }
+      }
     }
   }
 }
@@ -2148,6 +2158,12 @@ def _flatten_repo_node(n: dict | None) -> dict | None:
         out["description"] = desc
     if n.get("pushedAt"):
         out["pushed_at"] = n["pushedAt"]
+    # Lifetime commit count on the default branch — only requested for
+    # topRepos, absent on pinnedItems nodes. For owned non-fork repos it's
+    # a fine proxy for the depth of work the person sank into it.
+    hist = ((n.get("defaultBranchRef") or {}).get("target") or {}).get("history") or {}
+    if hist.get("totalCount") is not None:
+        out["commits"] = hist["totalCount"]
     return out
 
 
@@ -2220,6 +2236,29 @@ def fetch_user_triage_inputs(token: str, login: str) -> dict | None:
     top = [p for p in top if p]
     if top:
         out["top_repos"] = top
+    # recent_repos: repos the person committed to in the last ~12 months,
+    # ranked by their commit count — includes repos they don't own, and
+    # being window-bounded it drops stale projects (the "what are they
+    # working on now" lens, vs top_repos' "what they own / are known for").
+    recent: list[dict] = []
+    for entry in (cc.get("commitContributionsByRepository") or []):
+        repo = entry.get("repository") or {}
+        name = repo.get("nameWithOwner")
+        if not name or repo.get("isPrivate") or repo.get("isFork"):
+            continue
+        r: dict = {
+            "repo": name,
+            "commits": (entry.get("contributions") or {}).get("totalCount") or 0,
+            "stars": repo.get("stargazerCount") or 0,
+        }
+        if (repo.get("primaryLanguage") or {}).get("name"):
+            r["language"] = repo["primaryLanguage"]["name"]
+        desc = _truncate_text(repo.get("description"), 200)
+        if desc:
+            r["description"] = desc
+        recent.append(r)
+    if recent:
+        out["recent_repos"] = recent
     return out
 
 

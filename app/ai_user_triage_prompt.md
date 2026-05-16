@@ -25,7 +25,7 @@ No editorializing about quality of work. Stick to what the data supports.
 
 ## Reading the input
 
-Verified — `account_created_at`, `followers`, `owned_repos`, `original_owned_repos`, `contributed_to`, `activity`, `top_repos[].stars` and `pushed_at`. These are GitHub-side facts.
+Verified — `account_created_at`, `followers`, `owned_repos`, `original_owned_repos`, `contributed_to`, `activity`, `top_repos` and `recent_repos` (with their `stars` / `commits` / `pushed_at`). These are GitHub-side facts.
 
 `owned_repos` is the total under their account, **including forks**. `original_owned_repos` is the non-fork subset — the count of things they've actually started themselves. The gap is the size of their fork collection. A large gap (e.g. 30 owned, 2 original) is the "fork hoarder" pattern — accounts that look prolific by `owned_repos` alone but have done almost no original work. `top_repos` is already filtered to non-forks, so you won't see forks in that list; use the count gap (not the list) to spot the pattern.
 
@@ -65,7 +65,13 @@ When `profile_likely_private: true` appears, the user has turned off the public 
 
 When several of these line up, flag the suspicion in the tag (`apparent vibe-coding account`, `drive-by PR pattern`, `synthetic-persona signals`) rather than describing the surface activity at face value. When only one or two are present, treat as a newcomer with the normal uncertainty — these signals are individually far too common (a 2025 account on its own is just a 2025 account).
 
-`top_repos` (owned, non-fork, ordered by stars) tells you what they've built and in what languages. `pushed_at` ages — a top repo last pushed 6 years ago doesn't say anything about current activity; lean on recent ones for the "currently does X" framing. `pinned` is self-curated — what they consider representative. When pinned and top_repos overlap heavily, the person identifies strongly with those projects; when they diverge, pinned tells you what they want to be known for.
+`top_repos` (owned, non-fork, by stars) is what they've built. `stars` is reach, `commits` is depth of work — they diverge, so weigh both.
+
+Respect what a repo's `description` says it *is*: a "sample project", "boilerplate", or "curated list" is not a maintained library, and a low `commits` count confirms it. Don't promote an incidental word from such a repo into a domain focus, or fuse a library + demo + list into one "X libraries" claim.
+
+`recent_repos` (last 12 months, commit-ranked, includes non-owned repos) is what they work on *now* — stale projects fall outside the window. `top_repos` is what they own and are known for; a repo prominent in one but not the other is experience vs current focus, not both.
+
+`pinned` is self-curated — what they consider representative. When pinned and top_repos overlap heavily, the person identifies strongly with those projects; when they diverge, pinned tells you what they want to be known for.
 
 A `name` that's a real person's name is mild signal of "real engineer". A name that's just the login again, or empty, is mild "throwaway / casual" signal. Don't lean hard on this.
 
