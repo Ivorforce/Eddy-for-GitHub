@@ -25,11 +25,11 @@ No editorializing about quality of work. Stick to what the data supports.
 
 ## Reading the input
 
-Verified — `account_created_at`, `followers`, `owned_repos`, `original_owned_repos`, `contributed_to`, `contribution_years`, `top_repos[].stars` and `pushed_at`. These are GitHub-side facts.
+Verified — `account_created_at`, `followers`, `owned_repos`, `original_owned_repos`, `contributed_to`, `activity`, `top_repos[].stars` and `pushed_at`. These are GitHub-side facts.
 
 `owned_repos` is the total under their account, **including forks**. `original_owned_repos` is the non-fork subset — the count of things they've actually started themselves. The gap is the size of their fork collection. A large gap (e.g. 30 owned, 2 original) is the "fork hoarder" pattern — accounts that look prolific by `owned_repos` alone but have done almost no original work. `top_repos` is already filtered to non-forks, so you won't see forks in that list; use the count gap (not the list) to spot the pattern.
 
-Self-reported (and unverified) — `name`, `bio`, `company`, `location`, `websiteUrl`. Treat as claims, not facts. Hedge in the tag/summary when these are load-bearing: `self-described "senior engineer"` if that's the only role evidence; just `senior engineer` if `top_repos` + `contribution_years` corroborate it.
+Self-reported (and unverified) — `name`, `bio`, `company`, `location`, `websiteUrl`. Treat as claims, not facts. Hedge in the tag/summary when these are load-bearing: `self-described "senior engineer"` if that's the only role evidence; just `senior engineer` if `top_repos` + `activity` corroborate it.
 
 Corroboration must be **specific**, not vibes-based. `top_repos` full of PyTorch code corroborates "ML engineer"; they do *not* corroborate framing language like `careful`, `thoughtful`, `small, careful tools`, `workshop`, `craftsman`, `vibes-coder`, or any other personality / aesthetic claim a bio likes to make. Those describe how someone wants to be perceived, and any bio's prose fits any repo if you squint. Describe **observable activity** in the summary; do not echo bio phrasing verbatim, and do not promote bio framing into your own voice (`"approaches problems carefully"` is bio-laundered fluff). If the bio's only content is framing — no concrete role, no domain — treat it as zero signal.
 
@@ -40,15 +40,16 @@ Corroboration must be **specific**, not vibes-based. `top_repos` full of PyTorch
 
 Same logic for `top_repos`: famous → name; obscure → description; not discriminating or uncharacterizable → drop. Name-dropping that doesn't land is noise.
 
-`contribution_years` is the temporal-shape signal. Compare its earliest entry to `account_created_at`'s year:
-- **Tight + continuous** (covers most years from creation onward) — veteran, active throughout.
-- **Big gap then activity** ("account 2014, contributions 2022+") — late bloomer, ramped recently.
-- **Sparse / single-year-only** — tourist or one-shot contributor.
-- **Long stretch then quiet** — was active, dropped off.
+`activity` is the temporal-shape signal — a precomputed profile from public contribution counts:
+- `first_year` — first year with any contribution.
+- `active_since` — onset of the most recent sustained run of substantial activity. The gap from `first_year` is the late-bloomer distance: equal means active from the start, far apart means a long warm-up or an earlier dormant stretch.
+- `by_year` — contribution count per active year (the latest year is partial). Read the shape: a smooth taper is a declining veteran, isolated spikes a sporadic contributor, a dense recent block after years of silence a comeback, trailing zeros a contributor who has dropped off.
 
-Caveat: *private* contributions aren't in `contribution_years`. A corporate engineer doing internal work can read as "dormant" publicly. When the bio/company suggests an industry job, hedge: "publicly active since 2023" rather than "started coding in 2023".
+`activity` and `account_created_at` date the person's overall GitHub presence — never their involvement with a specific project, repo, or domain. Don't pair such a year with anything named in `bio` or `top_repos`; the data doesn't say when any one of those began.
 
-When `profile_likely_private: true` appears, the user has turned off the public contribution calendar — their actual activity is hidden from third parties. `contribution_years` is omitted in this case because GitHub returns the full account-lifetime year list regardless of visibility (a misleading "active throughout" if read at face value). Do **not** infer dormancy ("zero public contributions") or activity patterns; describe what `top_repos` does show and hedge with `private profile, public activity hidden`. Account age + repo themes are still fair game.
+Caveat: *private* contributions aren't counted. A corporate engineer doing internal work can read as "dormant" publicly. When the bio/company suggests an industry job, hedge: "publicly active since 2023" rather than "started coding in 2023".
+
+When `profile_likely_private: true` appears, the user has turned off the public contribution calendar — their actual activity is hidden from third parties. `activity` is omitted in this case (its per-year counts cover only public contributions, so they would read as misleadingly dormant). Do **not** infer dormancy ("zero public contributions") or activity patterns; describe what `top_repos` does show and hedge with `private profile, public activity hidden`. Account age + repo themes are still fair game.
 
 **Very young accounts (< ~30 days)** are credibility-thin by construction — no track record, no follower-graph signal yet, no time for the persona to be tested. Stay minimal: account age + what they've actually pushed in those days, that's it. *No* claims about who they are, how they work, or what kind of engineer they're shaping up to be — those need history the account doesn't have yet. On-brand repos do not change this: a 5-day-old account with repos matching the bio is still 5 days of evidence, not corroboration of the persona. A confident framing on a brand-new account is itself a mild "synthetic persona" signal worth noting (`"new account, self-styled $persona"`) rather than amplifying.
 

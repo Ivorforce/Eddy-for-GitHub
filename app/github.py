@@ -2054,6 +2054,77 @@ query($login: String!) {
 """
 
 
+# `activity` derivation thresholds — kept together so the bands stay
+# re-tunable in one place. A year counts as "substantial" at >=15% of the
+# person's peak year, with an absolute floor so a low-volume contributor
+# isn't all noise.
+_ACTIVITY_REL_FLOOR = 0.15
+_ACTIVITY_ABS_FLOOR = 5
+
+
+def _fetch_year_counts(token: str, login: str, years: list[int]) -> dict[int, int]:
+    """Second triage roundtrip: per-year contribution totals. GitHub caps a
+    `contributionsCollection` window at one year, so each year is its own
+    aliased block. Returns {} on failure — the caller then omits `activity`
+    rather than emitting a misleading all-zero profile."""
+    if not years:
+        return {}
+    aliases = "\n".join(
+        f'    y{y}: contributionsCollection(from: "{y}-01-01T00:00:00Z", '
+        f'to: "{y}-12-31T23:59:59Z") {{ contributionCalendar {{ totalContributions }} }}'
+        for y in years
+    )
+    query = f"query($login: String!) {{\n  user(login: $login) {{\n{aliases}\n  }}\n}}"
+    headers = {**_auth_headers(token), "Content-Type": "application/json"}
+    try:
+        r = _session.post(
+            _GRAPHQL_URL, headers=headers,
+            json={"query": query, "variables": {"login": login}}, timeout=20,
+        )
+        r.raise_for_status()
+        u = ((r.json() or {}).get("data") or {}).get("user") or {}
+    except (requests.RequestException, ValueError) as e:
+        log.warning("_fetch_year_counts: %s (%s)", login, e)
+        return {}
+    out: dict[int, int] = {}
+    for y in years:
+        cal = (u.get(f"y{y}") or {}).get("contributionCalendar") or {}
+        out[y] = cal.get("totalContributions") or 0
+    return out
+
+
+def _derive_activity(years: list[int], counts: dict[int, int]) -> dict:
+    """Precomputed activity profile for the user-triage prompt. `by_year`
+    hands the model the raw shape (taper / spikes / comeback all read off
+    it); `active_since` is the hard-derived onset anchor."""
+    first_year = min(years)
+    by_year = {str(y): counts.get(y, 0) for y in years}
+    peak = max(counts.values()) if counts else 0
+    threshold = max(_ACTIVITY_ABS_FLOOR, peak * _ACTIVITY_REL_FLOOR)
+    substantial = {y for y, c in counts.items() if c >= threshold}
+    # active_since: walk back from the most recent substantial year through
+    # its run, tolerating a single-year dip so one quiet year doesn't reset
+    # the onset. Falls back to first_year when nothing clears the floor.
+    if substantial:
+        active_since = max(substantial)
+        y = active_since
+        while True:
+            if (y - 1) in substantial:
+                y -= 1
+            elif (y - 2) in substantial:
+                y -= 2
+            else:
+                break
+            active_since = y
+    else:
+        active_since = first_year
+    return {
+        "first_year": first_year,
+        "active_since": active_since,
+        "by_year": by_year,
+    }
+
+
 def _truncate_text(s: str | None, n: int) -> str | None:
     if not s:
         return None
@@ -2122,9 +2193,9 @@ def fetch_user_triage_inputs(token: str, login: str) -> dict | None:
     # a live repo means visibility is restricted, not that the user is
     # inactive. Defaults to a 365-day cutoff to match GitHub's default
     # contributionsCollection window. When the heuristic fires, the
-    # year list is dropped — it's not informative for private profiles
-    # (GitHub returns the full account-lifetime year list regardless of
-    # visibility, which misleads any reader taking it at face value).
+    # `activity` profile is dropped — the underlying per-year counts only
+    # cover public contributions, so a restricted profile would read as
+    # misleadingly dormant.
     has_public = bool(cc.get("hasAnyContributions"))
     recent_push_cutoff = int(time.time()) - 365 * 86400
     raw_top_nodes = (u.get("topRepos") or {}).get("nodes") or []
@@ -2137,9 +2208,10 @@ def fetch_user_triage_inputs(token: str, login: str) -> dict | None:
     if profile_likely_private:
         out["profile_likely_private"] = True
     elif years:
-        # Ascending order reads more naturally in the prompt ("public
-        # activity in 2013, 2014, 2018-...").
-        out["contribution_years"] = sorted(years)
+        years = sorted(years)
+        counts = _fetch_year_counts(token, login, years)
+        if counts:
+            out["activity"] = _derive_activity(years, counts)
     pinned = [_flatten_repo_node(n) for n in ((u.get("pinnedItems") or {}).get("nodes") or [])]
     pinned = [p for p in pinned if p]
     if pinned:
