@@ -1682,6 +1682,14 @@ def auto_judge_eligible(
         return 0
     raw_watermark = db.get_meta(conn, "ai_auto_judge_since")
     if not raw_watermark:
+        # Setting on but no watermark — `ai_auto_judge` was enabled by editing
+        # settings.toml directly, bypassing `_set_ai_auto_judge`'s False→True
+        # stamp. Self-heal by stamping `now` (same prospective semantics as
+        # the toggle path: the existing pile isn't swept).
+        watermark = int(time.time())
+        db.set_meta(conn, "ai_auto_judge_since", str(watermark))
+        conn.commit()
+        log.info("auto-judge: ai_auto_judge_since absent; stamped watermark=%d", watermark)
         return 0
     try:
         watermark = int(raw_watermark)
@@ -1698,10 +1706,15 @@ def auto_judge_eligible(
     # Mirrors Re-assess's `ai_uptodate` predicate — enabled when *either*
     # there's no verdict yet *or* an invalidating event landed since the
     # verdict — and adds the watermark for prospective-only-on-toggle:
-    #   A) never-judged row whose updated_at is past the watermark (a fresh
-    #      PR / Release with no comments yet has no thread_events at all,
-    #      so the EXISTS clause alone misses it — but it's exactly the case
-    #      a focus event should pick up); or
+    #   A) never-judged row first delivered past the watermark — keyed on
+    #      `first_seen_at` (immutable, set once on INSERT), NOT `updated_at`
+    #      (GitHub activity time) and NOT `fetched_at` (rewritten on every
+    #      re-poll). A notification can land in the inbox long after its
+    #      activity timestamp, so an activity-time compare mis-files the
+    #      delivery as backlog; and a `fetched_at` compare would leak a
+    #      genuine backlog row the moment a poll happens to re-return it.
+    #      Catches the fresh-PR / Release case the EXISTS clause alone
+    #      misses (no events yet); or
     #   B) prior verdict + an invalidating event past the verdict, past the
     #      watermark, and past the latest `absorbed` user_action (so a
     #      muted-kinds re-delivery via `_apply_mute_filter` doesn't qualify
@@ -1716,8 +1729,7 @@ def auto_judge_eligible(
           FROM notifications n
          WHERE (n.throttle_until IS NULL OR n.throttle_until <= ?)
            AND (
-               (n.ai_verdict_at IS NULL
-                  AND datetime(n.updated_at) > datetime(?, 'unixepoch'))
+               (n.ai_verdict_at IS NULL AND n.first_seen_at > ?)
                OR EXISTS (
                    SELECT 1 FROM thread_events te
                     WHERE te.thread_id = n.id
@@ -1759,8 +1771,7 @@ def auto_judge_eligible(
              WHERE n.id = ?
                AND (n.throttle_until IS NULL OR n.throttle_until <= ?)
                AND (
-                   (n.ai_verdict_at IS NULL
-                      AND datetime(n.updated_at) > datetime(?, 'unixepoch'))
+                   (n.ai_verdict_at IS NULL AND n.first_seen_at > ?)
                    OR EXISTS (
                        SELECT 1 FROM thread_events te
                         WHERE te.thread_id = n.id

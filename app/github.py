@@ -2895,9 +2895,9 @@ def _upsert(
         """
         INSERT INTO notifications (
             id, repo, type, title, reason, api_url, html_url,
-            updated_at, last_read_at, unread, raw_json, fetched_at, link_url,
-            effective_updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            updated_at, last_read_at, unread, raw_json, fetched_at,
+            first_seen_at, link_url, effective_updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             repo=excluded.repo,
             type=excluded.type,
@@ -2910,6 +2910,8 @@ def _upsert(
             unread=excluded.unread,
             raw_json=excluded.raw_json,
             fetched_at=excluded.fetched_at,
+            -- first_seen_at deliberately omitted: set once on INSERT, never
+            -- rewritten, so it's the immutable "row entered our DB" stamp.
             link_url = COALESCE(excluded.link_url, notifications.link_url),
             effective_updated_at = CASE
                 WHEN excluded.updated_at != notifications.updated_at
@@ -2929,6 +2931,7 @@ def _upsert(
             item.get("last_read_at"),
             new_unread,
             json.dumps(item),
+            now,
             now,
             link_candidate,
             updated_at,

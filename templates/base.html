@@ -2392,6 +2392,15 @@
         const target = document.querySelector("#notifications-table");
         if (!target) return;
         htmx.ajax("GET", "/list", { source: "#filters", target, swap: "innerHTML" });
+        // A fingerprint bump means fresh activity landed (a server poll found
+        // something). Kick the AI batch so steady-state watching judges new
+        // rows without needing a tab blur/refocus — the only other trigger.
+        // Gated on visibility so a hidden tab doesn't judge rows the user
+        // can't see; the focus handler catches those up on return. Server
+        // 204s when AI/auto-judge is off, so no client-side mode check.
+        if (document.visibilityState === "visible") {
+          fetch("/ai/auto-judge-batch", { method: "POST" }).catch(() => {});
+        }
       });
       // Per-row "AI is judging" marker fired by the auto-judge batch. Add the
       // same `htmx-request` class HTMX uses for manual clicks so the existing

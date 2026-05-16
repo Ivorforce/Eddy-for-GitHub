@@ -451,6 +451,19 @@ CREATE TABLE IF NOT EXISTS repo_owners (
 """
 
 
+# Immutable first-seen stamp. `fetched_at` is rewritten on every re-poll
+# (_upsert's ON CONFLICT clause), so it tracks last delivery, not first.
+# Auto-judge's prospective watermark needs "when did this row enter our
+# DB" to tell a post-enable arrival from pre-enable backlog — `updated_at`
+# is activity-time (misses late deliveries), `fetched_at` is mutable
+# (leaks re-polled backlog). first_seen_at is set once on INSERT and never
+# touched again. Existing rows backfill from fetched_at (best estimate).
+SCHEMA_V35 = """
+ALTER TABLE notifications ADD COLUMN first_seen_at INTEGER;
+UPDATE notifications SET first_seen_at = fetched_at WHERE first_seen_at IS NULL;
+"""
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, isolation_level=None, check_same_thread=False)
@@ -600,6 +613,10 @@ def init() -> None:
             conn.executescript(SCHEMA_V34)
             _set_version(conn, 34)
             version = 34
+        if version < 35:
+            conn.executescript(SCHEMA_V35)
+            _set_version(conn, 35)
+            version = 35
     finally:
         conn.close()
 
