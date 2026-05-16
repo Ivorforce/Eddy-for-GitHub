@@ -1421,9 +1421,17 @@ def _format_event_for_render(
         # An @-mention of the user — a GitHub MENTIONED_EVENT (PR / Issue), a
         # Discussion body-scan hit, or the once-per-thread reason fallback.
         # Anchors *when* the mention landed so the pill can compare against
-        # the latest engagement. Rendered telegraphically in its own template
-        # branch — no actor chip ("GitHub mentioned you" reads awkwardly).
+        # the latest engagement. The mentioner is chipped when known (a
+        # Discussion author directly, a PR/Issue mentioner inferred); the
+        # template falls back to "someone" when it isn't.
         out["is_team"] = (payload.get("reason") == "team_mention")
+        by = payload.get("mentioned_by")
+        if by:
+            out["actor"] = by
+            badge, assoc = _chip(by)
+            out["author_badge_class"] = badge
+            out["author_assoc"] = assoc
+            out["is_tracked"] = _is_tracked(by)
     elif kind == "priority_change":
         # Same meta-line treatment as user_action: a row-state change the
         # user made in this app, not something that happened on the thread.

@@ -91,8 +91,10 @@ def rederive_mention_events(conn: sqlite3.Connection) -> None:
     unrelated re-delivery. Drop them all and null `details_fetched_at` on the
     affected threads so the next few polls re-enrich them; `_enrich` then
     regenerates the events from the proper anchor (MENTIONED_EVENT for PR /
-    Issue, a body scan for Discussions). Gated on a meta flag — runs once."""
-    if db.get_meta(conn, "mention_events_rederived"):
+    Issue, a body scan for Discussions). Gated on a meta flag — runs once;
+    the flag is versioned so a re-derive can be forced when the regeneration
+    logic changes (v2 added the inferred `mentioned_by`)."""
+    if db.get_meta(conn, "mention_events_rederived") == "2":
         return
     affected = {
         r["thread_id"] for r in conn.execute(
@@ -110,7 +112,7 @@ def rederive_mention_events(conn: sqlite3.Connection) -> None:
             "UPDATE notifications SET details_fetched_at = NULL WHERE id = ?",
             (tid,),
         )
-    db.set_meta(conn, "mention_events_rederived", "1")
+    db.set_meta(conn, "mention_events_rederived", "2")
     log.info("mention events reset — %d thread(s) queued for re-enrich", len(affected))
 
 
@@ -1091,6 +1093,32 @@ def _parse_mentioned_events(nodes) -> list[dict]:
             "created_at":  n.get("createdAt"),
         })
     return out
+
+
+# A MENTIONED_EVENT fires within seconds of the comment that triggered it; a
+# wider gap means the nearest @-mentioning body isn't the real source (an
+# inline review comment we never fetched, or a much later body edit), so we'd
+# rather say "someone" than mis-attribute.
+_MENTIONER_MATCH_WINDOW_S = 120
+
+
+def _infer_mentioner(event_ts: int, candidates: list[tuple[int, str]]) -> str | None:
+    """Pair a MENTIONED_EVENT to its mentioner. The event itself carries no
+    author, so `candidates` — (ts, author) for each visible body that
+    @-mentions the user — is matched by timestamp proximity. Returns the
+    nearest author within the window, or None (renders as 'someone')."""
+    best: tuple[int, str] | None = None
+    for c_ts, author in candidates:
+        diff = abs(event_ts - c_ts)
+        if diff <= _MENTIONER_MATCH_WINDOW_S and (best is None or diff < best[0]):
+            best = (diff, author)
+    return best[1] if best else None
+
+
+def _mention_payload(by: str | None) -> dict:
+    """`mention` thread_event payload — the mentioner login rides along as
+    `mentioned_by` when known, omitted otherwise."""
+    return {"reason": "mention", **({"mentioned_by": by} if by else {})}
 
 
 # CheckRun.conclusion values that count as a failed check for triage — the
@@ -2837,22 +2865,43 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
         # notification was last re-delivered (the delivery `reason` is sticky
         # and over-reports). PR / Issue: GitHub's MENTIONED_EVENT timeline
         # items, filtered to the user (already deduped per comment and
-        # code-block-aware). Discussion: no timeline API, so text-scan the
-        # discussion body + comment bodies. The fallback below covers what
-        # neither sees — typically an inline review-thread comment.
+        # code-block-aware) — the mentioner isn't in that event, so it's
+        # inferred from the comment whose body @-mentions the user. Discussion:
+        # no timeline API, so text-scan the discussion body + comment bodies,
+        # where the author is in hand. The fallback below covers what neither
+        # sees — typically an inline review-thread comment.
         if _USER_LOGIN and row["type"] in ("PullRequest", "Issue"):
-            for m in mentioned_events:
-                db_id = m.get("database_id")
-                if db_id is None or (m.get("login") or "").lower() != _USER_LOGIN.lower():
-                    continue
+            my_mentions = [
+                m for m in mentioned_events
+                if m.get("database_id") is not None
+                and (m.get("login") or "").lower() == _USER_LOGIN.lower()
+            ]
+            # (ts, author) for every visible body that @-mentions the user —
+            # the pool _infer_mentioner pairs each MENTIONED_EVENT against.
+            candidates: list[tuple[int, str]] = []
+            if my_mentions:
+                sources = [(details.get("body"), details.get("created_at"),
+                            (details.get("user") or {}).get("login"))]
+                sources += [(c.get("body"), c.get("created_at"),
+                             (c.get("user") or {}).get("login"))
+                            for c in comment_history]
+                sources += [(rv.get("body"), rv.get("submitted_at"),
+                             (rv.get("user") or {}).get("login"))
+                            for rv in pr_reviews]
+                for body, iso, author in sources:
+                    ts = db.iso_to_unix(iso)
+                    if author and ts is not None and _mentions_user(body):
+                        candidates.append((ts, author))
+            for m in my_mentions:
+                ev_ts = db.iso_to_unix(m.get("created_at")) or now
                 db.write_thread_event(
                     conn,
                     thread_id=row["id"],
-                    ts=db.iso_to_unix(m.get("created_at")) or now,
+                    ts=ev_ts,
                     kind="mention",
                     source="github",
-                    external_id=str(db_id),
-                    payload={"reason": "mention"},
+                    external_id=str(m["database_id"]),
+                    payload=_mention_payload(_infer_mentioner(ev_ts, candidates)),
                 )
         elif _USER_LOGIN and row["type"] == "Discussion":
             if _mentions_user(details.get("body")):
@@ -2863,7 +2912,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
                     kind="mention",
                     source="github",
                     external_id="body",
-                    payload={"reason": "mention"},
+                    payload=_mention_payload((details.get("user") or {}).get("login")),
                 )
             for c in comment_history:
                 db_id = c.get("database_id")
@@ -2875,7 +2924,7 @@ def _enrich(conn: sqlite3.Connection, token: str) -> dict[str, set[str]]:
                         kind="mention",
                         source="github",
                         external_id=str(db_id),
-                        payload={"reason": "mention"},
+                        payload=_mention_payload((c.get("user") or {}).get("login")),
                     )
         # Fallback: the delivery reason says we were mentioned but nothing
         # above accounts for it. Fire exactly once per thread — at the

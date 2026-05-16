@@ -79,13 +79,13 @@
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
   {% elif ev.kind == 'mention' %}
-    {# The /notifications API gives us the reason (mention / team_mention)
-       but not the author — the triggering comment is already in the
-       timeline above as its own `comment` event, so "someone" is honest.
-       @mentioned in the self/yours blue accent. #}
+    {# The mentioner is chipped when known (Discussion authors directly,
+       PR/Issue mentioners inferred from the triggering comment); when it
+       can't be determined it falls back to "someone". @mentioned in the
+       self/yours blue accent. #}
     <div class="timeline-line">
       <span class="timeline-summary">
-        someone <span class="recency-mention">@mentioned</span> {% if ev.is_team %}your team{% else %}you{% endif %}
+        {% if ev.actor %}{{ author_chip(ev.actor, ev.author_badge_class, ev.author_assoc or '', ev.is_tracked) }}{% else %}someone{% endif %} <span class="recency-mention">@mentioned</span> {% if ev.is_team %}your team{% else %}you{% endif %}
       </span>
       <span class="timeline-age">{{ ev.age_text }}</span>
     </div>
